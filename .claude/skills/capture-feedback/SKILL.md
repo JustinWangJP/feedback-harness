@@ -23,6 +23,8 @@ python3 scripts/feedback_log.py add \
 
 4. 出力に「openエントリが3件以上」の通知が出たら、feedback-curator エージェント(`.claude/agents/feedback-curator.md`)による昇華をユーザーに提案する
 
+昇華の出口は3つある(curator が選ぶ): 新しい原則なら `promote`、既存ルールと同じ原則の再発なら `merge --into`、一般化できない一回限りの指摘なら `close --reason`。
+
 ## 判断基準
 
 - **記録する**: 再発しうる指摘(スタイル、設計方針、テスト方針、用語、進め方)

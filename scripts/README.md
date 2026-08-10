@@ -95,11 +95,13 @@ python3 scripts/feedback_log.py <サブコマンド> [引数]
 | `add` | `--category <cat>` `--summary "<要約>"` `[--detail "<詳細>"]` `[--source human\|hook\|agent]` | エントリを記録。`open` が3件以上で promote 候補の通知を出す |
 | `list` | `[--status open\|promoted\|all]` `[--category <cat>]` | エントリ一覧(既定は `open`) |
 | `search` | `<キーワード>` | エントリの全文検索 |
-| `promote` | `<entry-id>` `--rule "<一般化ルール1行>"` | `rules.md` に追記し、対象エントリを `promoted` に更新 |
+| `promote` | `<entry-id>` `--rule "<一般化ルール1行>"` | `rules.md` に**新規ルールを追記**し、対象エントリを `promoted` に更新 |
+| `merge` | `<entry-id>` `--into <既存ルールの出典id>` `[--rule "<更新後の本文>"]` | 既存ルールの**出典に追記**し(新規行を増やさない)、対象を `promoted` に更新。同じ原則の指摘が再発したとき用 |
+| `close` | `<entry-id>` `[--reason "<理由>"]` | 昇華せず `closed` に更新。一般化できない一回限りの指摘用 |
 | `rules` | (なし) | 現在の `rules.md` を表示 |
 
 - **category**: `style` / `architecture` / `testing` / `naming` / `workflow` / `domain`
-- **entry-id**: 記録時刻 `%Y%m%d-%H%M%S`
+- **entry-id**: 記録時刻 `%Y%m%d-%H%M%S`。同一秒に複数記録した場合は `-2`, `-3` … を付けて一意にする(重複すると `promote` が先頭の1件しか掴めず、残りが昇華不能になるため)
 
 ### `hooks/` — Claude Code Hooks ラッパ
 
