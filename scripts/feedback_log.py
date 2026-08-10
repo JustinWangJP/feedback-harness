@@ -23,6 +23,23 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 LOG_DIR = ROOT / ".feedback" / "log"
 RULES = ROOT / ".feedback" / "rules.md"
+RULES_TEMPLATE = ROOT / ".feedback" / "rules.template.md"
+
+# rules.md が無いときの初期ヘッダ。install.sh の配布シードと同一内容を保つため、
+# rules.template.md があればそれを正とする(テンプレート消失時のフォールバックが以下)。
+DEFAULT_RULES_HEADER = """# フィードバック由来ルール
+
+エージェントはセッション開始時に必ずこのファイルを読むこと。
+各ルールは実際の人間の指摘から一般化されたもの(`scripts/feedback_log.py promote` で追加される)。
+
+<!-- ここから下に promote されたルールが追記される -->
+"""
+
+
+def rules_seed() -> str:
+    if RULES_TEMPLATE.exists():
+        return RULES_TEMPLATE.read_text(encoding="utf-8")
+    return DEFAULT_RULES_HEADER
 
 
 def slugify(text: str, limit: int = 40) -> str:
@@ -86,7 +103,7 @@ def cmd_list(args):
         if args.category and e.get("category") != args.category:
             continue
         found = True
-        title = next((l[2:] for l in e["body"].splitlines() if l.startswith("# ")), "")
+        title = next((line[2:] for line in e["body"].splitlines() if line.startswith("# ")), "")
         print(f"[{e.get('status','?'):8}] {e.get('id')}  {e.get('category','-'):12} {title}")
     if not found:
         print("該当エントリなし")
@@ -107,7 +124,7 @@ def cmd_promote(args):
         sys.exit(f"ERROR: id={args.entry_id} のエントリが見つかりません")
     RULES.parent.mkdir(parents=True, exist_ok=True)
     if not RULES.exists():
-        RULES.write_text("# フィードバック由来ルール\n\nエージェントはセッション開始時に必ずこのファイルを読むこと。\n", encoding="utf-8")
+        RULES.write_text(rules_seed(), encoding="utf-8")
     date = datetime.date.today().isoformat()
     with RULES.open("a", encoding="utf-8") as f:
         f.write(f"\n- **[{target.get('category','-')}]** {args.rule}  \n  <sub>出典: {target.get('id')} ({date} 昇華)</sub>\n")
@@ -131,10 +148,10 @@ def main():
     a.add_argument("--source", default="human", choices=["human", "hook", "agent"])
     a.set_defaults(func=cmd_add)
 
-    l = sub.add_parser("list", help="エントリ一覧")
-    l.add_argument("--status", default="open", choices=["open", "promoted", "all"])
-    l.add_argument("--category")
-    l.set_defaults(func=cmd_list)
+    li = sub.add_parser("list", help="エントリ一覧")
+    li.add_argument("--status", default="open", choices=["open", "promoted", "all"])
+    li.add_argument("--category")
+    li.set_defaults(func=cmd_list)
 
     s = sub.add_parser("search", help="キーワード検索")
     s.add_argument("keyword")

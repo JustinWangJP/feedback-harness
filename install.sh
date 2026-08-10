@@ -5,8 +5,8 @@
 #
 # 動作:
 # - scripts/ と .claude/(agents, skills, settings.json)をコピー
-# - .feedback/ のシード(rules.md)を作成(既存なら触らない)
-# - CLAUDE.md / AGENTS.md は既存があれば追記、なければ新規作成
+# - .feedback/ のシード(rules.template.md → rules.md)を作成(既存なら触らない)
+# - CLAUDE.md / AGENTS.md へ docs/pointer_*.md の断片を追記(なければ新規作成)
 # - 既存の .claude/settings.json がある場合は上書きせず .suggested として置く
 set -euo pipefail
 
@@ -22,9 +22,12 @@ echo "導入先: $DEST"
 
 # scripts/
 mkdir -p "$DEST/scripts/hooks"
-cp "$SRC/scripts/check.sh" "$SRC/scripts/check_file.sh" "$SRC/scripts/feedback_log.py" "$DEST/scripts/"
+cp "$SRC/scripts/check.sh" "$SRC/scripts/check_file.sh" "$SRC/scripts/lib.sh" \
+   "$SRC/scripts/feedback_log.py" "$SRC/scripts/README.md" "$DEST/scripts/"
 cp "$SRC/scripts/hooks/post_edit.sh" "$SRC/scripts/hooks/on_stop.sh" "$DEST/scripts/hooks/"
-chmod +x "$DEST/scripts/"*.sh "$DEST/scripts/hooks/"*.sh "$DEST/scripts/feedback_log.py"
+# 755(+x ではなく明示指定)。シェルスクリプトの実行には読み取り権限が必要で、
+# 導入元が 711 の場合に +x だと所有者以外が実行できない権限のまま複製される
+chmod 755 "$DEST/scripts/"*.sh "$DEST/scripts/hooks/"*.sh "$DEST/scripts/feedback_log.py"
 echo "  scripts/ ... OK"
 
 # .claude/agents + skills
@@ -46,27 +49,47 @@ else
 fi
 
 # .feedback/
+# rules.md は導入元の promote 済みルール(と導入先に存在しない出典ID)を持ち込まないよう、
+# ヘッダのみのテンプレートをシードにする。template 自体も feedback_log.py が
+# rules.md 再生成時に参照するためコピーする。
 mkdir -p "$DEST/.feedback/log"
-[[ -f "$DEST/.feedback/rules.md" ]] || cp "$SRC/.feedback/rules.md" "$DEST/.feedback/rules.md"
+cp "$SRC/.feedback/rules.template.md" "$DEST/.feedback/rules.template.md"
+[[ -f "$DEST/.feedback/rules.md" ]] || cp "$SRC/.feedback/rules.template.md" "$DEST/.feedback/rules.md"
 echo "  .feedback/ ... OK"
 
 # CLAUDE.md / AGENTS.md — ポインタの追記
-append_pointer() { # append_pointer <file> <marker> <src-file>
-  local file="$1" marker="$2" srcfile="$3"
+# 導入元の CLAUDE.md / AGENTS.md 全文ではなく docs/pointer_*.md の断片を使う。
+# 全文だと導入元のH1(プロジェクト名)と変更履歴が導入先に紛れ込む。
+WORK="$(mktemp -d)"
+trap 'rm -rf "$WORK"' EXIT
+
+append_pointer() { # append_pointer <file> <marker> <fragment>
+  local file="$1" marker="$2" frag="$3"
+  local rendered
+  rendered="$WORK/$(basename "$frag")"
+  sed "s/{{INSTALL_DATE}}/$(date +%Y-%m-%d)/" "$SRC/$frag" > "$rendered"
   if [[ -f "$DEST/$file" ]]; then
     if grep -q "$marker" "$DEST/$file"; then
       echo "  $file ... ポインタ既存のためスキップ"
     else
-      { echo; echo "---"; echo; cat "$SRC/$srcfile"; } >> "$DEST/$file"
+      { echo; echo "---"; echo; cat "$rendered"; } >> "$DEST/$file"
       echo "  $file ... 既存ファイルに追記"
     fi
   else
-    cp "$SRC/$srcfile" "$DEST/$file"
+    { echo "# $(basename "$DEST")"; echo; cat "$rendered"; } > "$DEST/$file"
     echo "  $file ... 新規作成"
   fi
 }
-append_pointer "CLAUDE.md" "ハーネス: フィードバックループ" "CLAUDE.md"
-append_pointer "AGENTS.md" "フィードバックハーネス" "AGENTS.md"
+append_pointer "CLAUDE.md" "ハーネス: フィードバックループ" "docs/pointer_claude.md"
+append_pointer "AGENTS.md" "フィードバックハーネス" "docs/pointer_agents.md"
+
+# .gitignore — _workspace/ は中間生成物なので追跡しない
+if [[ -f "$DEST/.gitignore" ]] && grep -q '^_workspace/' "$DEST/.gitignore"; then
+  echo "  .gitignore ... 記載済みのためスキップ"
+else
+  { echo; echo "# Harness working area (QAレポート等の中間生成物)"; echo "_workspace/"; } >> "$DEST/.gitignore"
+  echo "  .gitignore ... _workspace/ を追記"
+fi
 
 echo
 echo "導入完了。動作確認: cd \"$DEST\" && bash scripts/check.sh"
