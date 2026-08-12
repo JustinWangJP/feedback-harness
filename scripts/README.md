@@ -118,7 +118,7 @@ Claude Code の Hooks から起動される薄いラッパ。判定・実行は 
 
 ### Claude Code — Hooks 駆動(自動)
 
-Claude Code は `.claude/settings.json` の Hooks を起動ドライバとするため、**エージェントが明示的にスクリプトを呼ぶ必要はない**。
+Claude Code はプラグインが提供する Hooks(`hooks/hooks.json`)を起動ドライバとするため、**エージェントが明示的にスクリプトを呼ぶ必要はない**。
 
 | タイミング | Hook | 実行チェイン | 効果 |
 |-----------|------|-------------|------|
@@ -127,7 +127,7 @@ Claude Code は `.claude/settings.json` の Hooks を起動ドライバとする
 
 - **ルールの反映**: `apply-feedback` スキルが `.feedback/rules.md` を読み込む。`CLAUDE.md` のポインタが作業開始前にスキル使用を促す。
 - **指摘の記録**: `capture-feedback` / `feedback-loop` スキルが `feedback_log.py` を呼ぶ。
-- **設定ファイル**: `.claude/settings.json`(Hooks) + `.claude/skills/` + `.claude/agents/` + `CLAUDE.md`。
+- **設定ファイル**: プラグインの `hooks/hooks.json` + `skills/` + `agents/` + 導入先の `CLAUDE.md`。(このリポジトリ自身の開発では、これに加えて自己ドッグフーディング用の `.claude/settings.json` を使う)
 
 ### Codex / 汎用エージェント — 規約駆動(手動)
 
@@ -164,9 +164,9 @@ Codex など **Hooks を持たない環境**では、`AGENTS.md` の規約が自
 
 ## 他プロジェクトへの導入
 
-> このセクションは**ハーネス配布元リポジトリ**での操作を説明する。導入先には `install.sh` と `docs/` はコピーされないため、再導入・更新は配布元から行う。
+> このセクションは**ハーネス配布元リポジトリ**での操作を説明する。導入先には `scripts/init.sh` 自体と `docs/` はコピーされないため、再導入・更新は配布元から行う。
 
-`install.sh`(上位ディレクトリ)が `scripts/` を含むハーネス一式を対象プロジェクトへコピーする。`scripts/README.md` も導入先で参照できる。
+`scripts/init.sh` が `scripts/`(このファイルを含む)を対象プロジェクトへコピーする。`scripts/README.md` も導入先で参照できる。
 
 導入先に持ち込むのは**ハーネスの仕組みだけ**で、このリポジトリ固有の内容は持ち込まない:
 
@@ -174,6 +174,6 @@ Codex など **Hooks を持たない環境**では、`AGENTS.md` の規約が自
 - `CLAUDE.md` / `AGENTS.md` へ追記するのは `docs/pointer_claude.md` / `docs/pointer_agents.md` の断片。導入元のH1(プロジェクト名)や変更履歴は入らない
 
 ```bash
-bash install.sh /path/to/your-project
+bash scripts/init.sh /path/to/your-project
 cd /path/to/your-project && bash scripts/check.sh   # スタック検出の確認
 ```

@@ -1,0 +1,15 @@
+{
+  "name": "feedback-harness",
+  "description": "lint/test/build の自動フィードバックと、人間のレビュー指摘の蓄積・ルール化を行う Claude Code プラグイン兼マーケットプレイス",
+  "owner": {
+    "name": "JustinWangJP",
+    "url": "https://github.com/JustinWangJP"
+  },
+  "plugins": [
+    {
+      "name": "feedback-harness",
+      "source": "./",
+      "description": "lint/test/build の自動フィードバックと、人間のレビュー指摘の蓄積・ルール化"
+    }
+  ]
+}

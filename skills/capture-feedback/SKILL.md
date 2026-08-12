@@ -14,14 +14,14 @@ description: 人間のレビュー指摘・修正・ダメ出しをフィード�
 3. 記録する:
 
 ```bash
-python3 scripts/feedback_log.py add \
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/feedback_log.py" add \
   --category <cat> \
   --summary "<1文要約>" \
   --detail "<文脈: どのファイル/作業で、何を指摘されたか>" \
   --source human
 ```
 
-4. 出力に「openエントリが3件以上」の通知が出たら、feedback-curator エージェント(`.claude/agents/feedback-curator.md`)による昇華をユーザーに提案する
+4. 出力に「openエントリが3件以上」の通知が出たら、feedback-curator エージェント(`agents/feedback-curator.md`)による昇華をユーザーに提案する
 
 昇華の出口は3つある(curator が選ぶ): 新しい原則なら `promote`、既存ルールと同じ原則の再発なら `merge --into`、一般化できない一回限りの指摘なら `close --reason`。
 

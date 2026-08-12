@@ -16,8 +16,9 @@ LIBDIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib.sh
 . "$LIBDIR/lib.sh"
 
-ROOT="${1:-.}"
-cd "$ROOT" 2>/dev/null || { echo "ERROR: ディレクトリが見つかりません: $ROOT"; exit 2; }
+ROOT="$(harness_project_root "${1:-}")" \
+  || { echo "ERROR: ディレクトリが見つかりません: ${1:-}"; exit 2; }
+cd "$ROOT" || { echo "ERROR: ディレクトリへ移動できません: $ROOT"; exit 2; }
 
 SKIP="${FEEDBACK_CHECK_SKIP:-}"
 RESULTS=()
@@ -27,19 +28,6 @@ STACK_FOUND=0   # マニフェストを検出したか。RESULTS の空判定と
 LOGDIR="$(mktemp -d)"
 trap 'rm -rf "$LOGDIR"' EXIT
 
-# has: コマンドが存在し、かつ実際に起動できるか。
-# command -v はファイルの存在と実行ビットしか見ないため、shebang切れのvenv等を
-# 「インストール済み」と誤判定し、環境障害がFAILになる。--version を試行し、
-# 126(実行不可) / 127(未検出) のときだけ未インストール扱いにする。
-# --version を持たないコマンドは別のexit code(1/2等)を返すので影響を受けない。
-has() {
-  command -v "$1" >/dev/null 2>&1 || return 1
-  local rc
-  "$1" --version >/dev/null 2>&1
-  rc=$?
-  [[ $rc -eq 126 || $rc -eq 127 ]] && return 1
-  return 0
-}
 skipped() { [[ " $SKIP " == *" $1 "* ]]; }
 
 # run_stage <stage> <tool> <label> <cmd...>

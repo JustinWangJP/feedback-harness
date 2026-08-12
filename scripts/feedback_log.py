@@ -18,14 +18,45 @@ category の例: style, architecture, testing, naming, workflow, domain
 """
 import argparse
 import datetime
+import os
 import re
+import subprocess
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
+
+def project_root() -> Path:
+    """状態(.feedback/)を置くプロジェクトルートを解決する。
+
+    解決順: CLAUDE_PROJECT_DIR → git rev-parse --show-toplevel → cwd
+
+    __file__ 起点にはしない。プラグインとして配布されるとこのファイルは
+    プラグインキャッシュに置かれ、そこへ書いた状態はプラグイン更新で失われる。
+    """
+    env = os.environ.get("CLAUDE_PROJECT_DIR")
+    if env and Path(env).is_dir():
+        return Path(env).resolve()
+    try:
+        out = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+        if out:
+            return Path(out).resolve()
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return Path.cwd().resolve()
+
+
+ROOT = project_root()
 LOG_DIR = ROOT / ".feedback" / "log"
 RULES = ROOT / ".feedback" / "rules.md"
 RULES_TEMPLATE = ROOT / ".feedback" / "rules.template.md"
+# バンドル資産は状態と違い、スクリプトに同梱されて配られる読み取り専用のファイル。
+# 導入先が rules.template.md を持たない(プラグインのみで導入した)場合の供給元。
+BUNDLED_TEMPLATE = Path(__file__).resolve().parent.parent / ".feedback" / "rules.template.md"
 
 # rules.md が無いときの初期ヘッダ。install.sh の配布シードと同一内容を保つため、
 # rules.template.md があればそれを正とする(テンプレート消失時のフォールバックが以下)。
@@ -39,8 +70,10 @@ DEFAULT_RULES_HEADER = """# フィードバック由来ルール
 
 
 def rules_seed() -> str:
-    if RULES_TEMPLATE.exists():
-        return RULES_TEMPLATE.read_text(encoding="utf-8")
+    # 導入先のテンプレート → バンドルのテンプレート → 埋め込みの既定ヘッダ
+    for candidate in (RULES_TEMPLATE, BUNDLED_TEMPLATE):
+        if candidate.exists():
+            return candidate.read_text(encoding="utf-8")
     return DEFAULT_RULES_HEADER
 
 

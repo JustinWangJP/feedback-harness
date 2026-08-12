@@ -7,6 +7,8 @@
 # ときは再ブロックしない。
 set -u
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=../lib.sh
+. "$DIR/../lib.sh"
 
 INPUT="$(cat)"
 ACTIVE="$(printf '%s' "$INPUT" | python3 -c '
@@ -19,7 +21,8 @@ except Exception:
 
 # 検査ルートを明示的に渡す。省略するとカレントディレクトリが検査対象になり、
 # サブディレクトリ起動やCI流用時に沈黙して誤ったツリーを検査する。
-ROOT="${CLAUDE_PROJECT_DIR:-$(cd "$DIR/../.." && pwd)}"
+# $DIR 起点にはしない — プラグイン配布時はキャッシュを指してしまう。
+ROOT="$(harness_project_root)"
 
 # 2周目以降はチェック結果を表示するだけでブロックしない(ループ防止)
 if [[ "$ACTIVE" == "true" ]]; then

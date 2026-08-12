@@ -31,8 +31,8 @@ model: opus
 ## 入力/出力プロトコル
 
 - 入力: `.feedback/log/*.md`(status: open)、ユーザーの直近の指摘、既存 `.feedback/rules.md`
-- 出力: `scripts/feedback_log.py promote <id> --rule "..."` の実行結果、および変更内容の要約報告
-- 新規指摘の記録は `scripts/feedback_log.py add` を使う(手書きでlogファイルを作らない — フォーマット一貫性のため)
+- 出力: `"${CLAUDE_PLUGIN_ROOT}/scripts/feedback_log.py" promote <id> --rule "..."` の実行結果、および変更内容の要約報告
+- 新規指摘の記録は `"${CLAUDE_PLUGIN_ROOT}/scripts/feedback_log.py" add` を使う(手書きでlogファイルを作らない — フォーマット一貫性のため)
 
 ## エラーハンドリング
 

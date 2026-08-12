@@ -25,3 +25,28 @@ has() {
 # 完了をブロックされ続けるため、既定では拾わない。
 # shellcheck disable=SC2034  # 読み込み側(check.sh / check_file.sh)で使う
 SHELLCHECK_SEVERITY="${FEEDBACK_SHELLCHECK_SEVERITY:-warning}"
+
+# harness_project_root [明示パス] — 検査対象・状態保存先のプロジェクトルートを解決する。
+#
+# 解決順: 明示引数 → CLAUDE_PROJECT_DIR → git rev-parse --show-toplevel → cwd
+#
+# スクリプト自身の位置($BASH_SOURCE 起点)は使わない。プラグインとして配布されると
+# スクリプトはプラグインキャッシュに置かれ、そこは導入先ではないうえ更新のたびに
+# 消える領域だからである(状態を書くと失われる)。
+harness_project_root() {
+  local explicit="${1:-}"
+  if [[ -n "$explicit" ]]; then
+    (cd "$explicit" 2>/dev/null && pwd) || return 1
+    return 0
+  fi
+  if [[ -n "${CLAUDE_PROJECT_DIR:-}" && -d "${CLAUDE_PROJECT_DIR}" ]]; then
+    (cd "$CLAUDE_PROJECT_DIR" && pwd)
+    return 0
+  fi
+  local top
+  if top="$(git rev-parse --show-toplevel 2>/dev/null)" && [[ -n "$top" ]]; then
+    printf '%s\n' "$top"
+    return 0
+  fi
+  pwd
+}

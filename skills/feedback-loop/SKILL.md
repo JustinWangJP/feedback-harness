@@ -18,7 +18,7 @@ description: フィードバックハーネス全体のオーケストレータ�
 
 ## Phase 1: キュレーション (フィードバック → ルール)
 
-`Agent` ツールで feedback-curator を呼び出す(`model: "opus"`、定義: `.claude/agents/feedback-curator.md` — 定義ファイルの作業原則をpromptに含める):
+`Agent` ツールで feedback-curator を呼び出す(`model: "opus"`、定義: `agents/feedback-curator.md` — 定義ファイルの作業原則をpromptに含める):
 
 - 入力: openエントリ一覧 + 既存rules.md + ユーザーの直近指摘
 - 期待出力: promote実行結果と、昇華した/しなかった判断の要約
@@ -26,7 +26,7 @@ description: フィードバックハーネス全体のオーケストレータ�
 
 ## Phase 2: ハーネスQA
 
-`Agent` ツールで harness-qa を呼び出す(`model: "opus"`、定義: `.claude/agents/harness-qa.md`):
+`Agent` ツールで harness-qa を呼び出す(`model: "opus"`、定義: `agents/harness-qa.md`):
 
 - 入力: 検証対象(直近の変更、または全体)
 - 期待出力: 境界面クロス比較のPASS/FAIL/SKIPレポート + 修正案
@@ -35,9 +35,9 @@ description: フィードバックハーネス全体のオーケストレータ�
 
 ## Phase 3: 別プロジェクトへの導入
 
-1. `bash install.sh <対象プロジェクトパス>` を実行する
-2. 対象プロジェクトの既存 CLAUDE.md / AGENTS.md がある場合、install.shは追記モードで動く — 出力を確認し重複記載があれば整理する
-3. 導入後、対象プロジェクトで `scripts/check.sh` を1回実行してスタック検出を確認する
+1. `bash scripts/init.sh <対象プロジェクトパス>` を実行する
+2. 対象プロジェクトの既存 CLAUDE.md / AGENTS.md がある場合、init.shは追記モードで動く — 出力を確認し重複記載があれば整理する
+3. 導入後、対象プロジェクトで `bash scripts/check.sh` を1回実行してスタック検出を確認する
 
 ## エラーハンドリング
 
@@ -48,4 +48,4 @@ description: フィードバックハーネス全体のオーケストレータ�
 
 **正常フロー:** openエントリ2件がある状態で「フィードバックを整理して」→ Phase 0でキュレーション判定 → curatorが1件をpromote・1件をopen維持 → rules.md差分を提示。
 
-**エラーフロー:** `install.sh` の対象パスが存在しない → エラーを報告し、正しいパスをユーザーに確認する(勝手にディレクトリを作らない)。
+**エラーフロー:** `scripts/init.sh` の対象パスが存在しない → エラーを報告し、正しいパスをユーザーに確認する(勝手にディレクトリを作らない)。

@@ -1,52 +1,40 @@
 #!/usr/bin/env bash
-# install.sh — フィードバックハーネスを任意のプロジェクトへ導入する。
+# init.sh — フィードバックハーネスを任意のプロジェクトへ導入する。
 #
-# 使い方: bash install.sh <対象プロジェクトパス>
+# 使い方: bash scripts/init.sh <対象プロジェクトパス>
+#
+# Claude Code の skills / agents / hooks はプラグインが提供するので、ここでは
+# 扱わない。このスクリプトが用意するのは、プラグインを持たない環境(Codex 等)が
+# 必要とする実ファイルと、両環境で共有する状態だけである。
 #
 # 動作:
-# - scripts/ と .claude/(agents, skills, settings.json)をコピー
+# - scripts/(check.sh / check_file.sh / lib.sh / feedback_log.py)をコピー
 # - .feedback/ のシード(rules.template.md → rules.md)を作成(既存なら触らない)
 # - CLAUDE.md / AGENTS.md へ docs/pointer_*.md の断片を追記(なければ新規作成)
-# - 既存の .claude/settings.json がある場合は上書きせず .suggested として置く
+# - .gitignore へ _workspace/ を追記
 set -euo pipefail
 
-SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DEST="${1:-}"
 
-[[ -z "$DEST" ]] && { echo "使い方: bash install.sh <対象プロジェクトパス>"; exit 2; }
+[[ -z "$DEST" ]] && { echo "使い方: bash scripts/init.sh <対象プロジェクトパス>"; exit 2; }
 [[ -d "$DEST" ]] || { echo "ERROR: 対象が存在しません: $DEST"; exit 2; }
 DEST="$(cd "$DEST" && pwd)"
 [[ "$DEST" == "$SRC" ]] && { echo "ERROR: 自分自身には導入できません"; exit 2; }
 
 echo "導入先: $DEST"
 
-# scripts/
-mkdir -p "$DEST/scripts/hooks"
+# scripts/ — Codex 等がリポジトリ相対で叩くための実体
+mkdir -p "$DEST/scripts"
 cp "$SRC/scripts/check.sh" "$SRC/scripts/check_file.sh" "$SRC/scripts/lib.sh" \
    "$SRC/scripts/feedback_log.py" "$SRC/scripts/README.md" "$DEST/scripts/"
-cp "$SRC/scripts/hooks/post_edit.sh" "$SRC/scripts/hooks/on_stop.sh" "$DEST/scripts/hooks/"
 # 755(+x ではなく明示指定)。シェルスクリプトの実行には読み取り権限が必要で、
 # 導入元が 711 の場合に +x だと所有者以外が実行できない権限のまま複製される
-chmod 755 "$DEST/scripts/"*.sh "$DEST/scripts/hooks/"*.sh "$DEST/scripts/feedback_log.py"
+chmod 755 "$DEST/scripts/"*.sh "$DEST/scripts/feedback_log.py"
 echo "  scripts/ ... OK"
 
-# .claude/agents + skills
-mkdir -p "$DEST/.claude/agents"
-cp "$SRC/.claude/agents/"*.md "$DEST/.claude/agents/"
-for sk in capture-feedback apply-feedback feedback-loop; do
-  mkdir -p "$DEST/.claude/skills/$sk"
-  cp "$SRC/.claude/skills/$sk/SKILL.md" "$DEST/.claude/skills/$sk/"
-done
-echo "  .claude/agents, .claude/skills ... OK"
-
-# settings.json (Hooks)
-if [[ -f "$DEST/.claude/settings.json" ]]; then
-  cp "$SRC/.claude/settings.json" "$DEST/.claude/settings.json.suggested"
-  echo "  .claude/settings.json は既存のため settings.json.suggested を作成 — Hooks設定を手動でマージしてください"
-else
-  cp "$SRC/.claude/settings.json" "$DEST/.claude/settings.json"
-  echo "  .claude/settings.json ... OK"
-fi
+# Claude Code 向けの skills / agents / hooks はプラグインが提供する
+echo "  .claude/ ... スキップ(Claude Code ではプラグインを使ってください)"
 
 # .feedback/
 # rules.md は導入元の promote 済みルール(と導入先に存在しない出典ID)を持ち込まないよう、
@@ -93,3 +81,6 @@ fi
 
 echo
 echo "導入完了。動作確認: cd \"$DEST\" && bash scripts/check.sh"
+echo "Claude Code を使う場合は、あわせてプラグインを導入してください:"
+echo "  /plugin marketplace add JustinWangJP/feedback-harness"
+echo "  /plugin install feedback-harness@feedback-harness"

@@ -1,0 +1,12 @@
+{
+  "name": "feedback-harness",
+  "displayName": "Feedback Harness",
+  "version": "0.1.0",
+  "description": "lint/test/build の結果をエージェントへ自動フィードバックし、人間のレビュー指摘を蓄積してルール化するハーネス",
+  "author": {
+    "name": "JustinWangJP",
+    "url": "https://github.com/JustinWangJP"
+  },
+  "homepage": "https://github.com/JustinWangJP/feedback-harness",
+  "keywords": ["feedback", "lint", "hooks", "code-review"]
+}
