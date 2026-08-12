@@ -17,20 +17,12 @@ TEMPLATE="$DIR/../../.feedback/rules.template.md"
 
 mkdir -p "$ROOT/.feedback/log" 2>/dev/null || exit 0
 
-if [[ ! -f "$ROOT/.feedback/rules.md" ]]; then
-  if [[ -f "$TEMPLATE" ]]; then
-    cp "$TEMPLATE" "$ROOT/.feedback/rules.md" 2>/dev/null || exit 0
-  else
-    # テンプレートが同梱されていない場合の最小シード。
-    # feedback_log.py の DEFAULT_RULES_HEADER と同じ役割。
-    cat > "$ROOT/.feedback/rules.md" 2>/dev/null <<'SEED' || exit 0
-# フィードバック由来ルール
-
-エージェントはセッション開始時に必ずこのファイルを読むこと。
-
-<!-- ここから下に promote されたルールが追記される -->
-SEED
-  fi
+# テンプレートが無い場合はここで代替の rules.md を書かない。テンプレートは
+# バンドル資産なので、不在は「導入が壊れている」ことを意味し、ここで別内容の
+# 最小シードを書くと scripts/feedback_log.py の DEFAULT_RULES_HEADER と内容が
+# 分岐する(3箇所目のコピーを増やさない)。安全網は feedback_log.py 側に既にある。
+if [[ ! -f "$ROOT/.feedback/rules.md" && -f "$TEMPLATE" ]]; then
+  cp "$TEMPLATE" "$ROOT/.feedback/rules.md" 2>/dev/null || exit 0
 fi
 
 exit 0
