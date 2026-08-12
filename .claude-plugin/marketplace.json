@@ -1,0 +1,14 @@
+{
+  "name": "feedback-harness",
+  "owner": {
+    "name": "JustinWangJP",
+    "url": "https://github.com/JustinWangJP"
+  },
+  "plugins": [
+    {
+      "name": "feedback-harness",
+      "source": "./",
+      "description": "lint/test/build の自動フィードバックと、人間のレビュー指摘の蓄積・ルール化"
+    }
+  ]
+}

@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"$CLAUDE_PROJECT_DIR/scripts/hooks/on_session_start.sh\"",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}\"/scripts/hooks/on_session_start.sh",
             "timeout": 30
           }
         ]
@@ -17,7 +17,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"$CLAUDE_PROJECT_DIR/scripts/hooks/post_edit.sh\"",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}\"/scripts/hooks/post_edit.sh",
             "timeout": 60
           }
         ]
@@ -28,7 +28,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"$CLAUDE_PROJECT_DIR/scripts/hooks/on_stop.sh\"",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}\"/scripts/hooks/on_stop.sh",
             "timeout": 300
           }
         ]
