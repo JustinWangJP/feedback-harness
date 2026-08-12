@@ -17,6 +17,14 @@ mkdir -p "$WORK/cache/scripts" "$WORK/cache/.feedback"
 cp "$REPO/scripts/feedback_log.py" "$WORK/cache/scripts/"
 cp "$REPO/.feedback/rules.template.md" "$WORK/cache/.feedback/"
 
+# 本物の rules.template.md は DEFAULT_RULES_HEADER (埋め込みフォールバック) と
+# バイト単位で同一のため、"フィードバック由来ルール" が rules.md に出るだけでは
+# BUNDLED_TEMPLATE が実際に読まれた証拠にならない(段を飛ばして埋め込みへ
+# 落ちても同じ文字列が出てしまう)。BUNDLED_TEMPLATE 経由でしか出ない
+# マーカーをキャッシュ側のコピーにだけ追記して区別できるようにする。
+BUNDLED_MARKER="<!-- BUNDLED-TEMPLATE-MARKER -->"
+printf '\n%s\n' "$BUNDLED_MARKER" >> "$WORK/cache/.feedback/rules.template.md"
+
 # 導入先(.feedback/ をまだ持たない git リポジトリ)
 mkdir -p "$WORK/project"
 ( cd "$WORK/project" && git init -q . )
@@ -42,7 +50,7 @@ else
     python3 "$WORK/cache/scripts/feedback_log.py" promote "$ENTRY_ID" \
       --rule "テスト用のルール" >/dev/null 2>&1 )
   assert_contains "$(cat "$WORK/project/.feedback/rules.md" 2>/dev/null)" \
-    "フィードバック由来ルール" "バンドルのテンプレートでシードされる"
+    "$BUNDLED_MARKER" "バンドルのテンプレートでシードされる"
   assert_file_absent "$WORK/cache/.feedback/rules.md" "キャッシュ側に rules.md を作らない"
 fi
 
