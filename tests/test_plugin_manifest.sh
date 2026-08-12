@@ -51,18 +51,61 @@ PY
 )"
 assert_eq "" "$MISSING" "hooks.json の参照先が実在する"
 
-# 5: 開発用 .claude/settings.json と配布用 hooks.json が同じスクリプトを指す
-#    (二重管理なので、片方だけ直してもう片方が古いまま残るのを防ぐ)
-NAMES_A="$(python3 -c "
-import json,re
-cfg=json.load(open('$REPO/.claude/settings.json'))
-print(' '.join(sorted(set(re.findall(r'([a-z_]+\.sh)', json.dumps(cfg))))))
-")"
-NAMES_B="$(python3 -c "
-import json,re
-cfg=json.load(open('$REPO/hooks/hooks.json'))
-print(' '.join(sorted(set(re.findall(r'([a-z_]+\.sh)', json.dumps(cfg))))))
-")"
-assert_eq "$NAMES_A" "$NAMES_B" "開発用と配布用のフック定義が同じスクリプトを指す"
+# 5: 開発用 .claude/settings.json と配布用 hooks.json が同じイベント構造
+#    (どのイベントに、どのスクリプトが、どの matcher・timeout で紐づくか)を指す
+#    (二重管理なので、片方だけ直してもう片方が古いまま残るのを防ぐ。
+#     スクリプト名の集合比較だけでは「イベントの取り違え」や「timeout だけ食い違う」
+#     ドリフトを見逃すため、イベントごとに正規化した構造で突き合わせる。
+#     ${CLAUDE_PLUGIN_ROOT} と $CLAUDE_PROJECT_DIR のプレフィックス差は
+#     正当な差異なので、コマンド全体ではなくスクリプトのベース名だけを比較する)
+NORM_A="$(python3 - "$REPO/.claude/settings.json" <<'PY'
+import json, re, sys
+
+def normalize(path):
+    cfg = json.load(open(path))
+    out = {}
+    for event, entries in cfg.get("hooks", {}).items():
+        norm_entries = []
+        for entry in entries:
+            matcher = entry.get("matcher", "")
+            hooks = []
+            for hook in entry.get("hooks", []):
+                m = re.search(r"([a-z_]+\.sh)", hook.get("command", ""))
+                script = m.group(1) if m else None
+                hooks.append({"script": script, "timeout": hook.get("timeout")})
+            hooks.sort(key=lambda h: (h["script"] or "", h["timeout"] if h["timeout"] is not None else -1))
+            norm_entries.append({"matcher": matcher, "hooks": hooks})
+        norm_entries.sort(key=lambda e: (e["matcher"], json.dumps(e["hooks"], sort_keys=True)))
+        out[event] = norm_entries
+    return out
+
+print(json.dumps(normalize(sys.argv[1]), sort_keys=True))
+PY
+)"
+NORM_B="$(python3 - "$REPO/hooks/hooks.json" <<'PY'
+import json, re, sys
+
+def normalize(path):
+    cfg = json.load(open(path))
+    out = {}
+    for event, entries in cfg.get("hooks", {}).items():
+        norm_entries = []
+        for entry in entries:
+            matcher = entry.get("matcher", "")
+            hooks = []
+            for hook in entry.get("hooks", []):
+                m = re.search(r"([a-z_]+\.sh)", hook.get("command", ""))
+                script = m.group(1) if m else None
+                hooks.append({"script": script, "timeout": hook.get("timeout")})
+            hooks.sort(key=lambda h: (h["script"] or "", h["timeout"] if h["timeout"] is not None else -1))
+            norm_entries.append({"matcher": matcher, "hooks": hooks})
+        norm_entries.sort(key=lambda e: (e["matcher"], json.dumps(e["hooks"], sort_keys=True)))
+        out[event] = norm_entries
+    return out
+
+print(json.dumps(normalize(sys.argv[1]), sort_keys=True))
+PY
+)"
+assert_eq "$NORM_A" "$NORM_B" "開発用と配布用のフック定義が同じイベント構造(スクリプト・matcher・timeout)を指す"
 
 assert_summary
