@@ -10,9 +10,10 @@ description: 蓄積された過去のフィードバックルールを現在の�
 ## 手順
 
 1. `.feedback/rules.md` を読む(なければ `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/feedback_log.py" rules` で確認)
-2. 今回の作業に関係するルールを特定する — カテゴリ(`style`/`architecture`/`testing`/`naming`/`workflow`/`domain`)が作業タイプと一致するもの
-3. 該当ルールを作業方針に組み込んでから実装を開始する
-4. ルールと今回の指示が矛盾する場合は、**今回の明示的な指示を優先**し、矛盾があったことをユーザーに一言伝える(ルールの更新機会になる)
+2. 未昇華のopenエントリも確認する: `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/feedback_log.py" list --status open` — 記録は昇華を待たずその瞬間から次の作業に活かす(promote待ちで死蔵させない)
+3. 今回の作業に関係するルール・エントリを特定する — カテゴリ(`style`/`architecture`/`testing`/`naming`/`workflow`/`domain`)が作業タイプと一致するもの
+4. 該当ルールを作業方針に組み込んでから実装を開始する。openエントリとルールが食い違う場合はrules.mdを優先する(openは未検証の生の指摘)
+5. ルールと今回の指示が矛盾する場合は、**今回の明示的な指示を優先**し、矛盾があったことをユーザーに一言伝える(ルールの更新機会になる)
 
 ## 追加の文脈が必要なとき
 

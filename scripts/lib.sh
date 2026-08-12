@@ -50,3 +50,31 @@ harness_project_root() {
   fi
   pwd
 }
+
+# harness_tree_changed <ルート> <スタンプファイル> — 前回の成功検査以降に
+# 作業ツリーが変更されたか。変更あり(=検査が必要)なら 0 を返す。
+#
+# 応答完了のたびに無条件でフルチェックを走らせると、ファイルを1つも編集
+# しない質問応答のターンでも導入先の重いビルド(mvn verify / npm run build 等)
+# が毎回動く。mtime で判定するのは、Edit/Write だけでなく Bash 経由の編集や
+# 外部エディタの変更も拾うため(ツール種別で判定すると取りこぼす)。
+#
+# 判定できないときは必ず「変更あり」に倒す。検査を飛ばす方向の誤りは
+# 壊れたまま完了できてしまうため、安全側は常に「走らせる」側である。
+harness_tree_changed() {
+  local root="$1" stamp="$2"
+  [[ -f "$stamp" ]] || return 0
+  local found
+  # ディレクトリも対象に含める。ファイルの mtime だけを見るとファイルの削除を
+  # 検出できず(消えたファイルには mtime が無い)、ビルドを壊す削除をしたまま
+  # 「変更なし」と判定されてしまう。削除・作成・改名は親ディレクトリの mtime に出る。
+  #
+  # 除外はVCS・依存・キャッシュ・ハーネス状態のみに絞る。dist/build/target を
+  # 一律に除外するとソースを置くプロジェクトで変更を取りこぼすため含めない
+  # (検査中に書かれる生成物はスタンプより古くなるので誤検出にはならない)。
+  found="$(find "$root" \
+    \( -name .git -o -name .feedback -o -name _workspace -o -name node_modules \
+       -o -name .venv -o -name venv -o -name __pycache__ -o -name '.*_cache' \) -prune -o \
+    -newer "$stamp" -print -quit 2>/dev/null)" || return 0
+  [[ -n "$found" ]]
+}

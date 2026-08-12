@@ -24,6 +24,13 @@ assert_contains() { # assert_contains <haystack> <needle> <label>
   esac
 }
 
+assert_not_contains() { # assert_not_contains <haystack> <needle> <label>
+  ASSERT_CHECKS=$((ASSERT_CHECKS + 1))
+  case "$1" in
+    *"$2"*) fail "$3: [$2] が出力に含まれてはいけない。出力: [$1]" ;;
+  esac
+}
+
 assert_file_exists() { # assert_file_exists <path> <label>
   ASSERT_CHECKS=$((ASSERT_CHECKS + 1))
   [[ -e "$1" ]] || fail "$2: 存在しない: $1"

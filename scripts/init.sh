@@ -71,12 +71,20 @@ append_pointer() { # append_pointer <file> <marker> <fragment>
 append_pointer "CLAUDE.md" "ハーネス: フィードバックループ" "docs/pointer_claude.md"
 append_pointer "AGENTS.md" "フィードバックハーネス" "docs/pointer_agents.md"
 
-# .gitignore — _workspace/ は中間生成物なので追跡しない
+# .gitignore — 中間生成物とローカル状態は追跡しない。
+# .feedback/.last-check は Stop フックの検査スタンプ(mtime比較用)。共有すると
+# 他マシンの時刻で「検査済み」と誤判定され、検査が飛ばされる。
 if [[ -f "$DEST/.gitignore" ]] && grep -q '^_workspace/' "$DEST/.gitignore"; then
   echo "  .gitignore ... 記載済みのためスキップ"
 else
-  { echo; echo "# Harness working area (QAレポート等の中間生成物)"; echo "_workspace/"; } >> "$DEST/.gitignore"
-  echo "  .gitignore ... _workspace/ を追記"
+  {
+    echo
+    echo "# Harness working area (QAレポート等の中間生成物)"
+    echo "_workspace/"
+    echo "# Stop フックの検査スタンプ(ローカル状態)"
+    echo ".feedback/.last-check"
+  } >> "$DEST/.gitignore"
+  echo "  .gitignore ... _workspace/ と .feedback/.last-check を追記"
 fi
 
 echo

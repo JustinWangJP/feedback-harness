@@ -12,6 +12,7 @@ rules.md は CLAUDE.md / AGENTS.md から参照され、次回以降のセッシ
   feedback_log.py promote <entry-id> --rule "<一般化したルール1行>"
   feedback_log.py merge <entry-id> --into <既存ルールの出典id> [--rule "<更新後の本文>"]
   feedback_log.py close <entry-id> [--reason "<昇華しない理由>"]
+  feedback_log.py retire <出典entry-id> --reason "<退役理由>"
   feedback_log.py rules            # 現在のルール一覧を表示
 
 category の例: style, architecture, testing, naming, workflow, domain
@@ -207,6 +208,29 @@ def set_status(target: dict, new_status: str) -> None:
     )
 
 
+RULE_SOURCE_RE = re.compile(r"^(\s*<sub>出典: )(.+?)( \(.*)$")
+
+
+def find_rule_by_source(lines: list, entry_id: str) -> tuple:
+    """rules.md の行リストから、出典に entry_id を含むルールの出典行を探す。
+
+    行全体への部分文字列一致で探すと、同一秒採番の枝番ID(例: X と X-2)が
+    互いに誤ヒットする。出典リストを分解して厳密一致で比較する。
+    """
+    hits = []
+    for i, ln in enumerate(lines):
+        m = RULE_SOURCE_RE.match(ln)
+        if not m:
+            continue
+        if entry_id in (s.strip() for s in m.group(2).split(",")):
+            hits.append((i, m))
+    if not hits:
+        sys.exit(f"ERROR: 出典に {entry_id} を含むルールが rules.md にありません")
+    if len(hits) > 1:
+        sys.exit(f"ERROR: 出典に {entry_id} を含むルールが{len(hits)}件あります。rules.md の出典の重複を解消してください")
+    return hits[0]
+
+
 def cmd_close(args):
     """昇華せずに処理済みにする。
 
@@ -236,16 +260,7 @@ def cmd_merge(args):
         sys.exit("ERROR: rules.md がありません。先に promote でルールを作成してください")
 
     lines = RULES.read_text(encoding="utf-8").splitlines()
-    hits = [i for i, ln in enumerate(lines) if "出典:" in ln and args.into in ln]
-    if not hits:
-        sys.exit(f"ERROR: 出典に {args.into} を含むルールが rules.md にありません")
-    if len(hits) > 1:
-        sys.exit(f"ERROR: 出典に {args.into} を含むルールが{len(hits)}件あります。より具体的なIDを指定してください")
-
-    i = hits[0]
-    m = re.match(r"^(\s*<sub>出典: )(.+?)( \(.*)$", lines[i])
-    if not m:
-        sys.exit(f"ERROR: 出典行の形式を解釈できません: {lines[i]}")
+    i, m = find_rule_by_source(lines, args.into)
     sources = [s.strip() for s in m.group(2).split(",")]
     if args.entry_id in sources:
         sys.exit(f"ERROR: {args.entry_id} はすでにこのルールの出典です")
@@ -265,6 +280,43 @@ def cmd_merge(args):
     print(f"merged: {args.entry_id} を既存ルール(出典 {args.into})へ統合し promoted に更新")
 
 
+def cmd_retire(args):
+    """昇華済みルールを退役させ、rules.md から撤去する。
+
+    更新されないルールは時間とともに陳腐化し誤適用の負債になるが、
+    promote/merge/close だけでは rules.md からルールを取り除く出口がない
+    (手編集は禁止)。退役は棚卸し(feedback-loopスキル)で人間が裁定した
+    後に実行する。出典エントリには理由を追記して監査痕跡を残す。
+    """
+    if not RULES.exists():
+        sys.exit("ERROR: rules.md がありません")
+
+    lines = RULES.read_text(encoding="utf-8").splitlines()
+    i, m = find_rule_by_source(lines, args.entry_id)
+    if i == 0 or not lines[i - 1].lstrip().startswith("- **["):
+        sys.exit("ERROR: 退役対象のルール本文行が見つかりません")
+    sources = [s.strip() for s in m.group(2).split(",")]
+
+    start = i - 1
+    if start > 0 and not lines[start - 1].strip():
+        start -= 1  # promote が挿入する直前の空行も一緒に取り除く
+    del lines[start : i + 1]
+    RULES.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    updated = []
+    for sid in sources:
+        matches = [e for e in entries() if e.get("id") == sid]
+        if len(matches) != 1:
+            print(f"WARN: 出典 {sid} のエントリを一意に特定できません({len(matches)}件)。status を手動で確認してください")
+            continue
+        target = matches[0]
+        text = target["path"].read_text(encoding="utf-8").rstrip("\n")
+        target["path"].write_text(f"{text}\n\n---\nretire理由: {args.reason}\n", encoding="utf-8")
+        set_status(parse_entry(target["path"]), "retired")
+        updated.append(sid)
+    print(f"retired: rules.md からルールを撤去し、出典エントリ({', '.join(updated) if updated else 'なし'})を retired に更新")
+
+
 def cmd_rules(_args):
     print(RULES.read_text(encoding="utf-8") if RULES.exists() else "(rules.md はまだありません)")
 
@@ -281,7 +333,7 @@ def main():
     a.set_defaults(func=cmd_add)
 
     li = sub.add_parser("list", help="エントリ一覧")
-    li.add_argument("--status", default="open", choices=["open", "promoted", "closed", "all"])
+    li.add_argument("--status", default="open", choices=["open", "promoted", "closed", "retired", "all"])
     li.add_argument("--category")
     li.set_defaults(func=cmd_list)
 
@@ -304,6 +356,11 @@ def main():
     cl.add_argument("entry_id")
     cl.add_argument("--reason", help="昇華しない理由")
     cl.set_defaults(func=cmd_close)
+
+    rt = sub.add_parser("retire", help="昇華済みルールを退役(rules.md から撤去)")
+    rt.add_argument("entry_id", help="退役するルールの出典に含まれるentry-id")
+    rt.add_argument("--reason", required=True, help="退役の理由(出典エントリに追記され監査痕跡になる)")
+    rt.set_defaults(func=cmd_retire)
 
     r = sub.add_parser("rules", help="ルール一覧を表示")
     r.set_defaults(func=cmd_rules)

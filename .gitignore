@@ -17,5 +17,9 @@ venv/
 # Harness working area (QAレポート等の中間生成物 — 共有資産ではない)
 _workspace/
 
+# Stop フックの検査スタンプ(mtime比較用のローカル状態。共有すると他マシンの
+# 時刻で「検査済み」と誤判定されうる)
+.feedback/.last-check
+
 # OS
 .DS_Store
