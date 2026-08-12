@@ -27,4 +27,14 @@ if bash -c ". '$HERE/assert.sh'; assert_file_absent '$HERE/assert.sh' x 2>/dev/n
   fail "assert_file_absent が存在を検出できていない"
 fi
 
+# assert_contains も同様に両方向を確認する
+if bash -c ". '$HERE/assert.sh'; assert_contains abc x '含まない' 2>/dev/null; assert_summary"; then
+  fail "assert_contains が非包含を検出できていない"
+fi
+if bash -c ". '$HERE/assert.sh'; assert_contains abc b '含む'; assert_summary"; then
+  :
+else
+  fail "assert_contains が包含を失敗扱いにしている"
+fi
+
 assert_summary
