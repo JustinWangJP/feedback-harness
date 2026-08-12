@@ -37,7 +37,7 @@ description: フィードバックハーネス全体のオーケストレータ�
 
 1. `bash install.sh <対象プロジェクトパス>` を実行する
 2. 対象プロジェクトの既存 CLAUDE.md / AGENTS.md がある場合、install.shは追記モードで動く — 出力を確認し重複記載があれば整理する
-3. 導入後、対象プロジェクトで `scripts/check.sh` を1回実行してスタック検出を確認する
+3. 導入後、対象プロジェクトで `bash "${CLAUDE_PLUGIN_ROOT}/scripts/check.sh"` を1回実行してスタック検出を確認する
 
 ## エラーハンドリング
 

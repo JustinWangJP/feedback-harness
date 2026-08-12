@@ -9,7 +9,7 @@ description: 蓄積された過去のフィードバックルールを現在の�
 
 ## 手順
 
-1. `.feedback/rules.md` を読む(なければ `python3 scripts/feedback_log.py rules` で確認)
+1. `.feedback/rules.md` を読む(なければ `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/feedback_log.py" rules` で確認)
 2. 今回の作業に関係するルールを特定する — カテゴリ(`style`/`architecture`/`testing`/`naming`/`workflow`/`domain`)が作業タイプと一致するもの
 3. 該当ルールを作業方針に組み込んでから実装を開始する
 4. ルールと今回の指示が矛盾する場合は、**今回の明示的な指示を優先**し、矛盾があったことをユーザーに一言伝える(ルールの更新機会になる)
@@ -19,7 +19,7 @@ description: 蓄積された過去のフィードバックルールを現在の�
 ルールの意図が不明確なら、出典エントリを読む:
 
 ```bash
-python3 scripts/feedback_log.py search <キーワード>
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/feedback_log.py" search <キーワード>
 ```
 
 出典には指摘時の具体的文脈(どのファイルで何が起きたか)が残っている。
