@@ -164,9 +164,9 @@ Codex など **Hooks を持たない環境**では、`AGENTS.md` の規約が自
 
 ## 他プロジェクトへの導入
 
-> このセクションは**ハーネス配布元リポジトリ**での操作を説明する。導入先には `install.sh` と `docs/` はコピーされないため、再導入・更新は配布元から行う。
+> このセクションは**ハーネス配布元リポジトリ**での操作を説明する。導入先には `scripts/init.sh` 自体と `docs/` はコピーされないため、再導入・更新は配布元から行う。
 
-`install.sh`(上位ディレクトリ)が `scripts/` を含むハーネス一式を対象プロジェクトへコピーする。`scripts/README.md` も導入先で参照できる。
+`scripts/init.sh` が `scripts/`(このファイルを含む)を対象プロジェクトへコピーする。`scripts/README.md` も導入先で参照できる。
 
 導入先に持ち込むのは**ハーネスの仕組みだけ**で、このリポジトリ固有の内容は持ち込まない:
 
@@ -174,6 +174,6 @@ Codex など **Hooks を持たない環境**では、`AGENTS.md` の規約が自
 - `CLAUDE.md` / `AGENTS.md` へ追記するのは `docs/pointer_claude.md` / `docs/pointer_agents.md` の断片。導入元のH1(プロジェクト名)や変更履歴は入らない
 
 ```bash
-bash install.sh /path/to/your-project
+bash scripts/init.sh /path/to/your-project
 cd /path/to/your-project && bash scripts/check.sh   # スタック検出の確認
 ```

@@ -70,11 +70,22 @@ feedback-harness/
   scripts/
     check.sh  check_file.sh  lib.sh  feedback_log.py
     init.sh               # 旧 install.sh
-    hooks/post_edit.sh  hooks/on_stop.sh
+    hooks/post_edit.sh  hooks/on_stop.sh  hooks/on_session_start.sh
   docs/
     pointer_claude.md  pointer_agents.md
+  tests/                  # bash テスト。check.sh の make check フォールバック経由で自動実行される
+  Makefile                # check: → tests/run_tests.sh
+  .claude/
+    settings.json         # このリポジトリ自身の開発用 Hooks(自己ドッグフーディング用。配布対象外)
   .feedback/              # このリポジトリ自身の蓄積(配布対象外)
 ```
+
+実装で確定した点:
+
+1. `.claude/settings.json` は削除せず残した。プラグイン化後もこのリポジトリ自身の開発時 Hooks として使い続ける(自己ドッグフーディング)ため。配布用 `hooks/hooks.json` との内容の二重管理になるが、両者が同じイベント構造(スクリプト・matcher・timeout)を指すことを `tests/test_plugin_manifest.sh` でテスト固定し、ドリフトを検出可能にした。
+2. `tests/`(bash テスト)と `Makefile` を新設した。`Makefile` の `check:` ターゲットが `tests/run_tests.sh` を呼び、`scripts/check.sh` は Python/Node 等のスタックが検出できない場合に `make check` の存在をフォールバックとして検出して実行する。これにより `bash scripts/check.sh .` からハーネス自身のテストが自動実行される。
+3. `.claude-plugin/marketplace.json` の `plugins[0].source` は `"./"` で確定した(`claude plugin validate .` が受理する)。ただしローカルインストール時の CLI 引数としては `claude plugin marketplace add ./` の形が必要で、bare `.` は拒否される。
+4. `hooks/hooks.json` には最終的に `SessionStart` / `PostToolUse` / `Stop` の3つが登録されている。`.feedback/` の自動シード(項番7)を担う `SessionStart` は設計の初期段階では未反映だったが、実装時に追加された。
 
 ## 修正が必要な既存コード
 

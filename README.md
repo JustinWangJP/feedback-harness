@@ -17,35 +17,83 @@ Claude Code / Codex 両対応のフィードバックハーネス。2つのル�
 ## 構成
 
 ```
+.claude-plugin/
+  plugin.json       # プラグイン定義
+  marketplace.json  # カタログ(このリポジトリ自身を配布する)
+skills/             # feedback-loop (オーケストレーター) / capture-feedback / apply-feedback
+agents/             # feedback-curator (ルール昇華) / harness-qa (整合性検証)
+commands/
+  init.md           # /feedback-harness:init — Codex 向け資産の展開
+hooks/
+  hooks.json        # 配布用 Hooks 定義 (${CLAUDE_PLUGIN_ROOT} 基準)
 scripts/
   check.sh          # スタック自動検出 (Python/Node/Go/Rust/Java/Shell/Make) → lint/test/build、要約出力
   check_file.sh     # 単一ファイルの高速チェック (拡張子ベース)
-  lib.sh            # check.sh / check_file.sh の共有ユーティリティ
+  lib.sh            # 共有ユーティリティ (has / SHELLCHECK_SEVERITY / harness_project_root)
   feedback_log.py   # フィードバック記録CLI (add / list / search / promote / rules)
-  hooks/            # Claude Code Hooks ラッパー (PostToolUse / Stop)
-.claude/
-  settings.json     # Hooks設定
-  agents/           # feedback-curator (ルール昇華) / harness-qa (整合性検証)
-  skills/           # feedback-loop (オーケストレーター) / capture-feedback / apply-feedback
+  init.sh           # 導入スクリプト (Codex 向け資産の展開)
+  hooks/            # Claude Code Hooks ラッパー (SessionStart / PostToolUse / Stop)
 .feedback/
   rules.md          # 一般化された恒久ルール (エージェント必読)
   rules.template.md # rules.md のシード (導入時・再生成時に使う雛形)
   log/              # 生のフィードバックエントリ (frontmatter付きMarkdown)
+tests/              # bash テスト (make check → check.sh から自動実行される)
 docs/
   pointer_claude.md # 導入先の CLAUDE.md へ追記する断片
   pointer_agents.md # 導入先の AGENTS.md へ追記する断片
+.claude/
+  settings.json     # このリポジトリ自身の開発用 Hooks (配布対象外)
 ```
 
 ハーネス自身も `check.sh` の検査対象になる(`*.sh` と `*.py` を検出)。
 
 ## 他プロジェクトへの導入
 
+### Claude Code だけで使う場合
+
+```
+/plugin marketplace add JustinWangJP/feedback-harness
+/plugin install feedback-harness@feedback-harness
+```
+
+導入先に置かれるのは `.feedback/`(蓄積データ)だけ。スクリプト・スキル・エージェント・Hooks はプラグイン側にあり、マーケットプレイスの自動更新で追従する。
+
+チーム全員に配りたい場合は、導入先の `.claude/settings.json` に次を書いておくと、フォルダを信頼した時点でインストールを促される:
+
+```json
+{
+  "extraKnownMarketplaces": {
+    "feedback-harness": {
+      "source": { "source": "github", "repo": "JustinWangJP/feedback-harness" }
+    }
+  }
+}
+```
+
+### Codex や他の汎用エージェントも使う場合
+
+Claude Code から:
+
+```
+/feedback-harness:init
+```
+
+Claude Code を使わない場合は直接:
+
 ```bash
-bash install.sh /path/to/your-project
+git clone https://github.com/JustinWangJP/feedback-harness
+bash feedback-harness/scripts/init.sh /path/to/your-project
 cd /path/to/your-project && bash scripts/check.sh   # スタック検出の確認
 ```
 
-既存の CLAUDE.md / AGENTS.md には `docs/pointer_*.md` の断片を追記、既存の settings.json には `.suggested` を生成する(手動マージ)。`.feedback/rules.md` は空のテンプレートから始まる。
+`scripts/` と `AGENTS.md` が導入先に展開される。`CLAUDE.md` / `AGENTS.md` が既存なら `docs/pointer_*.md` の断片を追記する(重複追記はしない)。`.feedback/rules.md` は空のテンプレートから始まる。
+
+### 更新
+
+| 導入形態 | 更新方法 |
+|---------|---------|
+| プラグイン | 自動(Claude Code がマーケットプレイスを `git pull` する) |
+| `init.sh` でベンダリングした `scripts/` | `init.sh` を再実行する(冪等) |
 
 ## フィードバック運用フロー
 

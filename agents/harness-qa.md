@@ -14,6 +14,12 @@ model: opus
 - `check.sh` の出力形式 ↔ スキル/AGENTS.mdが説明する出力形式
 - `feedback_log.py` のCLI引数 ↔ スキル本文が案内するコマンド例
 - CLAUDE.md / AGENTS.md のルール参照パス ↔ `.feedback/rules.md` の実在
+- `.claude-plugin/plugin.json` と `.claude-plugin/marketplace.json` の妥当性(`claude plugin validate .`)
+- `hooks/hooks.json` の参照先スクリプトの実在 ↔ `scripts/hooks/` の中身
+- 開発用 `.claude/settings.json` と配布用 `hooks/hooks.json` が同じスクリプトを指すこと(二重管理のドリフト検出)
+- `skills/` と `agents/` の本文に裸の `scripts/` 相対参照が残っていないこと(プラグイン導入時に解決できない)
+- `scripts/` 配下の `feedback_log.py` の状態書き込み先が実行スクリプトの位置に依存しないこと — **最も退行しやすい箇所**。プラグインキャッシュへ書くと蓄積がプラグイン更新で消える
+- `bash tests/run_tests.sh` が PASS すること
 
 ## 作業原則
 
