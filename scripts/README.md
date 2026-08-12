@@ -10,6 +10,7 @@
 scripts/
 ├── check.sh          # フルチェック: スタック自動検出 → lint/typecheck/test/build、要約出力
 ├── check_file.sh     # 単一ファイル高速チェック: 拡張子ベースの静的チェック
+├── lib.sh            # check.sh / check_file.sh の共有ユーティリティ(has() ほか)
 ├── feedback_log.py   # フィードバック記録CLI: add/list/search/promote/rules
 └── hooks/
     ├── post_edit.sh  # Claude Code PostToolUse(Edit|Write) ラッパ → check_file.sh
@@ -43,10 +44,24 @@ FEEDBACK_CHECK_SKIP="test build" bash scripts/check.sh   # 特定ステージを
 
 **動作:** 検出したスタックごとに `lint` / `typecheck` / `test` / `build` を走らせ、`PASS`/`FAIL`/`SKIP` の要約を出す。
 
-- **検出対象**: Python(`pyproject.toml`/`setup.py`/`requirements.txt`) / Node(`package.json`) / Go(`go.mod`) / Rust(`Cargo.toml`) / Java(`pom.xml`/`build.gradle`) / 汎用(`Makefile` の `check` ターゲット)
+- **検出対象**: Python(`pyproject.toml`/`setup.py`/`requirements.txt`、無くても `*.py` があれば `ruff` のみ実行) / Node(`package.json`) / Go(`go.mod`) / Rust(`Cargo.toml`) / Java(`pom.xml`/`build.gradle`) / Shell(`*.sh`) / 汎用(`Makefile` の `check` ターゲット)
 - **ステージスキップ**: 環境変数 `FEEDBACK_CHECK_SKIP` に空白区切りでステージ名(`lint`/`typecheck`/`test`/`build`)を指定すると該当ステージを `SKIP` にする
+- **SKIPの理由**: 出力に必ず理由が付く — `(<tool> 未インストール)` / `(<tool> 起動不可 — 環境を確認してください)` / `(実行不可)` / `(FEEDBACK_CHECK_SKIP)`、およびスタック単位でまとめた `(<stack>: 全ステージ …)`。**ツールが無い・壊れているだけの状態を `FAIL` にしない**(ユーザーのコードの問題ではないため)
+- **検査対象ファイル**: Gitリポジトリなら `git ls-files --cached --others --exclude-standard`。**未コミットの新規ファイルも検査し**、`.gitignore` 済みは除外する
+- **ネットワークを使わない**: Node の typecheck フォールバックは `npx --no-install tsc`。`typescript` が未導入なら取得を試みず `SKIP` にする
+- **shellcheck の重大度**: 既定は `warning`(`-S warning`)。`style`/`info` まで拾うと導入初日のプロジェクトが既存コードで詰まるため。`FEEDBACK_SHELLCHECK_SEVERITY=style` で引き上げられる
 - **失敗出力**: `FAIL` したステージは末尾40行のログを `failures.txt` に集約し、最後にまとめて表示する
-- **exit code**: `0` = ALL PASS(またはスタック未検出) / `1` = FAILあり / `2` = ルートディレクトリ不正
+- **最終行**(FAIL時を除く。いずれも exit 0):
+
+  | 最終行 | 意味 |
+  |--------|------|
+  | `ALL PASS` | 全ステージ成功 |
+  | `ALL PASS (N件SKIP — 未検証の項目があります)` | 成功したが未検証あり |
+  | `実行できたステージがありません(すべてSKIP)` | 何も検証できていない |
+  | `検出できたスタックがありません …` | 対応マニフェスト・対象ファイルなし |
+
+  全SKIPや部分SKIPを無印の `ALL PASS` と偽らない。
+- **exit code**: `0` = FAILなし(全SKIP・スタック未検出を含む) / `1` = FAILあり / `2` = ルートディレクトリ不正。**エージェントは最終行の文字列ではなく exit code で判定すること**
 
 ### `check_file.sh` — 単一ファイル高速チェック(編集直後用)
 
@@ -80,11 +95,13 @@ python3 scripts/feedback_log.py <サブコマンド> [引数]
 | `add` | `--category <cat>` `--summary "<要約>"` `[--detail "<詳細>"]` `[--source human\|hook\|agent]` | エントリを記録。`open` が3件以上で promote 候補の通知を出す |
 | `list` | `[--status open\|promoted\|all]` `[--category <cat>]` | エントリ一覧(既定は `open`) |
 | `search` | `<キーワード>` | エントリの全文検索 |
-| `promote` | `<entry-id>` `--rule "<一般化ルール1行>"` | `rules.md` に追記し、対象エントリを `promoted` に更新 |
+| `promote` | `<entry-id>` `--rule "<一般化ルール1行>"` | `rules.md` に**新規ルールを追記**し、対象エントリを `promoted` に更新 |
+| `merge` | `<entry-id>` `--into <既存ルールの出典id>` `[--rule "<更新後の本文>"]` | 既存ルールの**出典に追記**し(新規行を増やさない)、対象を `promoted` に更新。同じ原則の指摘が再発したとき用 |
+| `close` | `<entry-id>` `[--reason "<理由>"]` | 昇華せず `closed` に更新。一般化できない一回限りの指摘用 |
 | `rules` | (なし) | 現在の `rules.md` を表示 |
 
 - **category**: `style` / `architecture` / `testing` / `naming` / `workflow` / `domain`
-- **entry-id**: 記録時刻 `%Y%m%d-%H%M%S`
+- **entry-id**: 記録時刻 `%Y%m%d-%H%M%S`。同一秒に複数記録した場合は `-2`, `-3` … を付けて一意にする(重複すると `promote` が先頭の1件しか掴めず、残りが昇華不能になるため)
 
 ### `hooks/` — Claude Code Hooks ラッパ
 
@@ -147,7 +164,14 @@ Codex など **Hooks を持たない環境**では、`AGENTS.md` の規約が自
 
 ## 他プロジェクトへの導入
 
+> このセクションは**ハーネス配布元リポジトリ**での操作を説明する。導入先には `install.sh` と `docs/` はコピーされないため、再導入・更新は配布元から行う。
+
 `install.sh`(上位ディレクトリ)が `scripts/` を含むハーネス一式を対象プロジェクトへコピーする。`scripts/README.md` も導入先で参照できる。
+
+導入先に持ち込むのは**ハーネスの仕組みだけ**で、このリポジトリ固有の内容は持ち込まない:
+
+- `.feedback/rules.md` のシードは `.feedback/rules.template.md`(ヘッダのみ)。導入元の promote 済みルールと、導入先に存在しない出典IDは混入しない
+- `CLAUDE.md` / `AGENTS.md` へ追記するのは `docs/pointer_claude.md` / `docs/pointer_agents.md` の断片。導入元のH1(プロジェクト名)や変更履歴は入らない
 
 ```bash
 bash install.sh /path/to/your-project

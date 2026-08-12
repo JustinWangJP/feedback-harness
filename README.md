@@ -18,8 +18,9 @@ Claude Code / Codex 両対応のフィードバックハーネス。2つのル�
 
 ```
 scripts/
-  check.sh          # スタック自動検出 (Python/Node/Go/Rust/Java/Make) → lint/test/build、要約出力
+  check.sh          # スタック自動検出 (Python/Node/Go/Rust/Java/Shell/Make) → lint/test/build、要約出力
   check_file.sh     # 単一ファイルの高速チェック (拡張子ベース)
+  lib.sh            # check.sh / check_file.sh の共有ユーティリティ
   feedback_log.py   # フィードバック記録CLI (add / list / search / promote / rules)
   hooks/            # Claude Code Hooks ラッパー (PostToolUse / Stop)
 .claude/
@@ -28,8 +29,14 @@ scripts/
   skills/           # feedback-loop (オーケストレーター) / capture-feedback / apply-feedback
 .feedback/
   rules.md          # 一般化された恒久ルール (エージェント必読)
+  rules.template.md # rules.md のシード (導入時・再生成時に使う雛形)
   log/              # 生のフィードバックエントリ (frontmatter付きMarkdown)
+docs/
+  pointer_claude.md # 導入先の CLAUDE.md へ追記する断片
+  pointer_agents.md # 導入先の AGENTS.md へ追記する断片
 ```
+
+ハーネス自身も `check.sh` の検査対象になる(`*.sh` と `*.py` を検出)。
 
 ## 他プロジェクトへの導入
 
@@ -38,7 +45,7 @@ bash install.sh /path/to/your-project
 cd /path/to/your-project && bash scripts/check.sh   # スタック検出の確認
 ```
 
-既存の CLAUDE.md / AGENTS.md には追記、既存の settings.json には `.suggested` を生成する(手動マージ)。
+既存の CLAUDE.md / AGENTS.md には `docs/pointer_*.md` の断片を追記、既存の settings.json には `.suggested` を生成する(手動マージ)。`.feedback/rules.md` は空のテンプレートから始まる。
 
 ## フィードバック運用フロー
 

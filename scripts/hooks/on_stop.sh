@@ -17,13 +17,17 @@ except Exception:
     print("false")
 ')"
 
+# 検査ルートを明示的に渡す。省略するとカレントディレクトリが検査対象になり、
+# サブディレクトリ起動やCI流用時に沈黙して誤ったツリーを検査する。
+ROOT="${CLAUDE_PROJECT_DIR:-$(cd "$DIR/../.." && pwd)}"
+
 # 2周目以降はチェック結果を表示するだけでブロックしない(ループ防止)
 if [[ "$ACTIVE" == "true" ]]; then
-  "$DIR/../check.sh" >&2 || true
+  "$DIR/../check.sh" "$ROOT" >&2 || true
   exit 0
 fi
 
-OUT="$("$DIR/../check.sh" 2>&1)" && exit 0
+OUT="$("$DIR/../check.sh" "$ROOT" 2>&1)" && exit 0
 
 echo "$OUT" >&2
 exit 2

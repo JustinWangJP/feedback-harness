@@ -6,10 +6,14 @@
 # 出力: 問題があれば内容を表示して exit 1、なければ exit 0(無出力)。
 set -u
 
+LIBDIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib.sh
+. "$LIBDIR/lib.sh"
+
 FILE="${1:-}"
 [[ -z "$FILE" || ! -f "$FILE" ]] && exit 0
 
-has() { command -v "$1" >/dev/null 2>&1; }
+# has() / SHELLCHECK_SEVERITY は lib.sh で定義(check.sh と共有)
 
 OUT=""
 case "$FILE" in
@@ -39,13 +43,23 @@ case "$FILE" in
     ;;
   *.sh)
     OUT="$(bash -n "$FILE" 2>&1)" || true
-    has shellcheck && { SC="$(shellcheck -f gcc "$FILE" 2>&1)" || true; OUT="${OUT}${SC:+$'\n'$SC}"; }
+    if has shellcheck; then
+      # -S: style/info まで拾うと導入初日のプロジェクトが既存コードで詰まる
+      # -x: source 先を追う(追えないだけの SC1091 を問題として報告しない)
+      SC="$(shellcheck -x -S "$SHELLCHECK_SEVERITY" -f gcc "$FILE" 2>&1)" || true
+      # bash -n が無出力のときに先頭空行を出さないよう、区切り改行は連結時だけ入れる
+      [[ -n "$SC" ]] && OUT="${OUT:+$OUT$'\n'}$SC"
+    fi
     ;;
   *.json)
     has python3 && { OUT="$(python3 -c "import json,sys; json.load(open(sys.argv[1]))" "$FILE" 2>&1)" && OUT=""; }
     ;;
   *.yaml|*.yml)
-    has python3 && { OUT="$(python3 -c "import yaml,sys; yaml.safe_load(open(sys.argv[1]))" "$FILE" 2>&1)" && OUT=""; }
+    # PyYAML は標準ライブラリではない。未導入だと ModuleNotFoundError が
+    # 「ファイルの問題」として報告され、正当なYAMLでフックがブロックする
+    if has python3 && python3 -c "import yaml" >/dev/null 2>&1; then
+      OUT="$(python3 -c "import yaml,sys; yaml.safe_load(open(sys.argv[1]))" "$FILE" 2>&1)" && OUT=""
+    fi
     ;;
 esac
 

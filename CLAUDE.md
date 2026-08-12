@@ -16,3 +16,6 @@
 | 日付 | 変更内容 | 対象 | 理由 |
 |------|----------|------|------|
 | 2026-08-09 | 初期構成 | 全体 | - |
+| 2026-08-10 | QAレポート(FAIL 10件)対応 | check.sh / install.sh / hooks / feedback_log.py | SKIP契約の実装、壊れたツールの誤FAIL防止、ハーネス自己検査、導入品質 |
+| 2026-08-10 | 再QA(新規10件)対応 | lib.sh(新規) / check_file.sh / check.sh / AGENTS.md | has()の共通化でドリフト防止、PyYAML未導入時の誤ブロック解消、未追跡ファイルの検査、shellcheck重大度しきい値 |
+| 2026-08-10 | 実環境テストで発見した蓄積ループの不具合を修正 | feedback_log.py / feedback-curator.md / capture-feedback | 同一秒のID衝突で昇華不能になる問題、および作業原則4・5(統合・close)がCLIで実行不能だった問題 |
