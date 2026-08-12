@@ -9,8 +9,13 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$HERE/assert.sh"
 REPO="$(cd "$HERE/.." && pwd)"
 
-# 1: skills/ と agents/ に裸の "scripts/feedback_log.py" が残っていない
-BARE="$(grep -rn 'scripts/feedback_log\.py' "$REPO/skills" "$REPO/agents" 2>/dev/null \
+# 1: skills/ と agents/ に、ハーネス側スクリプトの裸参照が残っていない。
+# 対象は feedback_log.py と init.sh — どちらもプラグイン側にしか無く、
+# 導入先の相対パスでは解決できない(init.sh に至っては導入先の scripts/ を
+# 作る側なので、実行時点では存在しない)。
+# check.sh / check_file.sh は init.sh が導入先へ展開した後に
+# 「導入先で」叩くものなので、相対パスのままが正しく、ここでは禁じない。
+BARE="$(grep -rnE 'scripts/(feedback_log\.py|init\.sh)' "$REPO/skills" "$REPO/agents" 2>/dev/null \
   | grep -v 'CLAUDE_PLUGIN_ROOT' || true)"
 assert_eq "" "$BARE" "skills/agents に裸の scripts/ 参照が残っていない"
 

@@ -11,7 +11,7 @@ scripts/
 ├── check.sh          # フルチェック: スタック自動検出 → lint/typecheck/test/build、要約出力
 ├── check_file.sh     # 単一ファイル高速チェック: 拡張子ベースの静的チェック
 ├── lib.sh            # check.sh / check_file.sh の共有ユーティリティ(has() ほか)
-├── feedback_log.py   # フィードバック記録CLI: add/list/search/promote/rules
+├── feedback_log.py   # フィードバック記録CLI: add/list/search/promote/merge/close/retire/rules
 └── hooks/
     ├── post_edit.sh  # Claude Code PostToolUse(Edit|Write) ラッパ → check_file.sh
     └── on_stop.sh    # Claude Code Stop ラッパ → check.sh
@@ -93,11 +93,12 @@ python3 scripts/feedback_log.py <サブコマンド> [引数]
 | サブコマンド | 引数 | 説明 |
 |-------------|------|------|
 | `add` | `--category <cat>` `--summary "<要約>"` `[--detail "<詳細>"]` `[--source human\|hook\|agent]` | エントリを記録。`open` が3件以上で promote 候補の通知を出す |
-| `list` | `[--status open\|promoted\|all]` `[--category <cat>]` | エントリ一覧(既定は `open`) |
+| `list` | `[--status open\|promoted\|closed\|retired\|all]` `[--category <cat>]` | エントリ一覧(既定は `open`) |
 | `search` | `<キーワード>` | エントリの全文検索 |
 | `promote` | `<entry-id>` `--rule "<一般化ルール1行>"` | `rules.md` に**新規ルールを追記**し、対象エントリを `promoted` に更新 |
 | `merge` | `<entry-id>` `--into <既存ルールの出典id>` `[--rule "<更新後の本文>"]` | 既存ルールの**出典に追記**し(新規行を増やさない)、対象を `promoted` に更新。同じ原則の指摘が再発したとき用 |
 | `close` | `<entry-id>` `[--reason "<理由>"]` | 昇華せず `closed` に更新。一般化できない一回限りの指摘用 |
+| `retire` | `<出典entry-id>` `--reason "<退役理由>"` | 昇華済みルールを **rules.md から撤去**し、出典エントリ(merge済みの分も含む)を `retired` に更新。棚卸しで人間が裁定した後に使う |
 | `rules` | (なし) | 現在の `rules.md` を表示 |
 
 - **category**: `style` / `architecture` / `testing` / `naming` / `workflow` / `domain`
@@ -108,7 +109,10 @@ python3 scripts/feedback_log.py <サブコマンド> [引数]
 Claude Code の Hooks から起動される薄いラッパ。判定・実行は `check_file.sh` / `check.sh` に委譲し、フック固有の処理(stdin JSONのパース、exit code 2 によるエージェントへの差し戻し、無限ループ防止)だけを担う。
 
 - **`post_edit.sh`** (PostToolUse: `Edit|Write`): stdin の `tool_input.file_path` を取り出し `check_file.sh` でチェック。問題あれば **`exit 2` + stderr** で Claude にフィードバックし、自己修正ループを起動する。
-- **`on_stop.sh`** (Stop): 応答完了前に `check.sh` を実行。失敗すれば **`exit 2`** で完了をブロックし失敗内容を返す。`stop_hook_active` が `true`(2周目以降)のときは結果表示のみでブロックせず、**無限ループを防止**する。
+- **`on_stop.sh`** (Stop): 応答完了前に `check.sh` を実行。失敗すれば **`exit 2`** で完了をブロックし失敗内容を返す。`stop_hook_active` が `true`(2周目以降)のときは何もせず `exit 0` し、**無限ループを防止**する。
+  - **検査の実行条件**: 前回の成功検査(`.feedback/.last-check` のmtime)以降に作業ツリーが変わっているときだけ走る。無条件だと、ファイルを1つも編集しない質問応答のターンでも導入先のフルビルド(`mvn verify` / `npm run build` 等)が毎回動く。判定は mtime なので Edit/Write だけでなく Bash 経由の編集も拾い、判定できないときは必ず「実行する」側に倒す。
+  - スタンプを進めるのは**検査が成功したときだけ**。失敗を記録すると、直さないまま次のターンで「変更なし」と判定され壊れたまま完了できてしまう。
+  - 2周目で `check.sh` を再実行しないのは、`exit 0` で返す出力がエージェントに渡らず、重い導入先では最も待たされる場面で時間だけを失うため。
 
 ---
 
@@ -123,7 +127,7 @@ Claude Code はプラグインが提供する Hooks(`hooks/hooks.json`)を起動
 | タイミング | Hook | 実行チェイン | 効果 |
 |-----------|------|-------------|------|
 | ファイル編集直後 | `PostToolUse` (`Edit\|Write`) | `post_edit.sh` → `check_file.sh` | 問題があれば `exit 2` で即時差し戻し → 自動修正 |
-| 応答完了前 | `Stop` | `on_stop.sh` → `check.sh` | FAILがあれば完了をブロック → 修正を継続 |
+| 応答完了前 | `Stop` | `on_stop.sh` → `check.sh` | FAILがあれば完了をブロック → 修正を継続(前回の成功検査以降に変更が無ければ検査自体を省略) |
 
 - **ルールの反映**: `apply-feedback` スキルが `.feedback/rules.md` を読み込む。`CLAUDE.md` のポインタが作業開始前にスキル使用を促す。
 - **指摘の記録**: `capture-feedback` / `feedback-loop` スキルが `feedback_log.py` を呼ぶ。
