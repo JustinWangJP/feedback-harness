@@ -9,10 +9,10 @@ Claude Code / Codex 両対応のフィードバックハーネス。2つのル�
 
 | 環境 | 自動チェック | ルール反映 |
 |------|-------------|-----------|
-| Claude Code | Hooks (`.claude/settings.json`): 編集直後に `check_file.sh`、応答完了前に `check.sh`。失敗時はexit 2でエージェントに差し戻し | `apply-feedback` スキル + CLAUDE.md ポインタ |
-| Codex ほか | AGENTS.md の規約: 変更ごとに `check_file.sh`、完了前に `check.sh` を実行 | AGENTS.md の規約で `.feedback/rules.md` を必読化 |
+| Claude Code(プラグイン導入) | Hooks(プラグインの `hooks/hooks.json` が提供): 編集直後に `check_file.sh`、応答完了前に `check.sh`。失敗時はexit 2でエージェントに差し戻し | `apply-feedback` スキル + CLAUDE.md ポインタ(プラグインが提供) |
+| Codex ほか(`scripts/init.sh` で導入) | AGENTS.md の規約: 変更ごとに `check_file.sh`、完了前に `check.sh` をエージェント自身が実行 | AGENTS.md の規約で `.feedback/rules.md` を必読化 |
 
-スクリプトとフィードバック蓄積(`.feedback/`)は両環境で完全共有。環境固有なのはエントリポイント(CLAUDE.md / AGENTS.md)とHooks設定だけ。
+スクリプトとフィードバック蓄積(`.feedback/`)は両環境で完全共有。環境固有なのはエントリポイント(CLAUDE.md / AGENTS.md)と、Hooksの提供元(プラグイン、または `init.sh` 導入時はAGENTS.mdの手動規約)だけ。このリポジトリ自身の `.claude/settings.json` は開発用のHooks設定であり、導入先には配布されない(「構成」節を参照)。
 
 ## 構成
 

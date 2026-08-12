@@ -18,7 +18,7 @@ description: フィードバックハーネス全体のオーケストレータ�
 
 ## Phase 1: キュレーション (フィードバック → ルール)
 
-`Agent` ツールで feedback-curator を呼び出す(`model: "opus"`、定義: `.claude/agents/feedback-curator.md` — 定義ファイルの作業原則をpromptに含める):
+`Agent` ツールで feedback-curator を呼び出す(`model: "opus"`、定義: `agents/feedback-curator.md` — 定義ファイルの作業原則をpromptに含める):
 
 - 入力: openエントリ一覧 + 既存rules.md + ユーザーの直近指摘
 - 期待出力: promote実行結果と、昇華した/しなかった判断の要約
@@ -26,7 +26,7 @@ description: フィードバックハーネス全体のオーケストレータ�
 
 ## Phase 2: ハーネスQA
 
-`Agent` ツールで harness-qa を呼び出す(`model: "opus"`、定義: `.claude/agents/harness-qa.md`):
+`Agent` ツールで harness-qa を呼び出す(`model: "opus"`、定義: `agents/harness-qa.md`):
 
 - 入力: 検証対象(直近の変更、または全体)
 - 期待出力: 境界面クロス比較のPASS/FAIL/SKIPレポート + 修正案

@@ -118,7 +118,7 @@ Claude Code の Hooks から起動される薄いラッパ。判定・実行は 
 
 ### Claude Code — Hooks 駆動(自動)
 
-Claude Code は `.claude/settings.json` の Hooks を起動ドライバとするため、**エージェントが明示的にスクリプトを呼ぶ必要はない**。
+Claude Code はプラグインが提供する Hooks(`hooks/hooks.json`)を起動ドライバとするため、**エージェントが明示的にスクリプトを呼ぶ必要はない**。
 
 | タイミング | Hook | 実行チェイン | 効果 |
 |-----------|------|-------------|------|
@@ -127,7 +127,7 @@ Claude Code は `.claude/settings.json` の Hooks を起動ドライバとする
 
 - **ルールの反映**: `apply-feedback` スキルが `.feedback/rules.md` を読み込む。`CLAUDE.md` のポインタが作業開始前にスキル使用を促す。
 - **指摘の記録**: `capture-feedback` / `feedback-loop` スキルが `feedback_log.py` を呼ぶ。
-- **設定ファイル**: `.claude/settings.json`(Hooks) + `.claude/skills/` + `.claude/agents/` + `CLAUDE.md`。
+- **設定ファイル**: プラグインの `hooks/hooks.json` + `skills/` + `agents/` + 導入先の `CLAUDE.md`。(このリポジトリ自身の開発では、これに加えて自己ドッグフーディング用の `.claude/settings.json` を使う)
 
 ### Codex / 汎用エージェント — 規約駆動(手動)
 
