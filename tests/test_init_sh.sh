@@ -12,9 +12,8 @@ WORK="$(cd "$WORK" && pwd)"
 mkdir -p "$WORK/target"
 ( cd "$WORK/target" && git init -q . )
 
-# shellcheck disable=SC2034  # 失敗時の調査用に出力を保持しておく(現状は未参照)
 OUT="$(bash "$REPO/scripts/init.sh" "$WORK/target" 2>&1)"
-assert_eq "0" "$?" "init.sh が成功する"
+assert_eq "0" "$?" "init.sh が成功する: $OUT"
 
 # Codex 向けにベンダリングされるもの
 assert_file_exists "$WORK/target/scripts/check.sh" "check.sh"
