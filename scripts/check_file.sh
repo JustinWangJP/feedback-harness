@@ -52,14 +52,11 @@ case "$FILE" in
     fi
     ;;
   *.json)
-    has python3 && { OUT="$(python3 -c "import json,sys; json.load(open(sys.argv[1]))" "$FILE" 2>&1)" && OUT=""; }
+    # 検証ロジックは lib.sh に集約(check.sh と同じ判定を保つため)
+    OUT="$(harness_validate_json "$FILE" 2>&1)" && OUT=""
     ;;
   *.yaml|*.yml)
-    # PyYAML は標準ライブラリではない。未導入だと ModuleNotFoundError が
-    # 「ファイルの問題」として報告され、正当なYAMLでフックがブロックする
-    if has python3 && python3 -c "import yaml" >/dev/null 2>&1; then
-      OUT="$(python3 -c "import yaml,sys; yaml.safe_load(open(sys.argv[1]))" "$FILE" 2>&1)" && OUT=""
-    fi
+    OUT="$(harness_validate_yaml "$FILE" 2>&1)" && OUT=""
     ;;
 esac
 

@@ -85,4 +85,25 @@ else
   ok harness_validate_yaml "$WORK/broken.yaml" "PyYAML不在なら検証せず成功する"
 fi
 
+# --- check_file.sh 経由でも同じ判定になる(共有関数を使っているか) ---
+CF="$REPO/scripts/check_file.sh"
+ASSERT_CHECKS=$((ASSERT_CHECKS + 1))
+if bash "$CF" "$WORK/broken.json" >/dev/null 2>&1; then
+  fail "check_file.sh が壊れたJSONを検出しない"
+fi
+ASSERT_CHECKS=$((ASSERT_CHECKS + 1))
+if ! bash "$CF" "$WORK/tsconfig.json" >/dev/null 2>&1; then
+  fail "check_file.sh が tsconfig.json のコメントで誤ブロックする(D2の回帰)"
+fi
+if harness_has_pyyaml; then
+  ASSERT_CHECKS=$((ASSERT_CHECKS + 1))
+  if ! bash "$CF" "$WORK/multi.yaml" >/dev/null 2>&1; then
+    fail "check_file.sh が複数文書YAMLで誤ブロックする(D3の回帰)"
+  fi
+  ASSERT_CHECKS=$((ASSERT_CHECKS + 1))
+  if ! bash "$CF" "$WORK/customtag.yaml" >/dev/null 2>&1; then
+    fail "check_file.sh がカスタムタグYAMLで誤ブロックする(D3の回帰)"
+  fi
+fi
+
 assert_summary
