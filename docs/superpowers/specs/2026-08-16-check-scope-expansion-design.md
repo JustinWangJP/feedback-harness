@@ -30,6 +30,19 @@ D2・D3 を直さずに D1 を横展開すると、誤検出が単一ファイ�
 | `check.sh` は Stop フックで毎ターン走り `timeout 300` を共有する。ネットワークや重い解析を入れると 2026-08-12 に解消した過剰実行問題が再発する | 脆弱性監査・API契約差分・カバレッジ | **M2 遅延実行**(入力ハッシュが変わったときだけ)+ **M3 相乗り**(既存 test ステージにカバレッジを同居させる) |
 | 既存プロジェクトが未整備の領域(未フォーマット・未使用コード)を一律 FAIL にすると、導入初日から完了不能になる(shellcheck 重大度で過去に扱った問題) | フォーマット・デッドコード・カバレッジ閾値 | **M1 WARN 結果クラス**(宣言していない検査は報告のみ) |
 
+## 1.3 ツール導入に関する原則(非交渉)
+
+**P-A. ハーネスは決してツールを自動インストールしない。** 未導入は SKIP と理由表示に留め、導入の判断と実行はユーザーが行う。インストールは環境を変える行為であり、エージェントが黙って行ってよいものではない。この原則は既存実装に埋め込まれている(`npx --no-install` を選び、ネットワークからの取得を避けた判断)。新規検査もこれを守る。
+
+**P-B. OS依存の導入手段を前提にしない。** Homebrew や apt を必要とするツールは「あれば使う」に留め、必須にしない。優先順位:
+
+1. **追加インストール不要** — python3 / node / git など既にある実行環境で自前実装できるもの(構文検証・内部リンク検証)
+2. **横断ツールは npm** — OSに依存せず `npm i -D` で入るNode製ツール
+3. **スタック固有の検査は、そのスタックのパッケージマネージャ** — Pythonプロジェクトには pip、Goには go、Rustには cargo が既にある。追加の導入経路を増やさない
+4. **OS固有バイナリは任意扱い** — PATH にあれば使い、無ければ SKIP
+
+**P-C. 依存を推奨する前にレジストリで素性を確認する。** 名前が一致するだけの別物・名前予約の空パッケージが実在する(§8.1 に実例)。公式リポジトリ・最終更新日・ダウンロード数を確認してから設計に載せる。
+
 ## 2. 実行モデルの拡張(3機構)
 
 ### M1. WARN — 非ブロッキングの第3の結果クラス
@@ -88,20 +101,23 @@ WARN は「今は直さないが、溜まったら見える」ための仕組み
 |---|---|---|---|---|
 | JSON構文 | `*.json` が存在 | 共有関数(§4.1) | lint | 常に FAIL(構文エラーは疑いようがない) |
 | YAML構文 | `*.yaml`/`*.yml` が存在・PyYAML あり | 共有関数(§4.1) | lint | 常に FAIL |
-| CI設定 | `.github/workflows/*.y*ml` + `actionlint` | `actionlint` | lint | FAIL |
-| Dockerfile | Dockerfile + `hadolint` | `hadolint <files>` | lint | FAIL |
+| CI設定 | `.github/workflows/*.y*ml` が存在 | 上記のYAML構文検証が適用される(必須ツール無し) | lint | FAIL |
+| CI設定(深) | 同上 + `actionlint` が PATH にある | `actionlint` | lint | FAIL。Go製バイナリのため任意扱い(P-B4)。npm の `actionlint` はWASM移植で2022年更新停止のため既定では使わない |
+| Dockerfile | Dockerfile + `dockerfilelint` 実行可能(npm) | `npx --no-install dockerfilelint <files>` | lint | FAIL |
+| Dockerfile(代替) | Dockerfile + `hadolint` が PATH にある | `hadolint <files>` | lint | FAIL。任意扱い(P-B4) |
 
 ### 3.2 セキュリティ
 
 | 検査 | 検出条件 | コマンド | ステージ | 判定 |
 |---|---|---|---|---|
-| 秘密情報 | `gitleaks` あり | `gitleaks detect --no-git --redact --no-banner -s .` | security | FAIL |
+| 秘密情報(主) | `secretlint` 実行可能(npm) | `npx --no-install secretlint --maskSecrets "**/*"` | security | 宣言(`.secretlintrc.*`)あり → FAIL / 無し → **WARN**(既定ルールセット未設定では誤検出しうるため) |
+| 秘密情報(代替) | `gitleaks` が PATH にある | `gitleaks detect --no-git --redact --no-banner -s .` | security | FAIL。OS固有バイナリのため任意扱い(P-B4)。**npm の `gitleaks` は別物なので使わない**(§8.1) |
 | 脆弱性(Python) | `pip-audit` あり | `pip-audit` | security | **M2遅延**(入力: `requirements*.txt` / `poetry.lock` / `uv.lock` / `pyproject.toml`)。FAIL |
 | 脆弱性(Node) | `package-lock.json` 等 + npm | `npm audit --audit-level=high` | security | **M2遅延**(入力: lockfile)。FAIL |
 | 脆弱性(Go) | `govulncheck` あり | `govulncheck ./...` | security | **M2遅延**(入力: `go.sum`)。FAIL |
 | 脆弱性(Rust) | `cargo-audit` あり | `cargo audit` | security | **M2遅延**(入力: `Cargo.lock`)。FAIL |
 
-`--redact` は必須 — `check.sh` の失敗ログはエージェントのコンテキストと `failures.txt` に入るため、秘密の値を出力すると別の場所へ拡散する。
+**値のマスクは必須** — `check.sh` の失敗ログはエージェントのコンテキストと `failures.txt` に入るため、秘密の値をそのまま出力すると別の場所へ拡散する。secretlint は `--maskSecrets`、gitleaks は `--redact` で伏せる。どちらのオプションも省略不可とする。
 
 ### 3.3 依存の実在性・整合性(オフライン)
 
@@ -149,7 +165,7 @@ Go だけ扱いが違うのは、gofmt が事実上の言語仕様であり「�
 
 | 検査 | 検出条件 | コマンド | ステージ | 判定 |
 |---|---|---|---|---|
-| OpenAPI | `openapi.yaml`/`openapi.json`(または `api/` 配下の同名)+ `oasdiff` あり | ベースライン版を一時ファイルへ取り出し `oasdiff breaking <base> <current>` | contract | **M2遅延**(入力: spec ファイルのハッシュ + ベースラインSHA)。FAIL |
+| OpenAPI | `openapi.yaml`/`openapi.json`(または `api/` 配下の同名)+ `oasdiff` が PATH にある | ベースライン版を一時ファイルへ取り出し `oasdiff breaking <base> <current>` | contract | **M2遅延**(入力: spec ファイルのハッシュ + ベースラインSHA)。FAIL。Go製バイナリのため任意扱い(P-B4)。**npm の `oasdiff` は中身の無い名前予約なので使わない**(§8.1) |
 | Rust ライブラリ | `cargo-semver-checks` あり + `[lib]` を持つ crate | `cargo semver-checks check-release` | contract | **M2遅延**。ビルドを伴い重いため、遅延必須。FAIL |
 
 ツールが無ければ SKIP。破壊的変更の判定は本質的にツール依存であり、自前実装はしない。
@@ -239,15 +255,32 @@ harness_validate_yaml <file...>       # 同上
 
 `bash scripts/check.sh` が `ALL PASS` であることを完了条件とする。
 
-## 8. 未検証事項(正直な記録)
+## 8. 検証状況(正直な記録)
 
-開発環境に gitleaks / actionlint / hadolint / import-linter / pip-audit / deptry / vulture / knip / oasdiff / cargo-semver-checks が**いずれも導入されていない**。テストは偽実行ファイルで**呼び出し契約**(引数・検出条件・SKIP/FAIL/WARNの分岐)を固定するに留まり、実ツールとの結合は導入済み環境での初回実行が最初の検証機会になる。
+### 8.1 確認済み — npm パッケージの素性(2026-08-16 に `npm view` で照会)
+
+| パッケージ | 実体 | 採否 |
+|---|---|---|
+| `secretlint` 13.0.4 | 公式 `secretlint/secretlint`、週約100万DL、2026-07更新 | **採用**(秘密情報の主手段) |
+| `dockerfilelint` 1.8.0 | 公式 `replicatedhq/dockerfilelint`、週約8.9千DL | **採用**(Dockerfileの主手段) |
+| `knip` 6.32.2 | 公式・活発 | **採用**(Nodeデッドコード) |
+| `prettier` 3.9.6 | 公式 | **採用**(Nodeフォーマット) |
+| `actionlint` 2.0.6 | 「Actionlint as wasm」(xing.com)、2022-12で更新停止 | **不採用**。本家Go版が PATH にあるときのみ使う |
+| `gitleaks` 1.0.0 | `ycjcl868/gitleaks`。説明「> custom rules」、2022-05停止、本家(`gitleaks/gitleaks` v8系・Go製)と**無関係の別物**。週約1.3万DLは誤インストールと推測 | **不採用**。npm経由では絶対に入れない |
+| `oasdiff` 0.0.1-security | 「Reserved name placeholder. No functionality.」= npm の名前予約 | **不採用**。中身が無い |
+
+後半3件は、本設計が導入しようとしている「依存の実在性」検査(§3.3)が防ぐべき事象そのものであり、原則 P-C の実例として記録する。
+
+### 8.2 未検証 — 実ツールとの結合
+
+開発環境に secretlint / dockerfilelint / knip / actionlint / hadolint / import-linter / pip-audit / deptry / vulture / oasdiff / cargo-semver-checks が**いずれも導入されていない**(原則 P-A により、許可なく導入しない)。テストは偽実行ファイルで**呼び出し契約**(引数・検出条件・SKIP/FAIL/WARNの分岐)を固定するに留まり、実ツールとの結合は導入済み環境での初回実行が最初の検証機会になる。
 
 特に確認が必要な項目:
-- gitleaks のサブコマンド構成はバージョン差が大きい(v8.19 で `detect` → `dir`/`git` に再編)。`gitleaks detect --help` の出力に `--no-git` と `--redact` の**両方が含まれること**をプローブし、無ければ SKIP する(ヘルプの終了コードだけでは不十分 — 未対応版でもヘルプ自体は成功する)
+- **secretlint の終了コードと既定ルール**: ルールセット未設定時に何も検出しない可能性がある(`@secretlint/secretlint-rule-preset-recommend` の導入が要る)。この不確実性のため、宣言(`.secretlintrc.*`)が無い場合は WARN 既定にしている
+- **gitleaks のバージョン差**: v8.19 で `detect` → `dir`/`git` に再編された。`gitleaks detect --help` の出力に `--no-git` と `--redact` の**両方が含まれること**をプローブし、無ければ SKIP する(ヘルプの終了コードだけでは不十分 — 未対応版でもヘルプ自体は成功する)
 - `npm ls --all` は `node_modules` 未インストール時に必ず失敗するため、存在確認を前置する
 - `oasdiff` の破壊的変更判定の終了コード仕様
-- `deptry` / `vulture` の誤検出率は実プロジェクトでの調整が要る可能性がある(WARN 既定にしているのはこのため)
+- `deptry` / `vulture` / `dockerfilelint` の誤検出率は実プロジェクトでの調整が要る可能性がある(WARN 既定または宣言ゲートにしているのはこのため)
 
 ## 9. 実装の分割
 
