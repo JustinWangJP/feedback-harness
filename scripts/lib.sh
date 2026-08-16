@@ -123,7 +123,11 @@ harness_is_jsonc() {
   case "$base" in
     tsconfig*.json|jsconfig*.json|devcontainer.json) return 0 ;;
   esac
-  case "$1" in
+  # 先頭に / を足してから照合する。check.sh の list_files は git ls-files 由来の
+  # リポジトリ相対パス(例: .vscode/settings.json)を返し、これは */.vscode/* に
+  # マッチしない。正規化しないと最も一般的なJSONCであるトップレベルの
+  # .vscode/settings.json が厳密なJSONとして検証され、完了をブロックする
+  case "/$1" in
     */.vscode/*) return 0 ;;
   esac
   return 1
@@ -162,8 +166,10 @@ sys.exit(bad)
 # harness_validate_yaml <file...> — YAML 構文を検証する。
 # 壊れていれば "path: 理由" を出力して非0。PyYAML 不在時は検証せず成功。
 harness_validate_yaml() {
-  harness_has_pyyaml || return 0
+  # 引数ゼロの判定を先に済ませる。検証すべきファイルが無いのに
+  # PyYAML 検出のため python3 を起動するのは無駄(フックは毎編集で走る)
   [[ $# -eq 0 ]] && return 0
+  harness_has_pyyaml || return 0
   python3 -c '
 import sys, yaml
 bad = 0

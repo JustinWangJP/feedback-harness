@@ -50,11 +50,24 @@ harness_is_jsonc "$WORK/tsconfig.json" || fail "harness_is_jsonc が tsconfig.js
 ASSERT_CHECKS=$((ASSERT_CHECKS + 1))
 if harness_is_jsonc "$WORK/good.json"; then fail "harness_is_jsonc が通常のJSONを誤判定した"; fi
 
+# check.sh の list_files は git ls-files 由来のリポジトリ相対パス(先頭に ./ も / も付かない)を
+# 返す。この形を取りこぼすと、最も一般的なJSONCであるトップレベルの .vscode/settings.json が
+# 厳密なJSONとして検証され、完了をブロックする
+ASSERT_CHECKS=$((ASSERT_CHECKS + 1))
+harness_is_jsonc ".vscode/settings.json" || fail "harness_is_jsonc がリポジトリ相対の .vscode パスを判定できない(check.sh の list_files が返す形)"
+ASSERT_CHECKS=$((ASSERT_CHECKS + 1))
+harness_is_jsonc "./.vscode/settings.json" || fail "harness_is_jsonc が ./ 始まりの .vscode パスを判定できない"
+
 # 複数ファイル一括: 1件でも壊れていれば非0
 ASSERT_CHECKS=$((ASSERT_CHECKS + 1))
 if harness_validate_json "$WORK/good.json" "$WORK/broken.json" >/dev/null 2>&1; then
   fail "複数ファイル指定で壊れたJSONを見逃した"
 fi
+
+# 出力契約: 壊れたファイルのパスと理由を stdout に出す(Task 2/3 がこれをそのまま提示する)
+ASSERT_CHECKS=$((ASSERT_CHECKS + 1))
+json_diag="$(harness_validate_json "$WORK/broken.json" 2>/dev/null)" || true
+assert_contains "$json_diag" "broken.json" "壊れたJSONの診断に対象パスが含まれる"
 
 # --- YAML(PyYAML がある環境でのみ実質検証される) ---
 if harness_has_pyyaml; then
