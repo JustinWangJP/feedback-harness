@@ -23,6 +23,8 @@ cd "$ROOT" || { echo "ERROR: ディレクトリへ移動できません: $ROOT";
 SKIP="${FEEDBACK_CHECK_SKIP:-}"
 RESULTS=()
 FAILED=0
+WARNED=0
+SOFT_STAGE=0
 STACK_FOUND=0   # マニフェストを検出したか。RESULTS の空判定とは分離する
                 # (全ステージがSKIPでも「スタック未検出」とは報告しないため)
 LOGDIR="$(mktemp -d)"
@@ -56,13 +58,31 @@ run_stage() {
     # 起動そのものに失敗(実行不可・未検出)。ユーザーのコードの問題ではない
     RESULTS+=("SKIP  $label (実行不可)")
   else
-    FAILED=1
-    RESULTS+=("FAIL  $label")
-    {
-      echo "----- FAIL: $label ($*) — 末尾40行 -----"
-      tail -n 40 "$log"
-    } >> "$LOGDIR/failures.txt"
+    if [[ "$SOFT_STAGE" == "1" ]]; then
+      # 宣言していない検査の失敗は報告に留める。完了はブロックしない
+      WARNED=1
+      RESULTS+=("WARN  $label")
+      {
+        echo "----- WARN: $label ($*) — 末尾40行 -----"
+        tail -n 40 "$log"
+      } >> "$LOGDIR/warnings.txt"
+    else
+      FAILED=1
+      RESULTS+=("FAIL  $label")
+      {
+        echo "----- FAIL: $label ($*) — 末尾40行 -----"
+        tail -n 40 "$log"
+      } >> "$LOGDIR/failures.txt"
+    fi
   fi
+}
+
+# run_stage_soft — 失敗しても完了をブロックせず WARN として記録する。
+# プロジェクトが設定で宣言していない検査(ハーネスの推測)に使う。
+run_stage_soft() {
+  SOFT_STAGE=1
+  run_stage "$@"
+  SOFT_STAGE=0
 }
 
 npm_script_exists() { # package.json に scripts.<name> があるか
@@ -84,6 +104,13 @@ list_files() { # list_files <glob> — 検査対象のファイルを1行1件で
 if [[ -f pyproject.toml || -f setup.py || -f requirements.txt ]]; then
   STACK_FOUND=1
   run_stage lint "ruff" "python: ruff" ruff check .
+  # 宣言(pyproject.toml の [tool.ruff] 系)があれば FAIL、無ければ WARN。
+  # 既存プロジェクトがフォーマッタ未使用の場合に完了不能にしないため
+  if grep -q "^\[tool\.ruff" pyproject.toml 2>/dev/null; then
+    run_stage format "ruff" "python: ruff format" ruff format --check .
+  else
+    run_stage_soft format "ruff" "python: ruff format" ruff format --check .
+  fi
   if [[ -f pyproject.toml ]] && grep -q "\[tool.mypy\]" pyproject.toml 2>/dev/null; then
     run_stage typecheck "mypy" "python: mypy" mypy .
   fi
@@ -99,6 +126,8 @@ else
   if [[ ${#PY_FILES[@]} -gt 0 ]]; then
     STACK_FOUND=1
     run_stage lint "ruff" "python: ruff" ruff check "${PY_FILES[@]}"
+    # マニフェストが無い=宣言も無いので WARN 固定
+    run_stage_soft format "ruff" "python: ruff format" ruff format --check "${PY_FILES[@]}"
   fi
 fi
 
@@ -236,6 +265,12 @@ if [[ ${#RESULTS[@]} -eq 0 ]]; then
 fi
 printf '%s\n' "${RESULTS[@]}"
 
+if [[ $WARNED -eq 1 ]]; then
+  echo
+  echo "以下は完了をブロックしませんが、確認してください:"
+  cat "$LOGDIR/warnings.txt"
+fi
+
 if [[ $FAILED -eq 1 ]]; then
   echo
   echo "以下の失敗を修正してから完了とすること:"
@@ -247,17 +282,23 @@ fi
 # 検証済みだとエージェントに誤解させる。部分SKIPも件数を添えて明示する
 PASSED=0
 SKIPPED=0
+WARNS=0
 for r in "${RESULTS[@]}"; do
   case "$r" in
     PASS*) PASSED=$((PASSED + 1)) ;;
     SKIP*) SKIPPED=$((SKIPPED + 1)) ;;
+    WARN*) WARNS=$((WARNS + 1)) ;;
   esac
 done
-if [[ $PASSED -eq 0 ]]; then
+if [[ $((PASSED + WARNS)) -eq 0 ]]; then
   echo "実行できたステージがありません(すべてSKIP)"
   exit 0
 fi
-if [[ $SKIPPED -gt 0 ]]; then
+if [[ $WARNS -gt 0 && $SKIPPED -gt 0 ]]; then
+  echo "ALL PASS (${WARNS}件WARN・${SKIPPED}件SKIP — 未検証/未対応の項目があります)"
+elif [[ $WARNS -gt 0 ]]; then
+  echo "ALL PASS (${WARNS}件WARN — 未対応の指摘があります)"
+elif [[ $SKIPPED -gt 0 ]]; then
   echo "ALL PASS (${SKIPPED}件SKIP — 未検証の項目があります)"
 else
   echo "ALL PASS"
