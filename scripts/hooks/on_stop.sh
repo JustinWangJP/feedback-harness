@@ -44,9 +44,11 @@ if OUT="$("$DIR/../check.sh" "$ROOT" 2>&1)"; then
   # 成功した時だけスタンプを更新する。失敗を記録すると、直さないまま次の
   # ターンで「変更なし」と判定され、壊れたまま完了できてしまう
   mkdir -p "$(dirname "$STAMP")" 2>/dev/null && : > "$STAMP" 2>/dev/null
+  harness_log_event "$ROOT" stop pass
   exit 0
 fi
 
+harness_log_event "$ROOT" stop fail
 echo "$OUT" >&2
 # 反復する失敗はルール/自動チェック改善の材料(失敗シグナル)。単発の失敗は記録不要
 echo "HINT: 同種の失敗がこのセッションで繰り返されている場合は、修正後に python3 \"$DIR/../feedback_log.py\" add --source hook で記録を検討すること" >&2

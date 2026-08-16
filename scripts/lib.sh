@@ -69,7 +69,10 @@ harness_tree_changed() {
   # 検出できず(消えたファイルには mtime が無い)、ビルドを壊す削除をしたまま
   # 「変更なし」と判定されてしまう。削除・作成・改名は親ディレクトリの mtime に出る。
   #
-  # 除外はVCS・依存・キャッシュ・ハーネス状態のみに絞る。dist/build/target を
+  # 除外はVCS・依存・キャッシュ・ハーネス状態のみに絞る。
+  # (.feedback には events.jsonl 等のローカル状態も含まれ、記録のたびに
+  #  フルチェックが再燃しないよう prune 対象である — test_events_log.sh が固定する)
+  # dist/build/target を
   # 一律に除外するとソースを置くプロジェクトで変更を取りこぼすため含めない
   # (検査中に書かれる生成物はスタンプより古くなるので誤検出にはならない)。
   found="$(find "$root" \
@@ -77,4 +80,35 @@ harness_tree_changed() {
        -o -name .venv -o -name venv -o -name __pycache__ -o -name '.*_cache' \) -prune -o \
     -newer "$stamp" -print -quit 2>/dev/null)" || return 0
   [[ -n "$found" ]]
+}
+
+# harness_log_event <ルート> <hook> <result> [ファイル] — フック合否を
+# .feedback/events.jsonl に1行追記する(stats/report の原料。ローカル状態で共有しない)。
+#
+# 記録がフック本体を壊してはならないため、すべての失敗は黙って無視する。
+# 無限増長を防ぐため 512KB を超えたら末尾2000行に切り詰める。
+harness_log_event() {
+  local root="$1" hook="$2" result="$3" file="${4:-}"
+  # 同一 local 文で直前の変数を参照すると未定義になる(set -u で落ちる)ため分けて宣言する
+  local dir="$root/.feedback"
+  local ev="$dir/events.jsonl"
+  mkdir -p "$dir" 2>/dev/null || return 0
+  local ts
+  local rel
+  ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)" || return 0
+  if [[ -n "$file" ]]; then
+    rel="${file#"$root"/}"
+    printf '{"ts":"%s","hook":"%s","file":"%s","result":"%s"}\n' \
+      "$ts" "$hook" "$rel" "$result" >>"$ev" 2>/dev/null || return 0
+  else
+    printf '{"ts":"%s","hook":"%s","result":"%s"}\n' \
+      "$ts" "$hook" "$result" >>"$ev" 2>/dev/null || return 0
+  fi
+  local size
+  size="$(wc -c <"$ev" 2>/dev/null | tr -d ' ')"
+  if [[ "$size" =~ ^[0-9]+$ ]] && (( size > 524288 )); then
+    tail -n 2000 "$ev" >"$ev.tmp" 2>/dev/null && mv "$ev.tmp" "$ev" 2>/dev/null \
+      || rm -f "$ev.tmp" 2>/dev/null
+  fi
+  return 0
 }

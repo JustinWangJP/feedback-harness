@@ -21,5 +21,8 @@ _workspace/
 # 時刻で「検査済み」と誤判定されうる)
 .feedback/.last-check
 
+# フック合否のイベントログ(stats用。マシン固有のノイズが混ざるため共有しない)
+.feedback/events.jsonl
+
 # OS
 .DS_Store
