@@ -179,6 +179,34 @@ if [[ ${#SH_FILES[@]} -gt 0 ]]; then
     shellcheck -x -S "$SHELLCHECK_SEVERITY" "${SH_FILES[@]}"
 fi
 
+# ---------- 横断チェック(スタック非依存) ----------
+# check_file.sh が JSON/YAML を検証できるのに check.sh 側に対応が無いと、
+# Bash 経由・外部エディタで壊された設定ファイルが完了前チェックをすり抜ける
+# (Shell ステージを追加したときと同じ非対称性)。
+# STACK_FOUND は立てない — 設定ファイルの存在は「スタックの検出」ではない。
+JSON_FILES=()
+while IFS= read -r f; do
+  [[ -n "$f" ]] && JSON_FILES+=("$f")
+done < <(list_files '*.json')
+if [[ ${#JSON_FILES[@]} -gt 0 ]]; then
+  run_stage lint "-" "config: json 構文" harness_validate_json "${JSON_FILES[@]}"
+fi
+
+YAML_FILES=()
+while IFS= read -r f; do
+  [[ -n "$f" ]] && YAML_FILES+=("$f")
+done < <(list_files '*.yaml')
+while IFS= read -r f; do
+  [[ -n "$f" ]] && YAML_FILES+=("$f")
+done < <(list_files '*.yml')
+if [[ ${#YAML_FILES[@]} -gt 0 ]]; then
+  if harness_has_pyyaml; then
+    run_stage lint "-" "config: yaml 構文" harness_validate_yaml "${YAML_FILES[@]}"
+  else
+    RESULTS+=("SKIP  config: yaml 構文 (PyYAML 未インストール)")
+  fi
+fi
+
 # ---------- 汎用フォールバック ----------
 # 再帰ガード: make check のテストが check.sh を呼び返す循環を断つ。フック実行時は
 # CLAUDE_PROJECT_DIR が子孫まで伝播し、テスト内の check.sh がルートを本リポジトリに
@@ -198,7 +226,7 @@ fi
 
 # ---------- 結果出力 ----------
 echo "=== feedback-harness check ==="
-if [[ $STACK_FOUND -eq 0 ]]; then
+if [[ $STACK_FOUND -eq 0 && ${#RESULTS[@]} -eq 0 ]]; then
   echo "検出できたスタックがありません (pyproject.toml / package.json / go.mod / Cargo.toml / pom.xml / *.sh / Makefile:check を確認)"
   exit 0
 fi
