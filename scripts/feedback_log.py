@@ -16,6 +16,8 @@ rules.md は CLAUDE.md / AGENTS.md から参照され、次回以降のセッシ
   feedback_log.py retire <出典entry-id> --reason "<退役理由>"
   feedback_log.py rules            # 現在のルール一覧を表示
   feedback_log.py stats [--since YYYY-MM-DD] [--days N]   # 初回通過率・再発候補など
+  feedback_log.py report --since <日付|yesterday> [--mark]  # 期間ダイジェスト(朝会・振り返りの議題)
+  feedback_log.py report --last [--mark]                    # 前回の振り返り以降
 
 category の例: style, architecture, testing, naming, workflow, domain
 """
@@ -59,6 +61,7 @@ LOG_DIR = ROOT / ".feedback" / "log"
 RULES = ROOT / ".feedback" / "rules.md"
 RULES_TEMPLATE = ROOT / ".feedback" / "rules.template.md"
 EVENTS_FILE = ROOT / ".feedback" / "events.jsonl"
+LAST_RETRO = ROOT / ".feedback" / ".last-retro"
 # バンドル資産は状態と違い、スクリプトに同梱されて配られる読み取り専用のファイル。
 # 導入先が rules.template.md を持たない(プラグインのみで導入した)場合の供給元。
 BUNDLED_TEMPLATE = Path(__file__).resolve().parent.parent / ".feedback" / "rules.template.md"
@@ -371,11 +374,17 @@ def find_entry(entry_id: str) -> dict:
 
 
 def set_status(target: dict, new_status: str) -> None:
+    today = datetime.date.today().isoformat()
     text = target["path"].read_text(encoding="utf-8")
-    target["path"].write_text(
-        text.replace(f"status: {target.get('status')}", f"status: {new_status}", 1),
-        encoding="utf-8",
-    )
+    text = text.replace(f"status: {target.get('status')}", f"status: {new_status}", 1)
+    if "status_changed:" in text:
+        # 1キー・上書き(report の期間集計は「最後の状態変化」を基準にする)
+        text = re.sub(r"status_changed: \d{4}-\d{2}-\d{2}", f"status_changed: {today}", text, count=1)
+    else:
+        text = text.replace(
+            f"status: {new_status}", f"status: {new_status}\nstatus_changed: {today}", 1
+        )
+    target["path"].write_text(text, encoding="utf-8")
 
 
 RULE_SOURCE_RE = re.compile(r"^(\s*<sub>出典: )(.+?)( \(.*)$")
@@ -550,6 +559,99 @@ def cmd_stats(args):
         print(f"- [{c['category']}] {', '.join(c['sources'])} ({c['date']} 昇華) ← 以降の同カテゴリ: {', '.join(c['recurrences'])}")
 
 
+def resolve_report_since(args) -> str:
+    if args.last:
+        if not LAST_RETRO.exists():
+            sys.exit("ERROR: .feedback/.last-retro がありません。--since <日付> を指定するか、初回は --mark で基点を作ってください")
+        return LAST_RETRO.read_text(encoding="utf-8").strip()
+    if not args.since:
+        sys.exit("ERROR: --since <日付|yesterday> か --last を指定してください")
+    if args.since == "yesterday":
+        return (datetime.date.today() - datetime.timedelta(days=1)).isoformat()
+    return args.since
+
+
+def cmd_report(args):
+    since = resolve_report_since(args)
+    today = datetime.date.today().isoformat()
+    print(f"# フィードバックレポート({since} 以降 {today} まで)")
+    es = entries()
+
+    print()
+    print("## 新規エントリ")
+    new = [e for e in es if (e.get("date") or "") >= since]
+    if not new:
+        print("(なし)")
+    for e in sorted(new, key=lambda e: (e.get("signal") or "unknown", e.get("category", ""))):
+        title = next((ln[2:] for ln in e["body"].splitlines() if ln.startswith("# ")), "")
+        print(f"- [{e.get('signal') or 'unknown'}/{e.get('category','-')}] {title} ({e.get('id')})")
+
+    print()
+    print("## 昇華・統合(rules.md)")
+    promoted_rules = [r for r in rule_sources() if r["date"] and r["date"] >= since]
+    if not promoted_rules:
+        print("(なし)")
+    for r in promoted_rules:
+        print(f"- [{r['category']}] 出典 {', '.join(r['sources'])} ({r['date']} 昇華)")
+
+    print()
+    print("## close・retire")
+    handled = [
+        e for e in es
+        if (e.get("status_changed") or "") >= since
+        and e.get("status") in ("closed", "retired")
+    ]
+    if not handled:
+        print("(なし)")
+    for e in sorted(handled, key=lambda e: e.get("status_changed") or ""):
+        print(f"- [{e.get('status')}] {e.get('id')} ({e.get('status_changed')})")
+
+    print()
+    print("## open 棚卸し")
+    opens = [e for e in es if e.get("status") == "open"]
+    if not opens:
+        print("(open なし)")
+    else:
+        for e in sorted(opens, key=lambda e: e.get("date") or ""):
+            print(f"- {e.get('id')} ({e.get('date', '?')}) [{e.get('signal') or 'unknown'}/{e.get('category','-')}]")
+        if len(opens) >= 3:
+            print(f"NOTE: open が{len(opens)}件 — promote/close を検討してください")
+
+    print()
+    print("## 再発候補")
+    cands = recurrence_candidates()
+    if not cands:
+        print("(なし)")
+    for c in cands:
+        print(f"- [{c['category']}] {', '.join(c['sources'])} ({c['date']} 昇華) ← 以降の同カテゴリ: {', '.join(c['recurrences'])}")
+
+    print()
+    print("## 数字")
+    evs = load_events()
+    if not evs:
+        print("(イベント記録が無い)")
+    else:
+        cur = post_edit_first_pass(evs, since, "9999-12-31")
+        if not cur[1]:
+            print("(期間内の post_edit イベントが無い)")
+        else:
+            line = f"PostToolUse 初回通過率: 当期間 {cur[0]}/{cur[1]}"
+            # 前期間は「今回と同じ長さだけ遡った区間」。傾向の向きだけを見るための粗い比較
+            span = abs((datetime.date.fromisoformat(since) - datetime.date.today()).days) or 1
+            prev_to = (datetime.date.fromisoformat(since) - datetime.timedelta(days=1)).isoformat()
+            prev_from = (datetime.date.fromisoformat(since) - datetime.timedelta(days=span)).isoformat()
+            prev = post_edit_first_pass(evs, prev_from, prev_to)
+            if prev[1]:
+                line += f"(前期間 {prev[0]}/{prev[1]})"
+            print(line)
+
+    if args.mark:
+        LAST_RETRO.parent.mkdir(parents=True, exist_ok=True)
+        LAST_RETRO.write_text(today, encoding="utf-8")
+        print()
+        print(f"(基点を更新しました: .feedback/.last-retro = {today})")
+
+
 def cmd_rules(_args):
     print(RULES.read_text(encoding="utf-8") if RULES.exists() else "(rules.md はまだありません)")
 
@@ -602,6 +704,12 @@ def main():
     stt.add_argument("--since", help="イベント集計の開始日 YYYY-MM-DD(既定: --days 日前から)")
     stt.add_argument("--days", type=int, default=30, help="イベント集計の期間日数(既定30)")
     stt.set_defaults(func=cmd_stats)
+
+    rp = sub.add_parser("report", help="期間ダイジェスト(朝会・振り返りの議題)")
+    rp.add_argument("--since", default="", help="開始日 YYYY-MM-DD または yesterday")
+    rp.add_argument("--last", action="store_true", help=".last-retro 基点で期間を切る")
+    rp.add_argument("--mark", action="store_true", help="実行後に .last-retro を今日で更新する")
+    rp.set_defaults(func=cmd_report)
 
     r = sub.add_parser("rules", help="ルール一覧を表示")
     r.set_defaults(func=cmd_rules)

@@ -24,5 +24,8 @@ _workspace/
 # フック合否のイベントログ(stats用。マシン固有のノイズが混ざるため共有しない)
 .feedback/events.jsonl
 
+# レポートの基点スタンプ(振り返り実施日。個人の運用リズムなので共有しない)
+.feedback/.last-retro
+
 # OS
 .DS_Store
