@@ -112,3 +112,74 @@ harness_log_event() {
   fi
   return 0
 }
+
+# harness_is_jsonc <path> — コメント付きJSON(JSONC)が慣例のファイルか。
+#
+# tsconfig.json 等はコメント付きで配布されるのが通例で、標準の JSON パーサでは
+# 原理的に検証できない。検証対象に含めると正当なファイルで完了をブロックする。
+harness_is_jsonc() {
+  local base
+  base="$(basename "$1")"
+  case "$base" in
+    tsconfig*.json|jsconfig*.json|devcontainer.json) return 0 ;;
+  esac
+  case "$1" in
+    */.vscode/*) return 0 ;;
+  esac
+  return 1
+}
+
+# harness_has_pyyaml — YAML 検証が可能か。
+# PyYAML は標準ライブラリではない。未導入を「ファイルの問題」として報告しない。
+harness_has_pyyaml() {
+  has python3 && python3 -c "import yaml" >/dev/null 2>&1
+}
+
+# harness_validate_json <file...> — JSON 構文を検証する。
+# 壊れていれば "path: 理由" を出力して非0。python3 不在時は検証せず成功。
+harness_validate_json() {
+  has python3 || return 0
+  local targets=()
+  local f
+  for f in "$@"; do
+    harness_is_jsonc "$f" || targets+=("$f")
+  done
+  [[ ${#targets[@]} -eq 0 ]] && return 0
+  python3 -c '
+import json, sys
+bad = 0
+for p in sys.argv[1:]:
+    try:
+        with open(p, encoding="utf-8") as fh:
+            json.load(fh)
+    except Exception as e:
+        print(f"{p}: {e}")
+        bad = 1
+sys.exit(bad)
+' "${targets[@]}"
+}
+
+# harness_validate_yaml <file...> — YAML 構文を検証する。
+# 壊れていれば "path: 理由" を出力して非0。PyYAML 不在時は検証せず成功。
+harness_validate_yaml() {
+  harness_has_pyyaml || return 0
+  [[ $# -eq 0 ]] && return 0
+  python3 -c '
+import sys, yaml
+bad = 0
+for p in sys.argv[1:]:
+    try:
+        with open(p, encoding="utf-8") as fh:
+            # safe_load は単一文書しか読まない。--- 区切りの複数文書(k8sマニフェスト等)を
+            # 構文エラーとして誤検出しないため safe_load_all を使う
+            list(yaml.safe_load_all(fh))
+    except yaml.constructor.ConstructorError:
+        # 未知のカスタムタグ(CloudFormation の !Ref 等)は構文エラーではない。
+        # ここで検証したいのは構文であってスキーマではない
+        pass
+    except Exception as e:
+        print(f"{p}: {e}")
+        bad = 1
+sys.exit(bad)
+' "$@"
+}
