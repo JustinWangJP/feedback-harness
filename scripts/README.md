@@ -46,6 +46,7 @@ FEEDBACK_CHECK_SKIP="test build" bash scripts/check.sh   # 特定ステージを
 
 - **検出対象**: Python(`pyproject.toml`/`setup.py`/`requirements.txt`、無くても `*.py` があれば `ruff` のみ実行) / Node(`package.json`) / Go(`go.mod`) / Rust(`Cargo.toml`) / Java(`pom.xml`/`build.gradle`) / Shell(`*.sh`) / 汎用(`Makefile` の `check` ターゲット)
 - **ステージスキップ**: 環境変数 `FEEDBACK_CHECK_SKIP` に空白区切りでステージ名(`lint`/`typecheck`/`test`/`build`)を指定すると該当ステージを `SKIP` にする
+- **make再帰ガード**: `make check` 実行時のみ `FEEDBACK_CHECK_RECURSION_GUARD` を子孫に伝え、その中で起動された check.sh は make フォールバックを `SKIP` する。フック実行時に `CLAUDE_PROJECT_DIR` が伝播し、テスト内の check.sh がルートを本リポジトリに解決し直して make check がテストを再実行する無限再帰(Stop フックの timeout を食い潰す)を断つためのもの。**通常の make 実行・直接ステージ(lint/test/build)には影響しない**
 - **SKIPの理由**: 出力に必ず理由が付く — `(<tool> 未インストール)` / `(<tool> 起動不可 — 環境を確認してください)` / `(実行不可)` / `(FEEDBACK_CHECK_SKIP)`、およびスタック単位でまとめた `(<stack>: 全ステージ …)`。**ツールが無い・壊れているだけの状態を `FAIL` にしない**(ユーザーのコードの問題ではないため)
 - **検査対象ファイル**: Gitリポジトリなら `git ls-files --cached --others --exclude-standard`。**未コミットの新規ファイルも検査し**、`.gitignore` 済みは除外する
 - **ネットワークを使わない**: Node の typecheck フォールバックは `npx --no-install tsc`。`typescript` が未導入なら取得を試みず `SKIP` にする

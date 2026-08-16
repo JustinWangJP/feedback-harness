@@ -180,9 +180,20 @@ if [[ ${#SH_FILES[@]} -gt 0 ]]; then
 fi
 
 # ---------- 汎用フォールバック ----------
+# 再帰ガード: make check のテストが check.sh を呼び返す循環を断つ。フック実行時は
+# CLAUDE_PROJECT_DIR が子孫まで伝播し、テスト内の check.sh がルートを本リポジトリに
+# 解決し直して make check がテストを再実行する — この無限再帰で Stop フックの
+# timeout を食い潰していた。ガードが拾うのは make フォールバックだけ。直接ステージ
+# (lint/test/build)はこの経路を通らないため必ず実行され、検証を抜けたまま完了しない。
 if [[ -f Makefile ]] && grep -qE "^check:" Makefile; then
   STACK_FOUND=1
-  run_stage test "make" "make check" make check
+  if [[ -n "${FEEDBACK_CHECK_RECURSION_GUARD:-}" ]]; then
+    RESULTS+=("SKIP  make check (再帰ガード — check.sh 起因のmake実行内のため)")
+  else
+    # env 経由で make とその子孫にだけ伝える。check.sh 全体へ export すると
+    # 直接ステージの子孫(テスト内で別プロジェクトを検証する等)まで誤スキップする
+    run_stage test "make" "make check" env FEEDBACK_CHECK_RECURSION_GUARD=1 make check
+  fi
 fi
 
 # ---------- 結果出力 ----------
