@@ -38,6 +38,7 @@ scripts/
   rules.template.md # rules.md のシード (導入時・再生成時に使う雛形)
   log/              # 生のフィードバックエントリ (frontmatter付きMarkdown)
   .last-check       # Stopフックの検査スタンプ (mtime比較用のローカル状態・gitignore対象)
+  events.jsonl      # フック合否のイベントログ (stats用のローカル状態・gitignore対象)
 tests/              # bash テスト (make check → check.sh から自動実行される)
 docs/
   pointer_claude.md # 導入先の CLAUDE.md へ追記する断片
@@ -102,6 +103,7 @@ cd /path/to/your-project && bash scripts/check.sh   # スタック検出の確�
 [記録]  人間の指摘・修正 / 有効だった進め方 / 反復する check 失敗 / 完了前の自省
           → feedback_log.py add   (capture-feedback スキル / AGENTS.md規約)
              失敗系は根因を --detail に1行: 文脈欠落 | 指示欠陥 | モデル限界
+             signal(--signal)も添える: 省略時は根因と category から推論される
                 ↓
 [open]  ├─ 昇華を待たず、次の作業の開始時に参照される (apply-feedback スキル)
         └─ feedback-curator が根因を見て昇華先を選ぶ (feedback-loop スキル)
@@ -114,8 +116,12 @@ cd /path/to/your-project && bash scripts/check.sh   # スタック検出の確�
 [反映]  .feedback/rules.md → 次セッションの作業開始前に適用
                 ↓
 [棚卸]  定期審査 (feedback-loop Phase 4) → 陳腐化したルールは retire で撤去
+[測定]  feedback_log.py stats            — 初回通過率・再発候補(要求時のみ・テキスト出力)
+[報告]  feedback_log.py report --last → 朝会/振り返りの5分議題(実施後に --mark で基点更新)
 ```
 
 記録は promote を待たずにその時点から次の作業に効く。「溜めてから一括で昇華する」設計にすると、昇華までの間に同じ指摘が再発する。
+
+測定は Flywheel の「衡量变化」に相当する。ダッシュボードは作らない — `stats` は要求時のテキスト出力で、数字は `report` の「数字」セクションにだけ現れる。`events.jsonl`(フック合否)と `.last-retro`(振り返り基点)はマシンローカルの状態であり、git で共有しない。
 
 昇華先を rules.md に一本化しないのは、信号の種類ごとに直すべき制品が違うため — 知識の欠落はプライミング文書(CLAUDE.md)で埋め、機械的に検出できる失敗は散文のルールより lint・テストにした方が強い護欄になる(参考: [Feedback Flywheel](docs/references/fowler-feedback-flywheel-translation.md))。

@@ -30,3 +30,4 @@
 | 2026-08-12 | Stopフックの過剰実行を解消 | lib.sh / on_stop.sh / tests / README | 変更が無いターンでもフルチェックが走り、導入先の重いビルドが毎回動く問題。2周目の無意味な再実行も除去 |
 | 2026-08-12 | 全体検証と不具合修正 | lib.sh / feedback-loop / init.sh / test_skill_paths / plugin.json | 削除を検出できず検査が飛ぶ穴、プラグイン導入時に解決できない `scripts/init.sh` 参照、導入先での検査スタンプ追跡、バージョン据え置き |
 | 2026-08-16 | Stopフックの無限再帰を修正 | check.sh / tests/test_recursion_guard.sh / README | フック由来の `CLAUDE_PROJECT_DIR` が子孫に伝播し、make check → テスト → check.sh が循環して timeout 300 を食い潰す問題を、make再帰ガードで断った |
+| 2026-08-16 | Flywheel Step 4(信号種・測定・報告) | feedback_log.py / hooks / lib.sh / rules.template / skills / tests | 信号4分類のデータ化、フック合否からの初回通過率測定、朝会・振り返り議題の report、再発候補の機械化 |
