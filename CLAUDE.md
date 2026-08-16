@@ -13,6 +13,9 @@
 
 **自動チェック:** Hooks(`.claude/settings.json`)が編集直後のファイルlint(PostToolUse)と完了前のフルチェック(Stop)を自動実行する。失敗内容は自動でフィードバックされるため、修正してから完了とすること。
 
+**スクリプト設計メモ:**
+- フック実行時に export された環境変数(CLAUDE_PROJECT_DIR 等)は make・テスト経由の子孫プロセスすべてに伝播する。スクリプトが環境変数でルート解決する場合、ネスト呼び出しでの再帰を前提にガードを入れること(FEEDBACK_CHECK_RECURSION_GUARD が参考実装 — 2026-08-16 の無限再帰修正由来)。
+
 **変更履歴:**
 | 日付 | 変更内容 | 対象 | 理由 |
 |------|----------|------|------|
@@ -26,3 +29,4 @@
 | 2026-08-12 | Feedback Flywheel 照合 Step 3 | feedback_log.py / skills/feedback-loop / tests / README | retire でルールの退役出口を追加、棚卸しPhase(定期審査)で陳腐化を負債化させない |
 | 2026-08-12 | Stopフックの過剰実行を解消 | lib.sh / on_stop.sh / tests / README | 変更が無いターンでもフルチェックが走り、導入先の重いビルドが毎回動く問題。2周目の無意味な再実行も除去 |
 | 2026-08-12 | 全体検証と不具合修正 | lib.sh / feedback-loop / init.sh / test_skill_paths / plugin.json | 削除を検出できず検査が飛ぶ穴、プラグイン導入時に解決できない `scripts/init.sh` 参照、導入先での検査スタンプ追跡、バージョン据え置き |
+| 2026-08-16 | Stopフックの無限再帰を修正 | check.sh / tests/test_recursion_guard.sh / README | フック由来の `CLAUDE_PROJECT_DIR` が子孫に伝播し、make check → テスト → check.sh が循環して timeout 300 を食い潰す問題を、make再帰ガードで断った |
