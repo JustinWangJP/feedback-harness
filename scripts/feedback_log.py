@@ -15,11 +15,13 @@ rules.md は CLAUDE.md / AGENTS.md から参照され、次回以降のセッシ
   feedback_log.py close <entry-id> [--reason "<昇華しない理由>"]
   feedback_log.py retire <出典entry-id> --reason "<退役理由>"
   feedback_log.py rules            # 現在のルール一覧を表示
+  feedback_log.py stats [--since YYYY-MM-DD] [--days N]   # 初回通過率・再発候補など
 
 category の例: style, architecture, testing, naming, workflow, domain
 """
 import argparse
 import datetime
+import json
 import os
 import re
 import subprocess
@@ -56,6 +58,7 @@ ROOT = project_root()
 LOG_DIR = ROOT / ".feedback" / "log"
 RULES = ROOT / ".feedback" / "rules.md"
 RULES_TEMPLATE = ROOT / ".feedback" / "rules.template.md"
+EVENTS_FILE = ROOT / ".feedback" / "events.jsonl"
 # バンドル資産は状態と違い、スクリプトに同梱されて配られる読み取り専用のファイル。
 # 導入先が rules.template.md を持たない(プラグインのみで導入した)場合の供給元。
 BUNDLED_TEMPLATE = Path(__file__).resolve().parent.parent / ".feedback" / "rules.template.md"
@@ -105,6 +108,103 @@ def infer_signal(category: str, detail: str) -> str:
     if category == "workflow":
         return "workflow"
     return "instruction"
+
+
+ROOT_CAUSE_RE = re.compile(r"根因:\s*(文脈欠落|指示欠陥|モデル限界)")
+RULE_DATE_RE = re.compile(r"\((\d{4}-\d{2}-\d{2}) 昇華\)")
+
+
+def load_events() -> list:
+    """events.jsonl を読む。不正な JSON 行は読み飛ばす(壊れた記録が集計を殺さない)。"""
+    if not EVENTS_FILE.exists():
+        return []
+    out = []
+    for line in EVENTS_FILE.read_text(encoding="utf-8").splitlines():
+        try:
+            ev = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(ev, dict) and "ts" in ev and "result" in ev:
+            out.append(ev)
+    return out
+
+
+def resolve_since(args) -> str:
+    """--since(優先)または --days(既定30)から集計開始日を返す。"""
+    if getattr(args, "since", None):
+        return args.since
+    days = getattr(args, "days", 30)
+    return (datetime.date.today() - datetime.timedelta(days=days)).isoformat()
+
+
+def post_edit_first_pass(evs, date_from: str, date_to: str):
+    """期間内の post_edit イベントから(初回pass数, ファイル数, ファイル別fail数)を返す。
+
+    「初回」= 期間内でそのファイルに最初に現れたイベント。期間を跨ぐ再登場は
+    リセットされる(日次/指定期間のスナップショットとして測る)。
+    """
+    first, fails = {}, {}
+    for e in evs:
+        if e.get("hook") != "post_edit":
+            continue
+        d = str(e.get("ts", ""))[:10]
+        if not (date_from <= d <= date_to):
+            continue
+        f = str(e.get("file", ""))
+        if e.get("result") == "fail":
+            fails[f] = fails.get(f, 0) + 1
+        if f not in first:
+            first[f] = e.get("result") == "pass"
+    return (sum(first.values()), len(first), fails)
+
+
+def root_cause(entry: dict) -> str:
+    """エントリ本文の「根因:」行から根因を返す(無ければ "-")。"""
+    m = ROOT_CAUSE_RE.search(entry.get("body", ""))
+    return m.group(1) if m else "-"
+
+
+def rule_sources() -> list:
+    """rules.md の各ルールから {sources, category, date} を返す(date は昇華日)。"""
+    if not RULES.exists():
+        return []
+    out = []
+    lines = RULES.read_text(encoding="utf-8").splitlines()
+    for i, ln in enumerate(lines):
+        m = RULE_SOURCE_RE.match(ln)
+        if not m or i == 0:
+            continue
+        cat_m = re.match(r"\s*- \*\*\[([^\]]+)\]\*\*", lines[i - 1])
+        dm = RULE_DATE_RE.search(ln)
+        out.append({
+            "sources": [s.strip() for s in m.group(2).split(",")],
+            "category": cat_m.group(1) if cat_m else "-",
+            "date": dm.group(1) if dm else "",
+        })
+    return out
+
+
+def recurrence_candidates() -> list:
+    """昇華日以降に同カテゴリの失敗系エントリが出たルールを列挙する。
+
+    curator 原則5(再発=ルールが効いていない兆候)と棚卸しPhase4手順1の
+    手動検索を機械化したもの。成功系(instruction/workflow)の再記録は
+    再発ではないため対象外。
+    """
+    out = []
+    for rule in rule_sources():
+        if not rule["date"]:
+            continue
+        hits = [
+            e for e in entries()
+            if e.get("category") == rule["category"]
+            and (e.get("date") or "") > rule["date"]
+            and e.get("id") not in rule["sources"]
+            and (e.get("signal") or "unknown") in ("failure", "context", "unknown")
+        ]
+        if hits:
+            out.append({**rule, "recurrences": [h.get("id", "?") for h in hits]})
+    return out
 
 
 def parse_entry(path: Path) -> dict:
@@ -387,6 +487,69 @@ def cmd_retire(args):
     print(f"retired: rules.md からルールを撤去し、出典エントリ({', '.join(updated) if updated else 'なし'})を retired に更新")
 
 
+def cmd_stats(args):
+    since = resolve_since(args)
+    print(f"# feedback stats(イベント集計: {since} 以降 / ログ集計: 全期間)")
+    evs = load_events()
+
+    print()
+    print("[フック]")
+    if not evs:
+        print("(イベント記録が無い — hooks が .feedback/events.jsonl に蓄積する)")
+    else:
+        npass, total, fails = post_edit_first_pass(evs, since, "9999-12-31")
+        if total:
+            print(f"PostToolUse 初回通過率: {npass}/{total} ({round(npass * 100 / total)}%)")
+            print(f"1ファイルあたりの平均再チェック回数: {sum(fails.values()) / total:.2f}")
+        else:
+            print("(期間内の post_edit イベントが無い)")
+        stops = [e for e in evs if e.get("hook") == "stop" and str(e.get("ts", ""))[:10] >= since]
+        if stops:
+            spass = sum(1 for e in stops if e.get("result") == "pass")
+            print(f"Stop フルチェック初回通過率: {spass}/{len(stops)} ({round(spass * 100 / len(stops))}%)")
+        top = sorted(fails.items(), key=lambda kv: (-kv[1], kv[0]))[:5]
+        if top:
+            print("失敗上位: " + ", ".join(f"{f}({n})" for f, n in top))
+
+    print()
+    print("[ログ]")
+    es = entries()
+    sig = {s: 0 for s in SIGNALS}
+    sig["unknown"] = 0
+    for e in es:
+        sig[e.get("signal") or "unknown"] += 1
+    print("signal: " + " / ".join(f"{k} {v}" for k, v in sig.items()))
+    cats, causes, srcs, st = {}, {}, {}, {}
+    for e in es:
+        cats[e.get("category", "-")] = cats.get(e.get("category", "-"), 0) + 1
+        rc = root_cause(e)
+        causes[rc] = causes.get(rc, 0) + 1
+        srcs[e.get("source", "-")] = srcs.get(e.get("source", "-"), 0) + 1
+        st[e.get("status", "-")] = st.get(e.get("status", "-"), 0) + 1
+    print("category: " + " / ".join(f"{k} {v}" for k, v in sorted(cats.items())))
+    print("根因: " + " / ".join(f"{k} {v}" for k, v in sorted(causes.items())))
+    print("source: " + " / ".join(f"{k} {v}" for k, v in sorted(srcs.items())))
+    print("status: " + " / ".join(f"{k} {v}" for k, v in sorted(st.items())))
+    opens = [e for e in es if e.get("status") == "open"]
+    if opens:
+        oldest = min(opens, key=lambda e: e.get("date") or "9999-99-99")
+        if oldest.get("date"):
+            days = (datetime.date.today() - datetime.date.fromisoformat(oldest["date"])).days
+            print(f"open: {len(opens)}件(最古 {oldest.get('id')} から {days}日経過)")
+        else:
+            print(f"open: {len(opens)}件")
+        if len(opens) >= 3:
+            print("NOTE: openが3件以上 — promote/close を検討してください")
+
+    print()
+    print("[再発候補] 昇華後に同カテゴリの失敗系エントリが再記録されたルール")
+    cands = recurrence_candidates()
+    if not cands:
+        print("(なし)")
+    for c in cands:
+        print(f"- [{c['category']}] {', '.join(c['sources'])} ({c['date']} 昇華) ← 以降の同カテゴリ: {', '.join(c['recurrences'])}")
+
+
 def cmd_rules(_args):
     print(RULES.read_text(encoding="utf-8") if RULES.exists() else "(rules.md はまだありません)")
 
@@ -434,6 +597,11 @@ def main():
     rt.add_argument("entry_id", help="退役するルールの出典に含まれるentry-id")
     rt.add_argument("--reason", required=True, help="退役の理由(出典エントリに追記され監査痕跡になる)")
     rt.set_defaults(func=cmd_retire)
+
+    stt = sub.add_parser("stats", help="フック合否とログの集計(初回通過率・再発候補)")
+    stt.add_argument("--since", help="イベント集計の開始日 YYYY-MM-DD(既定: --days 日前から)")
+    stt.add_argument("--days", type=int, default=30, help="イベント集計の期間日数(既定30)")
+    stt.set_defaults(func=cmd_stats)
 
     r = sub.add_parser("rules", help="ルール一覧を表示")
     r.set_defaults(func=cmd_rules)
