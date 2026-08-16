@@ -32,6 +32,9 @@ cat > "$WORK/project/.feedback/events.jsonl" <<'EOF'
 {"ts":"2026-08-13T04:00:00Z","hook":"stop","result":"pass"}
 {"ts":"2026-08-13T05:00:00Z","hook":"stop","result":"fail"}
 {"ts":"2026-08-13T06:00:00Z","hook":"stop","result":"pass"}
+{"ts":"2026-08-13T07:00:00Z","hook":"stop","result":"warn","check":"python: ruff format"}
+{"ts":"2026-08-13T08:00:00Z","hook":"stop","result":"warn","check":"python: ruff format"}
+{"ts":"2026-08-13T09:00:00Z","hook":"stop","result":"warn","check":"config: yaml 構文"}
 this is not json
 EOF
 
@@ -92,6 +95,8 @@ OUT="$(fb stats --since 2026-08-10)"
 assert_contains "$OUT" "PostToolUse 初回通過率: 1/3 (33%)" "初回通過率(a=fail,b=pass,c=fail → 1/3)"
 assert_contains "$OUT" "1ファイルあたりの平均再チェック回数: 1.00" "平均再チェック回数(fail3/3ファイル)"
 assert_contains "$OUT" "Stop フルチェック初回通過率: 2/3 (67%)" "stop の pass 率"
+# WARN イベントは stop の通過率の分母に混ぜない(warn は「テストの失敗」ではない)
+assert_contains "$OUT" "頻出WARN: python: ruff format(2), config: yaml 構文(1)" "頻出WARNが件数降順で出る"
 assert_contains "$OUT" "失敗上位: src/c.py(2), src/a.py(1)" "失敗上位(件数降順・ファイル名昇順)"
 
 # --- 期間指定(a.py の2026-08-10を除外 → b,c の2ファイル) ---

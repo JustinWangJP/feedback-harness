@@ -512,11 +512,26 @@ def cmd_stats(args):
             print(f"1ファイルあたりの平均再チェック回数: {sum(fails.values()) / total:.2f}")
         else:
             print("(期間内の post_edit イベントが無い)")
-        stops = [e for e in evs if e.get("hook") == "stop" and str(e.get("ts", ""))[:10] >= since]
+        # warn は「テストの失敗」ではなく指摘の一種なので通過率の分母から除く
+        stops = [
+            e for e in evs
+            if e.get("hook") == "stop"
+            and e.get("result") in ("pass", "fail")
+            and str(e.get("ts", ""))[:10] >= since
+        ]
         if stops:
             spass = sum(1 for e in stops if e.get("result") == "pass")
             print(f"Stop フルチェック初回通過率: {spass}/{len(stops)} ({round(spass * 100 / len(stops))}%)")
         top = sorted(fails.items(), key=lambda kv: (-kv[1], kv[0]))[:5]
+        warns = {}
+        for e in evs:
+            if e.get("result") != "warn" or str(e.get("ts", ""))[:10] < since:
+                continue
+            k = e.get("check", "-")
+            warns[k] = warns.get(k, 0) + 1
+        if warns:
+            top_warn = sorted(warns.items(), key=lambda kv: (-kv[1], kv[0]))[:5]
+            print("頻出WARN: " + ", ".join(f"{k}({v})" for k, v in top_warn))
         if top:
             print("失敗上位: " + ", ".join(f"{f}({n})" for f, n in top))
 
@@ -626,8 +641,21 @@ def cmd_report(args):
         print(f"- [{c['category']}] {', '.join(c['sources'])} ({c['date']} 昇華) ← 以降の同カテゴリ: {', '.join(c['recurrences'])}")
 
     print()
-    print("## 数字")
+    print("## WARN(ブロックしないが溜まっている指摘)")
     evs = load_events()
+    warns = {}
+    for e in evs:
+        if e.get("result") != "warn" or str(e.get("ts", ""))[:10] < since:
+            continue
+        k = e.get("check", "-")
+        warns[k] = warns.get(k, 0) + 1
+    if not warns:
+        print("(なし)")
+    for k, v in sorted(warns.items(), key=lambda kv: (-kv[1], kv[0])):
+        print(f"- {k}: {v}件")
+
+    print()
+    print("## 数字")
     if not evs:
         print("(イベント記録が無い)")
     else:

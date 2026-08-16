@@ -73,6 +73,7 @@ cat > "$WORK/project/.feedback/events.jsonl" <<'EOF'
 {"ts":"2026-08-10T01:00:00Z","hook":"post_edit","file":"src/a.py","result":"fail"}
 {"ts":"2026-08-10T01:01:00Z","hook":"post_edit","file":"src/a.py","result":"pass"}
 {"ts":"2026-08-14T02:00:00Z","hook":"post_edit","file":"src/b.py","result":"pass"}
+{"ts":"2026-08-14T03:00:00Z","hook":"stop","result":"warn","check":"python: ruff format"}
 EOF
 
 OUT="$(fb report --since 2026-07-10)"
@@ -92,6 +93,8 @@ assert_contains "$OUT" "以降の同カテゴリ: 20260715-000001" "再発候補
 assert_not_contains "$OUT" "出典 20260701-000001" "期間前の昇華は載らない"
 # 数字セクション: events があるので初回通過率が出る
 assert_contains "$OUT" "PostToolUse 初回通過率:" "イベント数字が出る"
+assert_contains "$OUT" "## WARN" "WARN セクションがある"
+assert_contains "$OUT" "python: ruff format: 1件" "WARN の件数が出る"
 
 # --- status_changed が CLI 経由で書かれる ---
 CID="$(fb add --category style --summary "close確認用" --detail "" | extract_id)"
