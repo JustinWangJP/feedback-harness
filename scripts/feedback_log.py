@@ -67,7 +67,11 @@ DEFAULT_RULES_HEADER = """# フィードバック由来ルール
 エージェントはセッション開始時に必ずこのファイルを読むこと。
 各ルールは実際の人間の指摘から一般化されたもの(`scripts/feedback_log.py promote` で追加される)。
 
-<!-- ここから下に promote されたルールが追記される -->
+<!-- rules:failure -->
+### 守るべき制約(失敗由来)
+
+<!-- rules:success -->
+### 再現すべき措辞・進め方(成功由来)
 """
 
 
@@ -196,16 +200,58 @@ def cmd_search(args):
         print("ヒットなし")
 
 
+FAILURE_MARKER = "<!-- rules:failure -->"
+SUCCESS_MARKER = "<!-- rules:success -->"
+
+FAILURE_SECTION = FAILURE_MARKER + "\n### 守るべき制約(失敗由来)\n"
+SUCCESS_SECTION = SUCCESS_MARKER + "\n### 再現すべき措辞・進め方(成功由来)\n"
+
+
+def ensure_sections(text: str) -> str:
+    """rules.md に2セクション構造が無ければ挿入する(遅延マイグレーション)。
+
+    既存の promote 済みルールはすべて失敗セクションに入れる。成功パターンの
+    捕獲(--signal)が始まる以前のルールはすべて失敗由来のためである。
+    """
+    if FAILURE_MARKER in text and SUCCESS_MARKER in text:
+        return text
+    lines = text.rstrip("\n").splitlines()
+    first_rule = next(
+        (i for i, ln in enumerate(lines) if ln.startswith("- **[")), len(lines)
+    )
+    out = "\n".join(lines[:first_rule]).rstrip() + "\n\n"
+    out += FAILURE_SECTION + "\n"
+    if first_rule < len(lines):
+        out += "\n".join(lines[first_rule:]).rstrip() + "\n\n"
+    out += SUCCESS_SECTION
+    return out
+
+
 def cmd_promote(args):
     target = find_entry(args.entry_id)
     RULES.parent.mkdir(parents=True, exist_ok=True)
     if not RULES.exists():
-        RULES.write_text(rules_seed(), encoding="utf-8")
+        RULES.write_text(ensure_sections(rules_seed()), encoding="utf-8")
+    text = ensure_sections(RULES.read_text(encoding="utf-8"))
     date = datetime.date.today().isoformat()
-    with RULES.open("a", encoding="utf-8") as f:
-        f.write(f"\n- **[{target.get('category','-')}]** {args.rule}  \n  <sub>出典: {target.get('id')} ({date} 昇華)</sub>\n")
-    text = target["path"].read_text(encoding="utf-8").replace("status: open", "status: promoted", 1)
-    target["path"].write_text(text, encoding="utf-8")
+    rule_line = f"- **[{target.get('category','-')}]** {args.rule}  "
+    source_line = f"  <sub>出典: {target.get('id')} ({date} 昇華)</sub>"
+    # instruction/workflow(成功系)は成功セクションの末尾へ、それ以外
+    # (failure/context/unknown)は失敗セクションの末尾(=成功マーカーの直前)へ
+    if (target.get("signal") or "unknown") in ("instruction", "workflow"):
+        RULES.write_text(
+            text.rstrip("\n") + "\n\n" + rule_line + "\n" + source_line + "\n",
+            encoding="utf-8",
+        )
+    else:
+        lines = text.splitlines()
+        j = lines.index(SUCCESS_MARKER)
+        ins = [rule_line, source_line]
+        if lines[j - 1].strip():
+            ins.insert(0, "")
+        lines[j:j] = ins
+        RULES.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    set_status(target, "promoted")
     print(f"promoted: rules.md に追加し {target.get('id')} を promoted に更新")
 
 
