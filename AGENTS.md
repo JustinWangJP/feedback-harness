@@ -52,10 +52,11 @@ FAIL(exit 1)がある状態で「完了しました」と報告してはなら�
 
 ```bash
 python3 scripts/feedback_log.py add --category <style|architecture|testing|naming|workflow|domain> \
-  --summary "<1文要約>" --detail "<文脈>" --source human
+  --summary "<1文要約>" --detail "<文脈>" --source human \
+  [--signal <context|instruction|workflow|failure>]
 ```
 
-再発しうる指摘は記録し、そのタスク限りの指示は記録しない。迷ったら記録する。次回も再現したい成功パターン(有効だった進め方・措辞)も同様に記録する。失敗系は根因(`文脈欠落` / `指示欠陥` / `モデル限界`)を `--detail` に1行含める。
+再発しうる指摘は記録し、そのタスク限りの指示は記録しない。迷ったら記録する。次回も再現したい成功パターン(有効だった進め方・措辞)も同様に記録する。失敗系は根因(`文脈欠落` / `指示欠陥` / `モデル限界`)を `--detail` に1行含める。`--signal` は省略時に根因とカテゴリから推論される(知識の欠落=`context`、失敗=`failure`、効いた措辞=`instruction`、効いた進め方=`workflow`)。
 
 ## 5. ルールと指示が矛盾したら
 

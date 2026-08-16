@@ -93,7 +93,7 @@ python3 scripts/feedback_log.py <サブコマンド> [引数]
 
 | サブコマンド | 引数 | 説明 |
 |-------------|------|------|
-| `add` | `--category <cat>` `--summary "<要約>"` `[--detail "<詳細>"]` `[--source human\|hook\|agent]` | エントリを記録。`open` が3件以上で promote 候補の通知を出す |
+| `add` | `--category <cat>` `--summary "<要約>"` `[--detail "<詳細>"]` `[--source human\|hook\|agent]` `[--signal <context\|instruction\|workflow\|failure>]` | エントリを記録。`open` が3件以上で promote 候補の通知を出す。`--signal` は信号種(省略時は detail/category から推論。昇華先ルーティングの軸) |
 | `list` | `[--status open\|promoted\|closed\|retired\|all]` `[--category <cat>]` | エントリ一覧(既定は `open`) |
 | `search` | `<キーワード>` | エントリの全文検索 |
 | `promote` | `<entry-id>` `--rule "<一般化ルール1行>"` | `rules.md` に**新規ルールを追記**し、対象エントリを `promoted` に更新 |
@@ -101,6 +101,8 @@ python3 scripts/feedback_log.py <サブコマンド> [引数]
 | `close` | `<entry-id>` `[--reason "<理由>"]` | 昇華せず `closed` に更新。一般化できない一回限りの指摘用 |
 | `retire` | `<出典entry-id>` `--reason "<退役理由>"` | 昇華済みルールを **rules.md から撤去**し、出典エントリ(merge済みの分も含む)を `retired` に更新。棚卸しで人間が裁定した後に使う |
 | `rules` | (なし) | 現在の `rules.md` を表示 |
+| `stats` | `[--since <日付>]` `[--days <N>]` | フック合否とログの集計。PostToolUse 初回通過率・平均再チェック回数・Stop 初回通過率・失敗上位・signal/根因別件数・**再発候補**(昇華後に同カテゴリの失敗系が再記録されたルール) |
+| `report` | `--since <日付\|yesterday>` または `--last`、`[--mark]` | 期間ダイジェスト(新規エントリ/昇華/close・retire/open 棚卸し/再発候補/数字)。`--last` は `.feedback/.last-retro` 基点。`--mark` で実施後に基点を更新 |
 
 - **category**: `style` / `architecture` / `testing` / `naming` / `workflow` / `domain`
 - **entry-id**: 記録時刻 `%Y%m%d-%H%M%S`。同一秒に複数記録した場合は `-2`, `-3` … を付けて一意にする(重複すると `promote` が先頭の1件しか掴めず、残りが昇華不能になるため)
@@ -110,10 +112,12 @@ python3 scripts/feedback_log.py <サブコマンド> [引数]
 Claude Code の Hooks から起動される薄いラッパ。判定・実行は `check_file.sh` / `check.sh` に委譲し、フック固有の処理(stdin JSONのパース、exit code 2 によるエージェントへの差し戻し、無限ループ防止)だけを担う。
 
 - **`post_edit.sh`** (PostToolUse: `Edit|Write`): stdin の `tool_input.file_path` を取り出し `check_file.sh` でチェック。問題あれば **`exit 2` + stderr** で Claude にフィードバックし、自己修正ループを起動する。
+  - 合否(成功・失敗の両方)を `.feedback/events.jsonl` に1行追記する(`stats` の初回通過率の原料。ローカル状態で共有しない)
 - **`on_stop.sh`** (Stop): 応答完了前に `check.sh` を実行。失敗すれば **`exit 2`** で完了をブロックし失敗内容を返す。`stop_hook_active` が `true`(2周目以降)のときは何もせず `exit 0` し、**無限ループを防止**する。
   - **検査の実行条件**: 前回の成功検査(`.feedback/.last-check` のmtime)以降に作業ツリーが変わっているときだけ走る。無条件だと、ファイルを1つも編集しない質問応答のターンでも導入先のフルビルド(`mvn verify` / `npm run build` 等)が毎回動く。判定は mtime なので Edit/Write だけでなく Bash 経由の編集も拾い、判定できないときは必ず「実行する」側に倒す。
   - スタンプを進めるのは**検査が成功したときだけ**。失敗を記録すると、直さないまま次のターンで「変更なし」と判定され壊れたまま完了できてしまう。
   - 2周目で `check.sh` を再実行しないのは、`exit 0` で返す出力がエージェントに渡らず、重い導入先では最も待たされる場面で時間だけを失うため。
+  - `check.sh` を実行したときだけ合否を `events.jsonl` に記録する(スキップ時は無記録)
 
 ---
 

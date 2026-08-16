@@ -9,7 +9,7 @@ description: 蓄積された過去のフィードバックルールを現在の�
 
 ## 手順
 
-1. `.feedback/rules.md` を読む(なければ `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/feedback_log.py" rules` で確認)
+1. `.feedback/rules.md` を読む(なければ `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/feedback_log.py" rules` で確認)。rules.md は2セクション構造 — **守るべき制約(失敗由来)** は守るべき制約、**再現すべき措辞・進め方(成功由来)** は次回再現すべき正例として読む
 2. 未昇華のopenエントリも確認する: `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/feedback_log.py" list --status open` — 記録は昇華を待たずその瞬間から次の作業に活かす(promote待ちで死蔵させない)
 3. 今回の作業に関係するルール・エントリを特定する — カテゴリ(`style`/`architecture`/`testing`/`naming`/`workflow`/`domain`)が作業タイプと一致するもの
 4. 該当ルールを作業方針に組み込んでから実装を開始する。openエントリとルールが食い違う場合はrules.mdを優先する(openは未検証の生の指摘)

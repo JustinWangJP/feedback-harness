@@ -11,18 +11,20 @@ description: 人間のレビュー指摘・修正・ダメ出しをフィード�
 
 1. 指摘から「何が問題とされ、どう直すべきとされたか」を1文の要約に整理する。成功パターンなら「何がうまくいき、次回どう再現するか」を要約する
 2. 失敗系の指摘は根因を1行判定し `--detail` に含める: `根因: 文脈欠落`(AIが知らなかった情報がある)/ `根因: 指示欠陥`(指示・スキルが要求していなかった)/ `根因: モデル限界`(能力の境界)。根因は昇華先を決める材料になる
-3. カテゴリを選ぶ: `style` / `architecture` / `testing` / `naming` / `workflow` / `domain`
-4. 記録する:
+3. signal を決める(省略時は CLI が detail/category から推論する): 失敗系は `failure`、知識の欠落(`根因: 文脈欠落`)は `context`、再現したい措辞は `instruction`、効いた進め方・タスク分解は `workflow`。`--signal <種>` で明示できる
+4. カテゴリを選ぶ: `style` / `architecture` / `testing` / `naming` / `workflow` / `domain`
+5. 記録する:
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/feedback_log.py" add \
   --category <cat> \
   --summary "<1文要約>" \
   --detail "<文脈: どのファイル/作業で、何を指摘されたか>" \
-  --source human
+  --source human \
+  [--signal <context|instruction|workflow|failure>]
 ```
 
-5. 出力に「openエントリが3件以上」の通知が出たら、feedback-curator エージェント(`agents/feedback-curator.md`)による昇華をユーザーに提案する
+6. 出力に「openエントリが3件以上」の通知が出たら、feedback-curator エージェント(`agents/feedback-curator.md`)による昇華をユーザーに提案する
 
 昇華の出口は3つある(curator が選ぶ): 新しい原則なら `promote`、既存ルールと同じ原則の再発なら `merge --into`、一般化できない一回限りの指摘なら `close --reason`。
 
