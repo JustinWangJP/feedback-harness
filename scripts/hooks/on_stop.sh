@@ -13,6 +13,17 @@ DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=../lib.sh
 . "$DIR/../lib.sh"
 
+# check.sh の出力から WARN 行を拾って記録する。成功時の出力はエージェントに
+# 渡らないため、記録しないと WARN は誰にも届かない
+log_warns() { # log_warns <check.shの出力>
+  local line label
+  while IFS= read -r line; do
+    case "$line" in
+      "WARN  "*) label="${line#WARN  }"; harness_log_warn "$ROOT" "$label" ;;
+    esac
+  done <<< "$1"
+}
+
 INPUT="$(cat)"
 ACTIVE="$(printf '%s' "$INPUT" | python3 -c '
 import json,sys
@@ -44,10 +55,12 @@ if OUT="$("$DIR/../check.sh" "$ROOT" 2>&1)"; then
   # 成功した時だけスタンプを更新する。失敗を記録すると、直さないまま次の
   # ターンで「変更なし」と判定され、壊れたまま完了できてしまう
   mkdir -p "$(dirname "$STAMP")" 2>/dev/null && : > "$STAMP" 2>/dev/null
+  log_warns "$OUT"
   harness_log_event "$ROOT" stop pass
   exit 0
 fi
 
+log_warns "$OUT"
 harness_log_event "$ROOT" stop fail
 echo "$OUT" >&2
 # 反復する失敗はルール/自動チェック改善の材料(失敗シグナル)。単発の失敗は記録不要

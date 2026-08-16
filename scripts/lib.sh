@@ -113,6 +113,23 @@ harness_log_event() {
   return 0
 }
 
+# harness_log_warn <ルート> <ラベル> — WARN を events.jsonl に1行追記する。
+#
+# Stop フックは成功時(exit 0)の出力をエージェントへ渡さないため、WARN は
+# そのままでは誰にも届かない。記録して stats/report に載せることで、
+# 反復する WARN が「設定を入れて FAIL に昇格させるか」の判断材料になる。
+harness_log_warn() {
+  local root="$1" label="$2"
+  local dir="$root/.feedback"
+  local ev="$dir/events.jsonl"
+  mkdir -p "$dir" 2>/dev/null || return 0
+  local ts
+  ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)" || return 0
+  printf '{"ts":"%s","hook":"stop","result":"warn","check":"%s"}\n' \
+    "$ts" "$label" >>"$ev" 2>/dev/null || return 0
+  return 0
+}
+
 # harness_is_jsonc <path> — コメント付きJSON(JSONC)が慣例のファイルか。
 #
 # tsconfig.json 等はコメント付きで配布されるのが通例で、標準の JSON パーサでは
