@@ -28,8 +28,10 @@ scripts/
 
 1. **出力はエージェント向け**: 成功は1行、失敗は末尾要約のみ。長大なログ全文は吐かない(トークンを食うため)。
 2. **寛容な検出**: ツール未インストールのステージは `SKIP` で、失敗扱いにしない。ハーネス側でスタックを強要しない。
-3. **スタック非依存**: プロジェクト種別をマニフェスト(`pyproject.toml`/`package.json`/…)から自動検出。設定不要。
-4. **ステートレス**: スクリプト自身は状態を持たない。すべての状態は `.feedback/`(ファイル)に置かれ、Gitで追跡・共有される。
+3. **宣言の有無で強度を決める**: プロジェクトが設定ファイルで宣言した検査は `FAIL`(完了をブロック)、ハーネスが推測で走らせる検査は `WARN`(報告のみ・exit 0)。宣言していない検査で完了不能にすると、導入初日の既存プロジェクトが作業できなくなる。WARN は `events.jsonl` に記録され `stats` / `report` の「頻出WARN」に現れる。
+4. **ツールを自動インストールしない**: 未導入は `SKIP` と理由表示に留める。インストールは環境を変える行為であり、導入の判断はユーザーが行う。
+5. **スタック非依存**: プロジェクト種別をマニフェスト(`pyproject.toml`/`package.json`/…)から自動検出。設定不要。
+6. **ステートレス**: スクリプト自身は状態を持たない。すべての状態は `.feedback/`(ファイル)に置かれ、Gitで追跡・共有される。
 
 ---
 
@@ -42,10 +44,11 @@ bash scripts/check.sh [プロジェクトルート]          # 省略時はカ�
 FEEDBACK_CHECK_SKIP="test build" bash scripts/check.sh   # 特定ステージをスキップ
 ```
 
-**動作:** 検出したスタックごとに `lint` / `typecheck` / `test` / `build` を走らせ、`PASS`/`FAIL`/`SKIP` の要約を出す。
+**動作:** 検出したスタックごとに `lint` / `typecheck` / `test` / `build` / `format` を走らせ、スタック非依存の横断チェック(設定ファイルの構文)も実行して、`PASS`/`FAIL`/`WARN`/`SKIP` の要約を出す。
 
 - **検出対象**: Python(`pyproject.toml`/`setup.py`/`requirements.txt`、無くても `*.py` があれば `ruff` のみ実行) / Node(`package.json`) / Go(`go.mod`) / Rust(`Cargo.toml`) / Java(`pom.xml`/`build.gradle`) / Shell(`*.sh`) / 汎用(`Makefile` の `check` ターゲット)
-- **ステージスキップ**: 環境変数 `FEEDBACK_CHECK_SKIP` に空白区切りでステージ名(`lint`/`typecheck`/`test`/`build`)を指定すると該当ステージを `SKIP` にする
+- **横断チェック(スタック非依存)**: `*.json` / `*.yaml` / `*.yml` の構文検証。`tsconfig*.json` / `jsconfig*.json` / `devcontainer.json` / `.vscode/` 配下はコメント付き(JSONC)が慣例のため対象外。YAML は複数文書(`---` 区切り)に対応し、未知のカスタムタグ(`!Ref` 等)は構文エラーとして扱わない。PyYAML 未導入なら YAML は理由付き `SKIP`
+- **ステージスキップ**: `FEEDBACK_CHECK_SKIP` に指定できるステージ名は `lint` / `typecheck` / `test` / `build` / `format`
 - **make再帰ガード**: `make check` 実行時のみ `FEEDBACK_CHECK_RECURSION_GUARD` を子孫に伝え、その中で起動された check.sh は make フォールバックを `SKIP` する。フック実行時に `CLAUDE_PROJECT_DIR` が伝播し、テスト内の check.sh がルートを本リポジトリに解決し直して make check がテストを再実行する無限再帰(Stop フックの timeout を食い潰す)を断つためのもの。**通常の make 実行・直接ステージ(lint/test/build)には影響しない**
 - **SKIPの理由**: 出力に必ず理由が付く — `(<tool> 未インストール)` / `(<tool> 起動不可 — 環境を確認してください)` / `(実行不可)` / `(FEEDBACK_CHECK_SKIP)`、およびスタック単位でまとめた `(<stack>: 全ステージ …)`。**ツールが無い・壊れているだけの状態を `FAIL` にしない**(ユーザーのコードの問題ではないため)
 - **検査対象ファイル**: Gitリポジトリなら `git ls-files --cached --others --exclude-standard`。**未コミットの新規ファイルも検査し**、`.gitignore` 済みは除外する
@@ -62,6 +65,7 @@ FEEDBACK_CHECK_SKIP="test build" bash scripts/check.sh   # 特定ステージを
   | `検出できたスタックがありません …` | 対応マニフェスト・対象ファイルなし |
 
   全SKIPや部分SKIPを無印の `ALL PASS` と偽らない。
+- **WARN**: 完了をブロックしない指摘。exit code は `0` のまま。最終行に件数が付く(`ALL PASS (1件WARN — 未対応の指摘があります)`)。現在の産出源は `python: ruff format`(`pyproject.toml` に `[tool.ruff` の宣言があれば `FAIL` に切り替わる)
 - **exit code**: `0` = FAILなし(全SKIP・スタック未検出を含む) / `1` = FAILあり / `2` = ルートディレクトリ不正。**エージェントは最終行の文字列ではなく exit code で判定すること**
 
 ### `check_file.sh` — 単一ファイル高速チェック(編集直後用)
