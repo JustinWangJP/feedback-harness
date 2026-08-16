@@ -6,7 +6,8 @@
 rules.md は CLAUDE.md / AGENTS.md から参照され、次回以降のセッションに反映される。
 
 使い方:
-  feedback_log.py add --category <cat> --summary "<要約>" [--detail "<詳細>"] [--source human|hook|agent]
+  feedback_log.py add --category <cat> --summary "<要約>" [--detail "<詳細>"] [--source human|hook|agent] \
+      [--signal context|instruction|workflow|failure]
   feedback_log.py list [--status open|promoted|closed|all] [--category <cat>]
   feedback_log.py search <キーワード>
   feedback_log.py promote <entry-id> --rule "<一般化したルール1行>"
@@ -83,6 +84,25 @@ def slugify(text: str, limit: int = 40) -> str:
     return s[:limit] or "entry"
 
 
+SIGNALS = ["context", "instruction", "workflow", "failure"]
+
+
+def infer_signal(category: str, detail: str) -> str:
+    """--signal 省略時に detail/category から信号種を推論する。
+
+    根因は failure のサブルーティング材料であり、signal はそれを置き換えない。
+    「根因: 文脈欠落」の失敗は直す先がプライミング文書(context)なのに対し、
+    「指示欠陥/モデル限界」は失敗信号(failure)として扱う。
+    """
+    if "根因" in detail and "文脈欠落" in detail:
+        return "context"
+    if "根因" in detail and ("指示欠陥" in detail or "モデル限界" in detail):
+        return "failure"
+    if category == "workflow":
+        return "workflow"
+    return "instruction"
+
+
 def parse_entry(path: Path) -> dict:
     meta, body, in_fm = {}, [], False
     for line in path.read_text(encoding="utf-8").splitlines():
@@ -127,6 +147,7 @@ def cmd_add(args):
     LOG_DIR.mkdir(parents=True, exist_ok=True)
     now = datetime.datetime.now()
     entry_id = next_entry_id(now)
+    signal = args.signal or infer_signal(args.category, args.detail)
     path = LOG_DIR / f"{entry_id}-{slugify(args.summary)}.md"
     path.write_text(
         f"""---
@@ -134,6 +155,7 @@ id: {entry_id}
 date: {now.strftime('%Y-%m-%d')}
 source: {args.source}
 category: {args.category}
+signal: {signal}
 status: open
 ---
 
@@ -155,6 +177,8 @@ def cmd_list(args):
         if args.status != "all" and e.get("status") != args.status:
             continue
         if args.category and e.get("category") != args.category:
+            continue
+        if args.signal and (e.get("signal") or "unknown") != args.signal:
             continue
         found = True
         title = next((line[2:] for line in e["body"].splitlines() if line.startswith("# ")), "")
@@ -330,11 +354,14 @@ def main():
     a.add_argument("--summary", required=True)
     a.add_argument("--detail", default="")
     a.add_argument("--source", default="human", choices=["human", "hook", "agent"])
+    a.add_argument("--signal", choices=SIGNALS,
+                   help="信号種(省略時は detail/category から推論)")
     a.set_defaults(func=cmd_add)
 
     li = sub.add_parser("list", help="エントリ一覧")
     li.add_argument("--status", default="open", choices=["open", "promoted", "closed", "retired", "all"])
     li.add_argument("--category")
+    li.add_argument("--signal", choices=SIGNALS + ["unknown"])
     li.set_defaults(func=cmd_list)
 
     s = sub.add_parser("search", help="キーワード検索")
