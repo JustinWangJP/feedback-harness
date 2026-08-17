@@ -226,6 +226,30 @@ assert_eq "0" "$RC" "node_modules 不在で完了をブロックしない"
 assert_contains "$OUT" "SKIP  node: npm ls" "node_modules 不在は理由付きSKIP"
 rm -f "$FAKEBIN/npm" "$FAKEBIN/node"
 
+# --- pnpm では ls --all を走らせない(npm 固有の構文のため) ---
+# 偽 pnpm は ls --all を usage error(exit 1)で返す(本物の pnpm と同じ挙動)。
+# ガードが無ければこのテストは FAIL する = 健全なプロジェクトの誤ブロックを防ぐ
+P19="$(new_project dep_pnpm)"
+printf '{"name":"t","version":"1.0.0","private":true}\n' > "$P19/package.json"
+printf 'lockfileVersion: 9.0\n' > "$P19/pnpm-lock.yaml"
+mkdir -p "$P19/node_modules"
+# 偽 node は -e(package.json の scripts 判定)で失敗する = スクリプト未定義の実プロジェクトと同じ。
+# 全て exit 0 の偽だと npm_script_exists が常に真になり、存在しない lint/test スクリプトまで走ってしまう
+{ echo '#!/usr/bin/env bash'
+  echo 'case "$1" in --version) exit 0 ;; esac'
+  echo 'exit 1'
+} > "$FAKEBIN/node"
+chmod +x "$FAKEBIN/node"
+{ echo '#!/usr/bin/env bash'
+  echo 'case "$1" in --version) exit 0 ;; esac'
+  echo 'exit 1'   # ls --all を含む任意のサブコマンドで usage error
+} > "$FAKEBIN/pnpm"
+chmod +x "$FAKEBIN/pnpm"
+OUT="$(PATH="$FAKEBIN:$PATH" bash "$CHECK" "$P19" 2>&1)"; RC=$?
+assert_eq "0" "$RC" "pnpm プロジェクトで usage error による誤FAILをしない"
+assert_contains "$OUT" "SKIP  node: npm ls (pnpm は ls --all 非対応)" "pnpm は理由付きSKIPになる"
+rm -f "$FAKEBIN/pnpm" "$FAKEBIN/node"
+
 # --- Go: go.sum があれば go mod verify ---
 P18="$(new_project dep_go)"
 printf 'module t\n\ngo 1.21\n' > "$P18/go.mod"

@@ -170,11 +170,16 @@ if [[ -f package.json ]]; then
     npm_script_exists build && run_stage build "$PM" "node: $PM run build" "$PM" run build
     # 依存の実在性・整合性(ネットワーク不使用)。宣言と実体のずれ・欠損を
     # 検出する — AIが存在しないパッケージ名を書く欠陥はここで捕まる。
-    # node_modules が無いのは「未インストール」であって欠陥ではないので SKIP
-    if [[ -d node_modules ]]; then
-      run_stage lint "$PM" "node: npm ls" "$PM" ls --all
-    else
+    # node_modules が無いのは「未インストール」であって欠陥ではないので SKIP。
+    # さらに `ls --all` は npm 固有の構文で、pnpm には --all が無く Yarn Berry には
+    # ls 自体が無い。他PMで走らせると健全なプロジェクトが usage error で FAIL する
+    # ため、npm のときだけ実行する
+    if [[ ! -d node_modules ]]; then
       RESULTS+=("SKIP  node: npm ls (node_modules 未インストール)")
+    elif [[ "$PM" != "npm" ]]; then
+      RESULTS+=("SKIP  node: npm ls ($PM は ls --all 非対応)")
+    else
+      run_stage lint "npm" "node: npm ls" npm ls --all
     fi
   fi
 fi
