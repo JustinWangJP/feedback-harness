@@ -13,6 +13,7 @@ PyYAML に依存させると「設定が黙って効かない」環境が生ま�
 """
 
 import re
+import sys
 
 
 class ConfigError(Exception):
@@ -152,3 +153,205 @@ def parse_yaml(text, path):
     if pending is not None:
         pending[1][pending[2]] = None
     return root
+
+
+# ---------- スキーマ ----------
+
+STAGES = ["lint", "typecheck", "test", "build", "format", "security", "docs", "contract"]
+STACKS = ["python", "node", "go", "rust", "java", "shell"]
+SEVERITIES = ["fail", "warn", "skip"]
+SCHEMA_VERSION = 1
+
+# 検査ID -> (スタック/群, ステージ)。
+# 表示ラベルは ID に使えない — Node のラベルは "node: $PM run lint" のように
+# パッケージマネージャで変動するため。スタック/群は check.<stack> の解決に、
+# ステージは check.skip 等の解決に使う
+CHECKS = {
+    "ruff": ("python", "lint"),
+    "ruff-format": ("python", "format"),
+    "mypy": ("python", "typecheck"),
+    "pytest": ("python", "test"),
+    "deptry": ("python", "lint"),
+    "vulture": ("python", "lint"),
+    "import-linter": ("python", "lint"),
+    "node-lint": ("node", "lint"),
+    "node-typecheck": ("node", "typecheck"),
+    "tsc": ("node", "typecheck"),
+    "node-test": ("node", "test"),
+    "node-test-coverage": ("node", "test"),
+    "node-build": ("node", "build"),
+    "npm-ls": ("node", "lint"),
+    "prettier": ("node", "format"),
+    "knip": ("node", "lint"),
+    "go-vet": ("go", "lint"),
+    "go-build": ("go", "build"),
+    "go-test": ("go", "test"),
+    "go-mod-verify": ("go", "lint"),
+    "gofmt": ("go", "format"),
+    "clippy": ("rust", "lint"),
+    "cargo-check": ("rust", "build"),
+    "cargo-test": ("rust", "test"),
+    "cargo-metadata": ("rust", "lint"),
+    "cargo-fmt": ("rust", "format"),
+    "cargo-semver-checks": ("rust", "contract"),
+    "mvn": ("java", "test"),
+    "gradle": ("java", "test"),
+    "bash-syntax": ("shell", "lint"),
+    "shellcheck": ("shell", "lint"),
+    "json-syntax": ("config", "lint"),
+    "yaml-syntax": ("config", "lint"),
+    "md-links": ("docs", "docs"),
+    "secretlint": ("security", "security"),
+    "gitleaks": ("security", "security"),
+    "actionlint": ("ci", "lint"),
+    "dockerfilelint": ("docker", "lint"),
+    "hadolint": ("docker", "lint"),
+    "oasdiff": ("contract", "contract"),
+    "make-check": ("make", "test"),
+}
+
+# 検査固有パラメータ: 検査ID -> キー -> (型, 既定値, 許容値 or None)
+CHECK_PARAMS = {
+    "shellcheck": {
+        "min_severity": ("enum", "warning", ["style", "info", "warning", "error"])
+    },
+    "vulture": {"min_confidence": ("int", 80, None)},
+    "oasdiff": {"base": ("str", "main", None)},
+}
+
+# セクション -> キー -> (型, 既定値, 許容値 or None)
+SECTIONS = {
+    "check": {
+        "skip": ("stages", [], None),
+        "fail_on": ("stages", [], None),
+        "warn_on": ("stages", [], None),
+        "exclude": ("strlist", [], None),
+        "log_tail_lines": ("int", 40, None),
+    },
+    "audit": {
+        "interval_days": ("int", 7, None),
+        "npm_audit_level": ("enum", "high", ["low", "moderate", "high", "critical"]),
+    },
+    "feedback": {"open_threshold": ("int", 3, None)},
+}
+
+# スタック層で使えるキー(全体層の一部)
+STACK_KEYS = ["skip", "fail_on", "warn_on"]
+
+
+def _check_type(kind, value, allowed, where, path):
+    if kind == "int":
+        if not isinstance(value, int) or isinstance(value, bool):
+            raise ConfigError(f"{path}: {where} は整数で指定してください(実際: {value!r})")
+    elif kind == "str":
+        if not isinstance(value, str):
+            raise ConfigError(f"{path}: {where} は文字列で指定してください(実際: {value!r})")
+    elif kind == "enum":
+        if value not in allowed:
+            raise ConfigError(
+                f"{path}: {where} に指定できるのは {' / '.join(allowed)} です(実際: {value!r})"
+            )
+    elif kind in ("stages", "strlist"):
+        if not isinstance(value, list):
+            raise ConfigError(f"{path}: {where} はリストで指定してください(実際: {value!r})")
+        for item in value:
+            if not isinstance(item, str):
+                raise ConfigError(f"{path}: {where} の要素は文字列です(実際: {item!r})")
+            if kind == "stages" and item not in STAGES:
+                raise ConfigError(
+                    f"{path}: {where} の {item!r} は未知のステージです。"
+                    f"使えるのは {' / '.join(STAGES)}"
+                )
+
+
+def _unknown(where, key, known, path):
+    raise ConfigError(
+        f"{path}: {where} に未知のキー {key!r} があります。使えるのは {' / '.join(sorted(known))}"
+    )
+
+
+def validate(cfg, path):
+    """パース済みの dict をスキーマで検証する。未知キー・型不一致・列挙外はエラー。
+
+    打ち間違いを黙って無視すると「書いたのに効かない」状態になるため、
+    既知の集合に無いキーは必ず落とす。
+    """
+    if cfg is None:
+        return {}
+    if not isinstance(cfg, dict):
+        raise ConfigError(f"{path}: トップレベルはマップである必要があります")
+
+    version = cfg.get("version", SCHEMA_VERSION)
+    if not isinstance(version, int) or version > SCHEMA_VERSION:
+        raise ConfigError(
+            f"{path}: version {version!r} は未対応です(このハーネスは {SCHEMA_VERSION} まで)"
+        )
+
+    top_known = set(SECTIONS) | {"version", "checks"}
+    for key in cfg:
+        if key not in top_known:
+            _unknown("トップレベル", key, top_known, path)
+
+    for section, keys in SECTIONS.items():
+        body = cfg.get(section) or {}
+        if not isinstance(body, dict):
+            raise ConfigError(f"{path}: {section} はマップである必要があります")
+        known = set(keys) | (set(STACKS) if section == "check" else set())
+        for key, value in body.items():
+            if key in STACKS and section == "check":
+                if not isinstance(value, dict):
+                    raise ConfigError(f"{path}: check.{key} はマップである必要があります")
+                for skey, sval in value.items():
+                    if skey not in STACK_KEYS:
+                        _unknown(f"check.{key}", skey, STACK_KEYS, path)
+                    kind, _, allowed = keys[skey]
+                    _check_type(kind, sval, allowed, f"check.{key}.{skey}", path)
+                continue
+            if key not in keys:
+                _unknown(section, key, known, path)
+            kind, _, allowed = keys[key]
+            _check_type(kind, value, allowed, f"{section}.{key}", path)
+
+    checks = cfg.get("checks") or {}
+    if not isinstance(checks, dict):
+        raise ConfigError(f"{path}: checks はマップである必要があります")
+    for cid, body in checks.items():
+        if cid not in CHECKS:
+            raise ConfigError(
+                f"{path}: {cid!r} は未知の検査IDです。"
+                "`bash scripts/check.sh --list-checks` で一覧を確認してください"
+            )
+        if not isinstance(body, dict):
+            raise ConfigError(f"{path}: checks.{cid} はマップである必要があります")
+        params = CHECK_PARAMS.get(cid, {})
+        known = set(params) | {"severity"}
+        for key, value in body.items():
+            if key == "severity":
+                _check_type("enum", value, SEVERITIES, f"checks.{cid}.severity", path)
+                continue
+            if key not in params:
+                _unknown(f"checks.{cid}", key, known, path)
+            kind, _, allowed = params[key]
+            _check_type(kind, value, allowed, f"checks.{cid}.{key}", path)
+
+    return cfg
+
+
+def _cmd_keys():
+    """検査IDと既定値を出力する。雛形・ガイド・check.sh とのドリフト検出に使う。"""
+    for cid in sorted(CHECKS):
+        stack, stage = CHECKS[cid]
+        print(f"check\t{cid}\t{stack}\t{stage}")
+    for section, keys in sorted(SECTIONS.items()):
+        for key, (kind, default, _) in sorted(keys.items()):
+            print(f"key\t{section}.{key}\t{kind}\t{default}")
+    for cid, params in sorted(CHECK_PARAMS.items()):
+        for key, (kind, default, _) in sorted(params.items()):
+            print(f"param\tchecks.{cid}.{key}\t{kind}\t{default}")
+
+
+if __name__ == "__main__":
+    if "--keys" in sys.argv:
+        _cmd_keys()
+        sys.exit(0)
+    sys.exit("usage: harness_config.py --keys")

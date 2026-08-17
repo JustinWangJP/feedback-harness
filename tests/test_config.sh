@@ -8,6 +8,7 @@ set -u
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$HERE/assert.sh"
 REPO="$(cd "$HERE/.." && pwd)"
+CFG="$REPO/scripts/harness_config.py"
 
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
@@ -60,5 +61,57 @@ OUT="$(printf 'a:\n\tb: 1' > "$WORK/t.yaml"; python3 -c '
 import sys; sys.path.insert(0, sys.argv[1]); import harness_config as hc
 hc.parse_yaml(open(sys.argv[2]).read(), sys.argv[2])' "$REPO/scripts" "$WORK/t.yaml" 2>&1)"
 assert_contains "$OUT" "タブ" "タブインデントを拒否する"
+
+# --- スキーマ検証 ---
+# 検証は parse の後段。打ち間違いを黙って無視しない契約を固定する
+val() { printf '%s' "$1" > "$WORK/v.yaml"; python3 -c '
+import json, sys
+sys.path.insert(0, sys.argv[1])
+import harness_config as hc
+p = sys.argv[2]
+print(json.dumps(hc.validate(hc.parse_yaml(open(p).read(), p), p), sort_keys=True))
+' "$REPO/scripts" "$WORK/v.yaml" 2>&1; }
+
+OUT="$(val 'check:
+  shelcheck_severity: warning')"
+assert_contains "$OUT" "未知のキー" "打ち間違いのキーを拒否する"
+assert_contains "$OUT" "shelcheck_severity" "問題のキー名を出す"
+
+OUT="$(val 'check:
+  skip: [lnit]')"
+assert_contains "$OUT" "lnit" "未知のステージ名を拒否する"
+
+OUT="$(val 'checks:
+  vultrue:
+    severity: skip')"
+assert_contains "$OUT" "vultrue" "未知の検査IDを拒否する"
+
+OUT="$(val 'checks:
+  vulture:
+    severity: hard')"
+assert_contains "$OUT" "hard" "未知の severity を拒否する"
+
+OUT="$(val 'audit:
+  interval_days: seven')"
+assert_contains "$OUT" "整数" "型不一致を拒否する"
+
+OUT="$(val 'version: 2')"
+assert_contains "$OUT" "version" "対応外のスキーマ版を拒否する"
+
+OUT="$(val 'check:
+  golang:
+    skip: [test]')"
+assert_contains "$OUT" "golang" "未知のスタック名を拒否する"
+
+# 正しい設定は通る
+assert_eq "0" "$(val 'check:
+  skip: [test]
+checks:
+  vulture:
+    severity: skip' >/dev/null 2>&1; echo $?)" "妥当な設定は検証を通る"
+
+# 検査IDの一覧が取れる(check.sh との突き合わせに使う)
+assert_contains "$(python3 "$CFG" --keys)" "vulture" "--keys が検査IDを出す"
+assert_contains "$(python3 "$CFG" --keys)" "ruff-format" "--keys がハイフン付きIDを出す"
 
 assert_summary
