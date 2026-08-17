@@ -307,6 +307,24 @@ assert_eq "1" "$RC" "gofmt は宣言が無くても未整形を FAIL にする"
 assert_contains "$OUT" "FAIL  go: gofmt" "gofmt の FAIL が記録される"
 rm -f "$FAKEBIN/go" "$FAKEBIN/gofmt"
 
+# --- アーキ制約: import-linter(設定がある時だけ実行) ---
+P24="$(new_project arch)"
+printf '[importlinter]\nroot_package = t\n' > "$P24/.importlinter"
+printf '[project]\nname = "t"\n' > "$P24/pyproject.toml"
+printf 'x = 1\n' > "$P24/mod.py"
+make_fake lint-imports 1
+OUT="$(PATH="$FAKEBIN:$PATH" bash "$CHECK" "$P24" 2>&1)"; RC=$?
+assert_eq "1" "$RC" "層の制約違反は exit 1"
+assert_contains "$OUT" "FAIL  python: import-linter" "FAILとして記録される"
+
+# 設定が無ければステージ自体を出さない
+P25="$(new_project arch_none)"
+printf '[project]\nname = "t"\n' > "$P25/pyproject.toml"
+printf 'x = 1\n' > "$P25/mod.py"
+OUT="$(PATH="$FAKEBIN:$PATH" bash "$CHECK" "$P25" 2>&1)"
+assert_not_contains "$OUT" "python: import-linter" "設定が無ければステージを出さない"
+rm -f "$FAKEBIN/lint-imports"
+
 # --- Go: go.sum があれば go mod verify ---
 P18="$(new_project dep_go)"
 printf 'module t\n\ngo 1.21\n' > "$P18/go.mod"

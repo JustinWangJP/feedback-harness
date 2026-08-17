@@ -142,6 +142,18 @@ if [[ -f pyproject.toml || -f setup.py || -f requirements.txt ]]; then
       run_stage_soft lint "vulture" "python: vulture" vulture . --min-confidence 80
     fi
   fi
+
+  # 層の制約(アーキテクチャ)。設定を書いた=意図的に制約を宣言したという
+  # ことなので、誤検出は原理的に起きない。mypy と同じ「設定がある時だけ」パターン
+  if [[ -f .importlinter ]] \
+     || grep -q "^\[importlinter\]" setup.cfg 2>/dev/null \
+     || grep -q "^\[tool\.importlinter" pyproject.toml 2>/dev/null; then
+    if has lint-imports; then
+      run_stage lint "-" "python: import-linter" lint-imports
+    else
+      RESULTS+=("SKIP  python: import-linter (import-linter 未インストール)")
+    fi
+  fi
 else
   # マニフェストが無くても .py があれば lint はできる(check_file.sh と対称)
   PY_FILES=()
