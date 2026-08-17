@@ -26,8 +26,11 @@ echo "導入先: $DEST"
 
 # scripts/ — Codex 等がリポジトリ相対で叩くための実体
 mkdir -p "$DEST/scripts"
+# audit.sh も配る。scripts/README.md が使い方を載せ、feedback_log.py の stats/report が
+# 「bash scripts/audit.sh の実行を推奨」と案内するため、欠けると案内先が存在しなくなる
 cp "$SRC/scripts/check.sh" "$SRC/scripts/check_file.sh" "$SRC/scripts/lib.sh" \
-   "$SRC/scripts/feedback_log.py" "$SRC/scripts/README.md" "$DEST/scripts/"
+   "$SRC/scripts/audit.sh" "$SRC/scripts/feedback_log.py" "$SRC/scripts/README.md" \
+   "$DEST/scripts/"
 # 755(+x ではなく明示指定)。シェルスクリプトの実行には読み取り権限が必要で、
 # 導入元が 711 の場合に +x だと所有者以外が実行できない権限のまま複製される
 chmod 755 "$DEST/scripts/"*.sh "$DEST/scripts/feedback_log.py"
