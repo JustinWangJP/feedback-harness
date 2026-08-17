@@ -334,7 +334,7 @@ FAIL  config: .feedback/config.yaml
 | `docs/configuration.md` | **新規**。設定ガイド |
 | `README.md` / `scripts/README.md` | 設定ファイルの節と、環境変数表への優先順位の追記 |
 | `tests/test_config.sh` | **新規** |
-| `.claude-plugin/plugin.json` | 0.4.0 → 0.5.0 |
+| `.claude-plugin/plugin.json` | **変更しない(0.4.0 のまま)**。main は 0.3.0 で 0.4.0 はまだ公開されていないため、設定ファイルも同じ 0.4.0 リリースに含める。公開前の中間の版を刻まないのは P1〜P3 と同じ扱い |
 
 `.gitignore` は変更しない — `config.yaml` は**共有する設定**であり、`events.jsonl` 等のローカル状態とは性質が違う。
 
