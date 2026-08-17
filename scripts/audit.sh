@@ -66,11 +66,16 @@ fi
 
 # ---------- Rust ----------
 if [[ -f Cargo.lock ]]; then
-  run_audit "cargo" "rust: cargo audit" cargo audit
+  # cargo audit は cargo 内蔵ではなく cargo-audit クレート由来。cargo だけある
+  # 環境で `cargo audit` は exit 101 になるため、probe は cargo-audit バイナリに対して行う
+  # (cargo-audit 導入時に PATH に置かれる)
+  run_audit "cargo-audit" "rust: cargo audit" cargo audit
 fi
 
 echo "=== feedback-harness audit ==="
-printf '%s\n' "${RESULTS[@]}"
+if [[ ${#RESULTS[@]} -gt 0 ]]; then
+  printf '%s\n' "${RESULTS[@]}"
+fi
 if [[ $FAILED -eq 1 ]]; then
   echo "脆弱性が検出されました。修正してから再実行すること。"
   # spec §3.2: 監査の失敗はフィードバックループに載せる(失敗シグナル)。

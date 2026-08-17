@@ -80,6 +80,18 @@ printf '{"name":"t","private":true}\n' > "$P5/package.json"
 OUT="$(PATH="$FAKEBIN:$PATH" bash "$AUDIT" "$P5" 2>&1)"
 assert_not_contains "$OUT" "npm audit" "lockfileが無ければステージを出さない"
 
+# --- Rust: cargo はあるが cargo-audit が無ければ SKIP(FAILにしない) ---
+# cargo audit は cargo 内蔵ではなく cargo-audit クレート由来。cargo だけある環境では
+# `cargo audit` が exit 101 になるため、probe が cargo のままだと「未導入」が誤FAILする
+P7="$(new_project rust_notool)"
+printf '[package]\nname = "t"\nversion = "0.1.0"\n' > "$P7/Cargo.toml"
+printf 'version = 3\n' > "$P7/Cargo.lock"
+make_fake cargo 101  # --version は 0、audit は 101(実際の失敗モード)
+OUT="$(PATH="$FAKEBIN:$PATH" bash "$AUDIT" "$P7" 2>&1)"; RC=$?
+assert_eq "0" "$RC" "cargo-audit 不在で完了をブロックしない"
+assert_contains "$OUT" "SKIP  rust: cargo audit (cargo-audit 未インストール)" "cargo-audit 不在は理由付きSKIP"
+rm -f "$FAKEBIN/cargo"
+
 # --- 依存ファイルが一切無いプロジェクト ---
 P6="$(new_project nothing)"
 printf 'hello\n' > "$P6/README.txt"
