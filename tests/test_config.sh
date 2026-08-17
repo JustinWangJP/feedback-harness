@@ -98,6 +98,9 @@ assert_contains "$OUT" "整数" "型不一致を拒否する"
 OUT="$(val 'version: 2')"
 assert_contains "$OUT" "version" "対応外のスキーマ版を拒否する"
 
+OUT="$(val 'version: true')"
+assert_contains "$OUT" "version" "version にブール値を渡すと拒否する(boolはintのサブクラス)"
+
 OUT="$(val 'check:
   golang:
     skip: [test]')"

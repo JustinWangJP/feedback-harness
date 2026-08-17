@@ -282,7 +282,13 @@ def validate(cfg, path):
         raise ConfigError(f"{path}: トップレベルはマップである必要があります")
 
     version = cfg.get("version", SCHEMA_VERSION)
-    if not isinstance(version, int) or version > SCHEMA_VERSION:
+    # Python では bool は int のサブクラス(True == 1)なので、isinstance(value, int) だけでは
+    # version: true をすり抜けてしまう。_check_type の int 分岐と同じくここでも明示的に除外する
+    if (
+        not isinstance(version, int)
+        or isinstance(version, bool)
+        or version > SCHEMA_VERSION
+    ):
         raise ConfigError(
             f"{path}: version {version!r} は未対応です(このハーネスは {SCHEMA_VERSION} まで)"
         )
