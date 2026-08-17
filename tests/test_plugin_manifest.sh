@@ -106,6 +106,14 @@ def normalize(path):
 print(json.dumps(normalize(sys.argv[1]), sort_keys=True))
 PY
 )"
-assert_eq "$NORM_A" "$NORM_B" "開発用と配布用のフック定義が同じイベント構造(スクリプト・matcher・timeout)を指す"
+# 開発用 settings.json に hooks が無いのは、このリポジトリ自身がプラグイン導入へ
+# 移行した状態(enabledPlugins で自己ドッグフーディングする)。両方に定義を置くと
+# Stop のたびに check.sh が二重に走るため、移行後は dev 側を空にするのが正しい。
+# 比較対象が存在しない状態を「ドリフト」と呼ぶことはできないので、その場合は検証を飛ばす。
+if [[ "$NORM_A" == "{}" ]]; then
+  echo "    SKIP: 開発用フック定義なし(プラグイン導入で自己ドッグフーディング中)" >&2
+else
+  assert_eq "$NORM_A" "$NORM_B" "開発用と配布用のフック定義が同じイベント構造(スクリプト・matcher・timeout)を指す"
+fi
 
 assert_summary
