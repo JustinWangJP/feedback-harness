@@ -89,6 +89,9 @@ npm_script_exists() { # package.json に scripts.<name> があるか
   node -e "process.exit(require('./package.json').scripts?.['$1'] ? 0 : 1)" 2>/dev/null
 }
 
+# 注意: git ls-files は「追跡済みだが作業ツリーから削除された」ファイルも列挙する。
+# それらを検査ツールに渡すと読み取りエラーで完了をブロックしてしまう(実測: リンク
+# 検査の [Errno 2]、bash -n の非ゼロ終了)。呼び出し側は必ず -f で実在を確認すること
 list_files() { # list_files <glob> — 検査対象のファイルを1行1件で出力
   if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     # --others を含めないと、まだコミットしていない新規ファイルが検査対象外になり、
@@ -124,7 +127,7 @@ else
   # マニフェストが無くても .py があれば lint はできる(check_file.sh と対称)
   PY_FILES=()
   while IFS= read -r f; do
-    [[ -n "$f" ]] && PY_FILES+=("$f")
+    [[ -n "$f" && -f "$f" ]] && PY_FILES+=("$f")
   done < <(list_files '*.py')
   if [[ ${#PY_FILES[@]} -gt 0 ]]; then
     STACK_FOUND=1
@@ -200,7 +203,7 @@ fi
 # シェルスクリプト主体のプロジェクト(ハーネス自身を含む)が一切検査されない。
 SH_FILES=()
 while IFS= read -r f; do
-  [[ -n "$f" ]] && SH_FILES+=("$f")
+  [[ -n "$f" && -f "$f" ]] && SH_FILES+=("$f")
 done < <(list_files '*.sh')
 if [[ ${#SH_FILES[@]} -gt 0 ]]; then
   STACK_FOUND=1
@@ -218,7 +221,7 @@ fi
 # STACK_FOUND は立てない — 設定ファイルの存在は「スタックの検出」ではない。
 JSON_FILES=()
 while IFS= read -r f; do
-  [[ -n "$f" ]] && JSON_FILES+=("$f")
+  [[ -n "$f" && -f "$f" ]] && JSON_FILES+=("$f")
 done < <(list_files '*.json')
 if [[ ${#JSON_FILES[@]} -gt 0 ]]; then
   run_stage lint "-" "config: json 構文" harness_validate_json "${JSON_FILES[@]}"
@@ -226,10 +229,10 @@ fi
 
 YAML_FILES=()
 while IFS= read -r f; do
-  [[ -n "$f" ]] && YAML_FILES+=("$f")
+  [[ -n "$f" && -f "$f" ]] && YAML_FILES+=("$f")
 done < <(list_files '*.yaml')
 while IFS= read -r f; do
-  [[ -n "$f" ]] && YAML_FILES+=("$f")
+  [[ -n "$f" && -f "$f" ]] && YAML_FILES+=("$f")
 done < <(list_files '*.yml')
 if [[ ${#YAML_FILES[@]} -gt 0 ]]; then
   if harness_has_pyyaml; then
@@ -243,13 +246,45 @@ fi
 # リンク先が実在しないのは好みの問題ではなく事実誤りなので、常に FAIL とする
 MD_FILES=()
 while IFS= read -r f; do
-  # -f で実在確認: list_files(git ls-files)は追跡済みだが作業ツリーから
-  # 削除されたファイルも列挙する。それは開けないだけでリンクの欠陥ではないため、
-  # 検査対象から外す(渡すと読み取りエラーで完了をブロックしてしまう)
   [[ -n "$f" && -f "$f" ]] && MD_FILES+=("$f")
 done < <(list_files '*.md')
 if [[ ${#MD_FILES[@]} -gt 0 ]]; then
   run_stage docs "-" "docs: 内部リンク" harness_check_md_links "${MD_FILES[@]}"
+fi
+
+# 検査対象を何か検出できたか。ここまでの全ステージの結果を見て判断する。
+# 何も検出できていないディレクトリに「設定すれば有効になる」と案内しても
+# 相手がいない上に、案内行が残ることで「スタック未検出」の報告を潰してしまう
+anything_detected() { [[ $STACK_FOUND -eq 1 || ${#RESULTS[@]} -gt 0 ]]; }
+
+# 秘密情報スキャン。secretlint は .secretlintrc.* が無いと exit 2 で実行できない
+# (実測)ため、設定の有無をゲートにする。設定を書いた=チームが検査を選んだ、
+# という宣言なので FAIL でよい。マスクは既定で有効 — 無効化する引数は渡さない
+# (失敗ログはエージェントのコンテキストに入るため、秘密の値を拡散させない)
+if ls .secretlintrc.* >/dev/null 2>&1; then
+  # npx は「未インストール」も「秘密を検出」も exit 1 を返すので区別できない。
+  # tsc と同じく --version で事前プローブし、未導入を誤FAILにしない
+  if has npx && npx --no-install secretlint --version >/dev/null 2>&1; then
+    run_stage security "-" "security: secretlint" npx --no-install secretlint "**/*"
+  else
+    RESULTS+=("SKIP  security: secretlint (secretlint 未インストール)")
+  fi
+elif anything_detected; then
+  RESULTS+=("SKIP  security: secretlint (.secretlintrc.* が無い — 設定すると検査が有効になります)")
+fi
+
+# gitleaks があれば併用する(OS固有バイナリのため任意扱い)。バージョン差が
+# 大きく v8.19 で detect が再編されたため、必要なフラグがヘルプに出ることを
+# 確認してから使う。--redact は省略不可(秘密の値を出力に出さない)。
+# PATH にあることはプロジェクトの宣言ではないので、検出対象があるときだけ走らせる
+if anything_detected && has gitleaks; then
+  GL_HELP="$(gitleaks detect --help 2>&1)"
+  if [[ "$GL_HELP" == *"--no-git"* && "$GL_HELP" == *"--redact"* ]]; then
+    run_stage security "-" "security: gitleaks" \
+      gitleaks detect --no-git --redact --no-banner -s .
+  else
+    RESULTS+=("SKIP  security: gitleaks (この版は detect --no-git/--redact に非対応)")
+  fi
 fi
 
 # ---------- 汎用フォールバック ----------
