@@ -8,9 +8,6 @@ set -u
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$HERE/assert.sh"
 REPO="$(cd "$HERE/.." && pwd)"
-# parse() 内で参照する対象を明示するためのドキュメント変数(直接は未使用)
-# shellcheck disable=SC2034
-CFG="$REPO/scripts/harness_config.py"
 
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT

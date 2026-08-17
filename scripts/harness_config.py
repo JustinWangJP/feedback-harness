@@ -13,7 +13,6 @@ PyYAML に依存させると「設定が黙って効かない」環境が生ま�
 """
 
 import re
-import sys  # noqa: F401 — 後続タスク(CLI化)で sys.argv/stderr を使うためのプレースホルダ
 
 
 class ConfigError(Exception):
