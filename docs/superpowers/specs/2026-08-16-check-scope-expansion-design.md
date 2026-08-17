@@ -110,14 +110,14 @@ WARN は「今は直さないが、溜まったら見える」ための仕組み
 
 | 検査 | 検出条件 | コマンド | ステージ | 判定 |
 |---|---|---|---|---|
-| 秘密情報(主) | `secretlint` 実行可能(npm) | `npx --no-install secretlint --maskSecrets "**/*"` | security | 宣言(`.secretlintrc.*`)あり → FAIL / 無し → **WARN**(既定ルールセット未設定では誤検出しうるため) |
+| 秘密情報(主) | `secretlint` 実行可能(npm)**かつ `.secretlintrc.*` が存在** | `npx --no-install secretlint "**/*"` | security | FAIL。設定が無ければ **SKIP**(理由: `.secretlintrc.* 未設定`)— §8.3 の実測により、設定なしでは exit 2 で実行できないため WARN にできない。マスクは既定で有効(`--maskSecrets` というオプションは存在しない) |
 | 秘密情報(代替) | `gitleaks` が PATH にある | `gitleaks detect --no-git --redact --no-banner -s .` | security | FAIL。OS固有バイナリのため任意扱い(P-B4)。**npm の `gitleaks` は別物なので使わない**(§8.1) |
 | 脆弱性(Python) | `pip-audit` あり | `pip-audit` | security | **M2遅延**(入力: `requirements*.txt` / `poetry.lock` / `uv.lock` / `pyproject.toml`)。FAIL |
 | 脆弱性(Node) | `package-lock.json` 等 + npm | `npm audit --audit-level=high` | security | **M2遅延**(入力: lockfile)。FAIL |
 | 脆弱性(Go) | `govulncheck` あり | `govulncheck ./...` | security | **M2遅延**(入力: `go.sum`)。FAIL |
 | 脆弱性(Rust) | `cargo-audit` あり | `cargo audit` | security | **M2遅延**(入力: `Cargo.lock`)。FAIL |
 
-**値のマスクは必須** — `check.sh` の失敗ログはエージェントのコンテキストと `failures.txt` に入るため、秘密の値をそのまま出力すると別の場所へ拡散する。secretlint は `--maskSecrets`、gitleaks は `--redact` で伏せる。どちらのオプションも省略不可とする。
+**値のマスクは必須** — `check.sh` の失敗ログはエージェントのコンテキストと `failures.txt` に入るため、秘密の値をそのまま出力すると別の場所へ拡散する。secretlint は**既定でマスクする**(`--no-maskSecrets` を**渡してはならない**)。gitleaks は `--redact` を省略不可とする。§8.3 で実際に値が `****` に伏せられることを確認済み。
 
 ### 3.3 依存の実在性・整合性(オフライン)
 
@@ -271,16 +271,30 @@ harness_validate_yaml <file...>       # 同上
 
 後半3件は、本設計が導入しようとしている「依存の実在性」検査(§3.3)が防ぐべき事象そのものであり、原則 P-C の実例として記録する。
 
+### 8.3 実測 — npm ツールの実挙動(2026-08-17、ユーザー承認のうえ検証目的で導入)
+
+`package.json`(private・devDependencies のみ)を作り `npm install` で secretlint 13.0.4 / dockerfilelint 1.8.0 / knip 6.32.2 / prettier 3.9.6 を導入し、実際に走らせて確認した。**設計の記述と食い違った点があり、上表はこの実測に合わせて修正済み**。
+
+| ツール | 実測結果 | 設計への影響 |
+|---|---|---|
+| secretlint | `--maskSecrets` オプションは**存在しない**。マスクは**既定で有効**で、無効化する `--no-maskSecrets` がある側。検出時の出力は `found slack token: ****…` と伏せられ、生値は出ない | コマンドから `--maskSecrets` を削除。「`--no-maskSecrets` を渡さない」ことを制約に変更 |
+| secretlint | `.secretlintrc.*` が無いと **exit 2**(`secretlint config is not found`)で実行不能。`--secretlintrcJSON` でインライン設定は可能だが、ハーネスが既定ルールを押し付けることになる | 判定を「設定あり→FAIL / 無し→**WARN**」から「設定あり→FAIL / 無し→**SKIP**」へ変更 |
+| secretlint | 検出時 exit 1 / 問題なし exit 0。Slack トークン・npm アクセストークン・秘密鍵ヘッダを検出。AWS のドキュメント用ダミー値(`AKIAIOSFODNN7EXAMPLE`)は正しく無視する | 終了コード契約を確認。誤検出耐性も良好 |
+| dockerfilelint | 問題あり **exit 2** / 問題なし exit 0(`Issues: None found`) | FAIL 判定は非0で正しい。exit 1 ではなく 2 である点に注意 |
+| prettier | 設定なしでも `--check` は動作し exit 0 を返す(既定スタイルで判定) | 「設定なしは SKIP」の判断は据え置き — 動くこと自体が問題で、既定スタイルの押し付けになるため |
+| knip | 設定なしで実行すると、**ハーネスが検査ツールとして入れた devDependencies 4件すべてを「Unused」と報告**し exit 1 | 「設定なしは SKIP」の判断が実測で裏付けられた。FAIL にすれば導入直後に完了不能になる |
+
+この検証がなければ、secretlint は起動すらしないコマンドを、knip は即座に全プロジェクトを止める設定を実装するところだった(原則 P-C の実例)。
+
 ### 8.2 未検証 — 実ツールとの結合
 
-開発環境に secretlint / dockerfilelint / knip / actionlint / hadolint / import-linter / pip-audit / deptry / vulture / oasdiff / cargo-semver-checks が**いずれも導入されていない**(原則 P-A により、許可なく導入しない)。テストは偽実行ファイルで**呼び出し契約**(引数・検出条件・SKIP/FAIL/WARNの分岐)を固定するに留まり、実ツールとの結合は導入済み環境での初回実行が最初の検証機会になる。
+§8.3 で実測した4ツール(secretlint / dockerfilelint / knip / prettier)を除き、actionlint / hadolint / import-linter / pip-audit / deptry / vulture / oasdiff / cargo-semver-checks は**未導入**(原則 P-A により、許可なく導入しない)。これらのテストは偽実行ファイルで**呼び出し契約**(引数・検出条件・SKIP/FAIL/WARNの分岐)を固定するに留まり、実ツールとの結合は導入済み環境での初回実行が最初の検証機会になる。
 
 特に確認が必要な項目:
-- **secretlint の終了コードと既定ルール**: ルールセット未設定時に何も検出しない可能性がある(`@secretlint/secretlint-rule-preset-recommend` の導入が要る)。この不確実性のため、宣言(`.secretlintrc.*`)が無い場合は WARN 既定にしている
 - **gitleaks のバージョン差**: v8.19 で `detect` → `dir`/`git` に再編された。`gitleaks detect --help` の出力に `--no-git` と `--redact` の**両方が含まれること**をプローブし、無ければ SKIP する(ヘルプの終了コードだけでは不十分 — 未対応版でもヘルプ自体は成功する)
 - `npm ls --all` は `node_modules` 未インストール時に必ず失敗するため、存在確認を前置する
 - `oasdiff` の破壊的変更判定の終了コード仕様
-- `deptry` / `vulture` / `dockerfilelint` の誤検出率は実プロジェクトでの調整が要る可能性がある(WARN 既定または宣言ゲートにしているのはこのため)
+- `deptry` / `vulture` の誤検出率は実プロジェクトでの調整が要る可能性がある(WARN 既定または宣言ゲートにしているのはこのため)
 
 ## 9. 実装の分割
 

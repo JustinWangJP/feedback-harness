@@ -5,6 +5,9 @@ __pycache__/
 .venv/
 venv/
 
+# Node(検査ツールの実体。package.json / package-lock.json だけを共有する)
+node_modules/
+
 # Lint / test caches
 .ruff_cache/
 .mypy_cache/
