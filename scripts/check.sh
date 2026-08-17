@@ -120,8 +120,16 @@ if [[ -f pyproject.toml || -f setup.py || -f requirements.txt ]]; then
   if [[ -f pyproject.toml ]] && grep -q "\[tool.mypy\]" pyproject.toml 2>/dev/null; then
     run_stage typecheck "mypy" "python: mypy" mypy .
   fi
-  if [[ -d tests ]] || ls ./test_*.py ./*_test.py >/dev/null 2>&1; then
-    run_stage test "pytest" "python: pytest" pytest -q -x
+  # カバレッジ相乗り(M3): テストを2回走らせず、計装フラグを足すだけ。
+  # pytest-cov は設定の --cov-fail-under を exit code で強制するため、
+  # 閾値宣言があるプロジェクトは自動的に FAIL ゲートになる
+  PYTEST_ARGS=(-q -x)
+  if python3 -c "import pytest_cov" >/dev/null 2>&1; then
+    PYTEST_ARGS+=(--cov --cov-report=term-missing)
+  fi
+  if [[ -d tests ]] || compgen -G "test_*.py" >/dev/null 2>&1 \
+     || compgen -G "*_test.py" >/dev/null 2>&1; then
+    run_stage test "pytest" "python: pytest" pytest "${PYTEST_ARGS[@]}"
   fi
   # 宣言に無い import・未使用依存の検出(ネットワーク不使用)。
   # 誤検出の可能性があるため、設定の宣言があるときだけ FAIL にする
@@ -189,6 +197,11 @@ if [[ -f package.json ]]; then
       fi
     fi
     npm_script_exists test  && run_stage test  "$PM" "node: $PM test"      "$PM" test
+    # カバレッジ相乗り: test:coverage スクリプトを書いた=計装を宣言した。
+    # 通常の test ステージはそのまま残す(両方走るのではなく coverage 側に統合したい
+    # プロジェクトは test スクリプトを省けばよい)
+    npm_script_exists test:coverage \
+      && run_stage test "$PM" "node: $PM run test:coverage" "$PM" run test:coverage
     npm_script_exists build && run_stage build "$PM" "node: $PM run build" "$PM" run build
     # 依存の実在性・整合性(ネットワーク不使用)。宣言と実体のずれ・欠損を
     # 検出する — AIが存在しないパッケージ名を書く欠陥はここで捕まる。
@@ -238,7 +251,9 @@ if [[ -f go.mod ]]; then
   STACK_FOUND=1
   run_stage lint  "go" "go: vet"   go vet ./...
   run_stage build "go" "go: build" go build ./...
-  run_stage test  "go" "go: test"  go test ./...
+  # -cover は標準機能で計装のみ(追加プロセス無し)。coverage の数値は
+  # ステージログに現れる。閾値ゲートは持たない(go test のexitはテスト合否のみ)
+  run_stage test  "go" "go: test"  go test -cover ./...
   # go.sum のチェックサム検証(ネットワーク不使用)。依存の改竄・欠損を検出する
   if [[ -f go.sum ]]; then
     run_stage lint "go" "go: mod verify" go mod verify
