@@ -27,7 +27,7 @@ D2・D3 を直さずに D1 を横展開すると、誤検出が単一ファイ�
 
 | 制約 | 誰が当たるか | 解決機構 |
 |---|---|---|
-| `check.sh` は Stop フックで毎ターン走り `timeout 300` を共有する。ネットワークや重い解析を入れると 2026-08-12 に解消した過剰実行問題が再発する | 脆弱性監査・API契約差分・カバレッジ | **M2 遅延実行**(入力ハッシュが変わったときだけ)+ **M3 相乗り**(既存 test ステージにカバレッジを同居させる) |
+| `check.sh` は Stop フックで毎ターン走り `timeout 300` を共有する。ネットワークや重い解析を入れると 2026-08-12 に解消した過剰実行問題が再発する | 脆弱性監査・API契約差分・カバレッジ | 当初は **M2 遅延実行** を設計したが **2026-08-17 に廃止**。改訂後: 脆弱性監査は**オンデマンド限定**(check.sh の外)、API契約差分は**宣言ゲート**で Stop フックに載せる、カバレッジは **M3 相乗り** |
 | 既存プロジェクトが未整備の領域(未フォーマット・未使用コード)を一律 FAIL にすると、導入初日から完了不能になる(shellcheck 重大度で過去に扱った問題) | フォーマット・デッドコード・カバレッジ閾値 | **M1 WARN 結果クラス**(宣言していない検査は報告のみ) |
 
 ## 1.3 ツール導入に関する原則(非交渉)
@@ -74,16 +74,15 @@ D2・D3 を直さずに D1 を横展開すると、誤検出が単一ファイ�
 
 WARN は「今は直さないが、溜まったら見える」ための仕組みであり、握り潰しではない。
 
-### M2. 遅延実行 — 入力ハッシュが変わったときだけ走らせる
+### M2. ~~遅延実行~~ → **廃止(2026-08-17 改訂)**
 
-重い検査・ネットワークを使う検査は、**入力が変わっていなければ結果も変わらない**。入力のハッシュをスタンプに残し、一致する間はスキップする。
+当初は「入力ハッシュが変わったときだけ走らせる」機構(.feedback/.check-cache/ にハッシュ+前回結果を記録)を設計した。**P3 着手前の再検討で廃止する。** 理由:
 
-- スタンプ: `.feedback/.check-cache/<検査名>` に「入力ハッシュ + 前回結果」を記録(gitignore 対象のローカル状態)
-- 入力ハッシュの定義は検査ごとに宣言する(下表参照)。例: 脆弱性監査の入力は lockfile
-- 前回が PASS ならスキップ時に `SKIP  security: pip-audit (前回から lockfile 変更なし)` と理由を明示する。**前回が FAIL なら必ず再実行する**(直っていない可能性があるため、スキップは「壊れたまま完了できる」側の誤りになる)
-- キャッシュを無視して強制実行する手段: `FEEDBACK_CHECK_FORCE=1`
+1. **ネットワークの不定性は遅延で解けない** — M2 が解くのは「重さ」だけ。レジストリ障害・遅延・オフライン環境(機内・閉域網)で Stop フックの `timeout 300` を侵食し、他ステージの結果ごと死ぬリスクは残る。check.sh が一貫して守ってきた「ネットワーク不使用」原則を、このためだけに崩す価値がない
+2. **キャッシュ管理という新しい障害面** — ハッシュ計算・スタンプ破損・前回FAIL再実行の条件は、それ自体がバグの住処になる。ネットワーク検査を Stop フックから外せば、この機構は不要になる
+3. **代替で足りる** — 脆弱性監査はオンデマンド限定(下記)とし、最終実行日を `report`/`stats` に載せて可視する。**WARN 機構と同じ哲学**(ブロックせず、溜まったら見える)の適用である
 
-これで脆弱性監査は「lockfile を更新したターンだけ走る」= 定常状態では実質ゼロコストになる。
+重いがオフラインで完結する検査(cargo-semver-checks のビルド等)は、M2 の代わりに**宣言ゲート**(設定を書いたプロジェクトだけがコストを払う)で扱う。
 
 ### M3. 相乗り — カバレッジは既存の test ステージに同居させる
 
@@ -112,10 +111,12 @@ WARN は「今は直さないが、溜まったら見える」ための仕組み
 |---|---|---|---|---|
 | 秘密情報(主) | `secretlint` 実行可能(npm)**かつ `.secretlintrc.*` が存在** | `npx --no-install secretlint "**/*"` | security | FAIL。設定が無ければ **SKIP**(理由: `.secretlintrc.* 未設定`)— §8.3 の実測により、設定なしでは exit 2 で実行できないため WARN にできない。マスクは既定で有効(`--maskSecrets` というオプションは存在しない) |
 | 秘密情報(代替) | `gitleaks` が PATH にある | `gitleaks detect --no-git --redact --no-banner -s .` | security | FAIL。OS固有バイナリのため任意扱い(P-B4)。**npm の `gitleaks` は別物なので使わない**(§8.1) |
-| 脆弱性(Python) | `pip-audit` あり | `pip-audit` | security | **M2遅延**(入力: `requirements*.txt` / `poetry.lock` / `uv.lock` / `pyproject.toml`)。FAIL |
-| 脆弱性(Node) | `package-lock.json` 等 + npm | `npm audit --audit-level=high` | security | **M2遅延**(入力: lockfile)。FAIL |
-| 脆弱性(Go) | `govulncheck` あり | `govulncheck ./...` | security | **M2遅延**(入力: `go.sum`)。FAIL |
-| 脆弱性(Rust) | `cargo-audit` あり | `cargo audit` | security | **M2遅延**(入力: `Cargo.lock`)。FAIL |
+| 脆弱性(Python) | `pip-audit` あり | `pip-audit` | —(check.sh 外) | **オンデマンド限定**(2026-08-17 改訂)。check.sh には入れない |
+| 脆弱性(Node) | `package-lock.json` 等 + npm | `npm audit --audit-level=high` | —(check.sh 外) | **オンデマンド限定** |
+| 脆弱性(Go) | `govulncheck` あり | `govulncheck ./...` | —(check.sh 外) | **オンデマンド限定** |
+| 脆弱性(Rust) | `cargo-audit` あり | `cargo audit` | —(check.sh 外) | **オンデマンド限定** |
+
+**オンデマンド監査の実行経路(2026-08-17 改訂)**: 監査は `feedback-loop` スキル等からの明示実行に限定する(check.sh の外)。`report` / `stats` には **最終監査日**(`.feedback/.last-audit` スタンプ)を表示し、規定の間隔(例: 7日)を過ぎていれば「監査を推奨」行を出す — WARN 機構と同じ「ブロックせず、溜まったら見える」哲学の適用。監査実行時に判定結果は FAIL なら `feedback_log.py add --source hook` 相当で記録し、ループに載せる。
 
 **値のマスクは必須** — `check.sh` の失敗ログはエージェントのコンテキストと `failures.txt` に入るため、秘密の値をそのまま出力すると別の場所へ拡散する。secretlint は**既定でマスクする**(`--no-maskSecrets` を**渡してはならない**)。gitleaks は `--redact` を省略不可とする。§8.3 で実際に値が `****` に伏せられることを確認済み。
 
@@ -165,8 +166,8 @@ Go だけ扱いが違うのは、gofmt が事実上の言語仕様であり「�
 
 | 検査 | 検出条件 | コマンド | ステージ | 判定 |
 |---|---|---|---|---|
-| OpenAPI | `openapi.yaml`/`openapi.json`(または `api/` 配下の同名)+ `oasdiff` が PATH にある | ベースライン版を一時ファイルへ取り出し `oasdiff breaking <base> <current>` | contract | **M2遅延**(入力: spec ファイルのハッシュ + ベースラインSHA)。FAIL。Go製バイナリのため任意扱い(P-B4)。**npm の `oasdiff` は中身の無い名前予約なので使わない**(§8.1) |
-| Rust ライブラリ | `cargo-semver-checks` あり + `[lib]` を持つ crate | `cargo semver-checks check-release` | contract | **M2遅延**。ビルドを伴い重いため、遅延必須。FAIL |
+| OpenAPI | `openapi.yaml`/`openapi.json`(または `api/` 配下の同名)+ `oasdiff` が PATH にある | ベースライン版を一時ファイルへ取り出し `oasdiff breaking <base> <current>` | contract | FAIL。**宣言ゲート**(spec ファイルの存在=宣言)。オフラインで完結するため Stop フックに載せる(M2廃止後も変更なし)。Go製バイナリのため任意扱い(P-B4)。**npm の `oasdiff` は中身の無い名前予約なので使わない**(§8.1) |
+| Rust ライブラリ | `cargo-semver-checks` あり + `[lib]` を持つ crate | `cargo semver-checks check-release` | contract | FAIL。**宣言ゲート**(cargo-semver-checks の設定/導入自体が宣言)。ビルドを伴い重いが、導入を選んだプロジェクトだけがコストを払う(M2廃止に伴い宣言ゲートで扱う) |
 
 ツールが無ければ SKIP。破壊的変更の判定は本質的にツール依存であり、自前実装はしない。
 
@@ -229,13 +230,13 @@ harness_validate_yaml <file...>       # 同上
 
 | ファイル | 変更 |
 |---|---|
-| `scripts/lib.sh` | `harness_has_pyyaml` / `harness_validate_json` / `harness_validate_yaml` / `harness_check_md_links` / M2 のキャッシュ判定 `harness_cache_valid` |
+| `scripts/lib.sh` | `harness_has_pyyaml` / `harness_validate_json` / `harness_validate_yaml` / `harness_check_md_links` |
 | `scripts/check_file.sh` | JSON/YAML 分岐を共有関数へ置換(D2・D3 修正) |
-| `scripts/check.sh` | WARN 結果クラス(集計・表示・exit code)、横断チェック節、各スタック節への検査追加、M2 遅延実行、M3 相乗り |
+| `scripts/check.sh` | WARN 結果クラス(集計・表示・exit code)、横断チェック節、各スタック節への検査追加、M3 相乗り |
 | `scripts/hooks/on_stop.sh` | WARN 件数を `events.jsonl` に記録 |
 | `scripts/feedback_log.py` | `stats` / `report` に WARN 集計を追加(頻出WARNの表示) |
-| `.gitignore` | `.feedback/.check-cache/` |
-| `scripts/README.md` | ステージ表・検査一覧・結果クラス(WARN)・必要ツール・`FEEDBACK_CHECK_FORCE` |
+| `.gitignore` | `.feedback/.last-audit`(監査の最終実行日スタンプ) |
+| `scripts/README.md` | ステージ表・検査一覧・結果クラス(WARN)・必要ツール・オンデマンド監査の案内 |
 | `README.md` | 仕組み・必要ツール |
 | `AGENTS.md` / `docs/pointer_agents.md` | 最終行の意味表に WARN 付きの行を追加(規約3) |
 | `CLAUDE.md` | 変更履歴 |
@@ -250,7 +251,7 @@ harness_validate_yaml <file...>       # 同上
 |---|---|
 | `tests/test_config_syntax.sh` | 壊れたJSON/YAMLを検出 / 複数文書YAML・カスタムタグYAMLを**誤検出しない**(D3回帰)/ JSONC除外(D2回帰)/ PyYAML不在でSKIP / `check_file.sh` と `check.sh` で同判定 |
 | `tests/test_check_warn.sh` | WARN が exit 0 のままであること / 最終行に件数が出ること / FAIL と混在したときは exit 1 になること / 宣言(設定ファイル)の有無で FAIL/WARN が切り替わること |
-| `tests/test_check_cache.sh` | 入力ハッシュ不変ならスキップ / 入力変更で再実行 / **前回FAILなら入力不変でも再実行** / `FEEDBACK_CHECK_FORCE=1` で強制実行 |
+| `tests/test_audit_ondemand.sh` | 監査コマンドが check.sh を実行しないこと / 最終監査日スタンプの更新 / report/stats に推奨行が出ること(期間経過時)・出ないこと(期限内) |
 | `tests/test_check_extended.sh` | 偽ツールで各検査の (a) 検出条件 (b) FAIL伝播 (c) ツール不在でSKIP (d) gitleaks に `--redact` が渡ること / 内部リンク切れの検出と外部URL・アンカーの除外 |
 
 `bash scripts/check.sh` が `ALL PASS` であることを完了条件とする。
@@ -304,6 +305,6 @@ harness_validate_yaml <file...>       # 同上
 |---|---|---|
 | **P1: 基盤と既存欠陥** | D1〜D3 修正・共有関数・Tier 0(構文検証)・**M1 WARN機構**・events.jsonl 連携・stats/report の WARN 集計 | 誤ブロックの解消と、以降すべての検査が乗る土台 |
 | **P2: 速い検査群** | 秘密情報・CI/Dockerfile lint・アーキ制約・依存整合性・フォーマット・デッドコード・内部リンク | 追加コストほぼゼロで適用範囲が一気に広がる |
-| **P3: 重い検査群** | **M2 遅延実行機構**・脆弱性監査・**M3 カバレッジ相乗り**・API契約差分 | 定常状態でのコストを抑えたまま、残りの領域を埋める |
+| **P3: 重い検査群**(2026-08-17 改訂) | **M3 カバレッジ相乗り**・API契約差分(宣言ゲート)・**脆弱性監査のオンデマンド経路**(実行スクリプト+最終監査日の可視化) | Stop フックはオフライン検査のみを載せたまま、残りの領域を埋める。M2 は廃止 |
 
 P1 → P2 → P3 の順に実施する。P2 の各検査は互いに独立なので、P2 内でさらに分割・並行しても構わない。
