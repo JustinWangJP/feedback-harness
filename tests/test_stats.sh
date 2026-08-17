@@ -121,4 +121,23 @@ OUT3="$(fb stats)"
 assert_contains "$OUT3" "イベント記録が無い" "events.jsonl 不在でもログ集計を続ける"
 assert_contains "$OUT3" "再発候補" "再発候補セクションは出る"
 
+# --- 最終監査日(.last-audit)の表示と期限切れ推奨 ---
+mkdir -p "$WORK/project/.feedback"
+printf '2026-01-01\n' > "$WORK/project/.feedback/.last-audit"
+OUT="$(fb stats)"
+assert_contains "$OUT" "最終監査: 2026-01-01 (" "最終監査日が表示される"
+assert_contains "$OUT" "日前)" "経過日数が表示される"
+assert_contains "$OUT" "監査を推奨" "7日超過なら推奨行が出る"
+
+printf '%s\n' "$(python3 -c 'import datetime; print(datetime.date.today().isoformat())')" \
+  > "$WORK/project/.feedback/.last-audit"
+OUT="$(fb stats)"
+assert_contains "$OUT" "最終監査:" "当日でも表示される"
+assert_not_contains "$OUT" "監査を推奨" "期限内なら推奨は出ない"
+
+rm -f "$WORK/project/.feedback/.last-audit"
+OUT="$(fb stats)"
+assert_contains "$OUT" "最終監査: 未実行" "スタンプ無しは未実行表示"
+assert_contains "$OUT" "scripts/audit.sh" "未実行なら実行方法を案内する"
+
 assert_summary

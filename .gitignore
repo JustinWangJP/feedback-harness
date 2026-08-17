@@ -30,5 +30,8 @@ _workspace/
 # レポートの基点スタンプ(振り返り実施日。個人の運用リズムなので共有しない)
 .feedback/.last-retro
 
+# 脆弱性監査の最終実行日(audit.sh が成功時に書く。マシンローカル)
+.feedback/.last-audit
+
 # OS
 .DS_Store
