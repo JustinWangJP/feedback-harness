@@ -32,3 +32,4 @@
 | 2026-08-16 | Stopフックの無限再帰を修正 | check.sh / tests/test_recursion_guard.sh / README | フック由来の `CLAUDE_PROJECT_DIR` が子孫に伝播し、make check → テスト → check.sh が循環して timeout 300 を食い潰す問題を、make再帰ガードで断った |
 | 2026-08-16 | Flywheel Step 4(信号種・測定・報告) | feedback_log.py / hooks / lib.sh / rules.template / skills / tests | 信号4分類のデータ化、フック合否からの初回通過率測定、朝会・振り返り議題の report、再発候補の機械化 |
 | 2026-08-16 | 適用範囲拡張 P1(基盤と既存欠陥) | lib.sh / check_file.sh / check.sh / on_stop.sh / feedback_log.py / tests | JSONC・複数文書YAMLの誤ブロック解消、設定ファイル構文の横断検査、非ブロッキングWARNとその測定連携 |
+| 2026-08-17 | 適用範囲拡張 P2(速い検査群) | check.sh / lib.sh / tests / package.json | 秘密情報・内部リンク・依存整合性・CI設定・Dockerfile・フォーマット・デッドコード・アーキ制約を追加。実測に基づき secretlint と knip は設定ゲート(設定なしは SKIP) |

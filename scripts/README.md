@@ -44,11 +44,15 @@ bash scripts/check.sh [プロジェクトルート]          # 省略時はカ�
 FEEDBACK_CHECK_SKIP="test build" bash scripts/check.sh   # 特定ステージをスキップ
 ```
 
-**動作:** 検出したスタックごとに `lint` / `typecheck` / `test` / `build` / `format` を走らせ、スタック非依存の横断チェック(設定ファイルの構文)も実行して、`PASS`/`FAIL`/`WARN`/`SKIP` の要約を出す。
+**動作:** 検出したスタックごとに `lint` / `typecheck` / `test` / `build` / `format` を走らせ、スタック非依存の横断チェック(設定ファイルの構文・内部リンク・秘密情報・CI設定・Dockerfile)も実行して、`PASS`/`FAIL`/`WARN`/`SKIP` の要約を出す。
 
 - **検出対象**: Python(`pyproject.toml`/`setup.py`/`requirements.txt`、無くても `*.py` があれば `ruff` のみ実行) / Node(`package.json`) / Go(`go.mod`) / Rust(`Cargo.toml`) / Java(`pom.xml`/`build.gradle`) / Shell(`*.sh`) / 汎用(`Makefile` の `check` ターゲット)
 - **横断チェック(スタック非依存)**: `*.json` / `*.yaml` / `*.yml` の構文検証。`tsconfig*.json` / `jsconfig*.json` / `devcontainer.json` / `.vscode/` 配下はコメント付き(JSONC)が慣例のため対象外。YAML は複数文書(`---` 区切り)に対応し、未知のカスタムタグ(`!Ref` 等)は構文エラーとして扱わない。PyYAML 未導入なら YAML は理由付き `SKIP`
-- **ステージスキップ**: `FEEDBACK_CHECK_SKIP` に指定できるステージ名は `lint` / `typecheck` / `test` / `build` / `format`
+- **ドキュメント整合性**: Markdown の内部リンク切れを検出する(`docs` ステージ)。外部URL・`mailto:`・アンカーのみ・絶対パスは対象外(ネットワークを使わない原則)。コードブロック・コードスパン内のリンク風記述は検証しない
+- **秘密情報**(`security` ステージ): `.secretlintrc.*` があれば `secretlint` を実行する。**設定が無ければ SKIP** — secretlint は設定なしでは起動できないため。値は既定でマスクされ、失敗ログに秘密が出ることはない。`gitleaks` が PATH にあれば併用する(`--no-git --redact` に対応する版のみ)
+- **CI設定・Dockerfile**: `.github/workflows/*.y*ml` があれば `actionlint`、`Dockerfile*` があれば `dockerfilelint`(無ければ `hadolint`)を実行する。いずれも未導入なら SKIP
+- **依存の実在性**(ネットワーク不使用): Node は `npm ls --all`(npm のときのみ。`node_modules` があるときのみ)、Go は `go mod verify`、Rust は `cargo metadata --offline`、Python は `deptry`。「存在しないパッケージ名」「宣言と実体のずれ」を検出する
+- **ステージスキップ**: `FEEDBACK_CHECK_SKIP` に指定できるステージ名は `lint` / `typecheck` / `test` / `build` / `format` / `security` / `docs`。空白区切りで複数指定できる
 - **make再帰ガード**: `make check` 実行時のみ `FEEDBACK_CHECK_RECURSION_GUARD` を子孫に伝え、その中で起動された check.sh は make フォールバックを `SKIP` する。フック実行時に `CLAUDE_PROJECT_DIR` が伝播し、テスト内の check.sh がルートを本リポジトリに解決し直して make check がテストを再実行する無限再帰(Stop フックの timeout を食い潰す)を断つためのもの。**通常の make 実行・直接ステージ(lint/test/build)には影響しない**
 - **SKIPの理由**: 出力に必ず理由が付く — `(<tool> 未インストール)` / `(<tool> 起動不可 — 環境を確認してください)` / `(実行不可)` / `(FEEDBACK_CHECK_SKIP)`、およびスタック単位でまとめた `(<stack>: 全ステージ …)`。**ツールが無い・壊れているだけの状態を `FAIL` にしない**(ユーザーのコードの問題ではないため)
 - **検査対象ファイル**: Gitリポジトリなら `git ls-files --cached --others --exclude-standard`。**未コミットの新規ファイルも検査し**、`.gitignore` 済みは除外する
@@ -67,7 +71,7 @@ FEEDBACK_CHECK_SKIP="test build" bash scripts/check.sh   # 特定ステージを
   | `検出できたスタックがありません …` | 対応マニフェスト・対象ファイルなし |
 
   全SKIPや部分SKIPを無印の `ALL PASS` と偽らない。
-- **WARN**: 完了をブロックしない指摘。exit code は `0` のまま。最終行に件数が付く(`ALL PASS (1件WARN — 未対応の指摘があります)`)。現在の産出源は `python: ruff format`(`pyproject.toml` に `[tool.ruff` の宣言があれば `FAIL` に切り替わる)
+- **WARN**: 完了をブロックしない指摘。exit code は `0` のまま。最終行に件数が付く(`ALL PASS (1件WARN — 未対応の指摘があります)`)。産出源は宣言(設定ファイル)が無い検査 — `python: ruff format`(`[tool.ruff` があれば FAIL)、`python: deptry` / `python: vulture`(`[tool.deptry` / `[tool.vulture` があれば FAIL)、`rust: cargo fmt`(`rustfmt.toml` があれば FAIL)
 - **exit code**: `0` = FAILなし(全SKIP・スタック未検出を含む) / `1` = FAILあり / `2` = ルートディレクトリ不正。**エージェントは最終行の文字列ではなく exit code で判定すること**
 
 ### `check_file.sh` — 単一ファイル高速チェック(編集直後用)

@@ -406,7 +406,7 @@ while IFS= read -r f; do
 done < <(list_files 'Dockerfile*'; list_files '*/Dockerfile*')
 # 上の2つのグロブは Dockerfile がリポジトリ直下にある場合に重複しない
 # (git pathspec の 'Dockerfile*' はルート直下のみ、'*/Dockerfile*' は1階層以上)。
-# ただし git 外(find フォールバック)では両方が同じファイルを拾うため重複排除する
+# 念のため防御的な重複排除を入れる(現状の経路では重複は生じない)
 if [[ ${#DOCKER_FILES[@]} -gt 1 ]]; then
   IFS=$'\n' read -r -d '' -a DOCKER_FILES < <(printf '%s\n' "${DOCKER_FILES[@]}" | sort -u && printf '\0')
 fi
