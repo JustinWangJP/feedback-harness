@@ -118,6 +118,8 @@ cd /path/to/your-project && bash scripts/check.sh   # スタック検出の確�
 [棚卸]  定期審査 (feedback-loop Phase 4) → 陳腐化したルールは retire で撤去
 [測定]  feedback_log.py stats            — 初回通過率・再発候補(要求時のみ・テキスト出力)
 [報告]  feedback_log.py report --last → 朝会/振り返りの5分議題(実施後に --mark で基点更新)
+[監査]  bash scripts/audit.sh          — 脆弱性監査(オンデマンド・ネットワーク使用)
+                                          成功時のみ .last-audit を更新 → report が期限を見る
 ```
 
 記録は promote を待たずにその時点から次の作業に効く。「溜めてから一括で昇華する」設計にすると、昇華までの間に同じ指摘が再発する。

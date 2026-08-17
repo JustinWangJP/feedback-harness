@@ -16,6 +16,7 @@ description: フィードバックハーネス全体のオーケストレータ�
    - 別プロジェクトへの導入依頼 → **導入実行** (Phase 3)
    - ルールの棚卸し・見直し・定期審査の依頼 → **棚卸し実行** (Phase 4)
    - 数字・レポートの依頼(「調子は」「初回通過率」「振り返りの議題」等) → **stats/report 実行**(`feedback_log.py stats` / `report --last`。振り返り実施後は `report --last --mark` で基点を更新する)
+   - 脆弱性監査の依頼(「監査して」「脆弱性チェック」等)、または report で監査期限切れを指摘された → **監査実行**(`bash "${CLAUDE_PLUGIN_ROOT}/scripts/audit.sh"`。ネットワークを使うため Stop フックでは走らない)
    - `_workspace/` に前回レポートあり + 部分修正依頼 → 該当Phaseのみ再実行
 
 ## Phase 1: キュレーション (フィードバック → ルール)

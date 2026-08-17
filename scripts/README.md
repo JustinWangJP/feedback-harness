@@ -12,6 +12,7 @@ scripts/
 ├── check_file.sh     # 単一ファイル高速チェック: 拡張子ベースの静的チェック
 ├── lib.sh            # check.sh / check_file.sh の共有ユーティリティ(has() ほか)
 ├── feedback_log.py   # フィードバック記録CLI: add/list/search/promote/merge/close/retire/rules
+├── audit.sh          # オンデマンド脆弱性監査(唯一のネットワーク検査。Stopフックからは呼ばれない)
 └── hooks/
     ├── post_edit.sh  # Claude Code PostToolUse(Edit|Write) ラッパ → check_file.sh
     └── on_stop.sh    # Claude Code Stop ラッパ → check.sh
@@ -52,7 +53,9 @@ FEEDBACK_CHECK_SKIP="test build" bash scripts/check.sh   # 特定ステージを
 - **秘密情報**(`security` ステージ): `.secretlintrc.*` があれば `secretlint` を実行する。**設定が無ければ SKIP** — secretlint は設定なしでは起動できないため。値は既定でマスクされ、失敗ログに秘密が出ることはない。`gitleaks` が PATH にあれば併用する(`--no-git --redact` に対応する版のみ)
 - **CI設定・Dockerfile**: `.github/workflows/*.y*ml` があれば `actionlint`、`Dockerfile*` があれば `dockerfilelint`(無ければ `hadolint`)を実行する。いずれも未導入なら SKIP
 - **依存の実在性**(ネットワーク不使用): Node は `npm ls --all`(npm のときのみ。`node_modules` があるときのみ)、Go は `go mod verify`、Rust は `cargo metadata --offline`、Python は `deptry`。「存在しないパッケージ名」「宣言と実体のずれ」を検出する
-- **ステージスキップ**: `FEEDBACK_CHECK_SKIP` に指定できるステージ名は `lint` / `typecheck` / `test` / `build` / `format` / `security` / `docs`。空白区切りで複数指定できる
+- **API契約・破壊的変更**(`contract` ステージ): `openapi.yaml`/`openapi.json`(ルートまたは `api/`)があれば `oasdiff breaking` をベースライン(`git merge-base HEAD <FEEDBACK_CONTRACT_BASE:-main>`、解決不能なら `HEAD`)との差分で実行する。Rust は `[lib]` を持つ crate で `cargo semver-checks check-release`。いずれもオフラインで完結する
+- **カバレッジ相乗り**: テストを2回走らせず計装フラグを足すだけ — Python は pytest-cov 検出時に `--cov --cov-report=term-missing`(設定の `--cov-fail-under` が自動的に FAIL ゲートになる)、Go は `go test -cover`、Node は `test:coverage` スクリプトがあるときだけ別ステージ
+- **ステージスキップ**: `FEEDBACK_CHECK_SKIP` に指定できるステージ名は `lint` / `typecheck` / `test` / `build` / `format` / `security` / `docs` / `contract`。空白区切りで複数指定できる
 - **make再帰ガード**: `make check` 実行時のみ `FEEDBACK_CHECK_RECURSION_GUARD` を子孫に伝え、その中で起動された check.sh は make フォールバックを `SKIP` する。フック実行時に `CLAUDE_PROJECT_DIR` が伝播し、テスト内の check.sh がルートを本リポジトリに解決し直して make check がテストを再実行する無限再帰(Stop フックの timeout を食い潰す)を断つためのもの。**通常の make 実行・直接ステージ(lint/test/build)には影響しない**
 - **SKIPの理由**: 出力に必ず理由が付く — `(<tool> 未インストール)` / `(<tool> 起動不可 — 環境を確認してください)` / `(実行不可)` / `(FEEDBACK_CHECK_SKIP)`、およびスタック単位でまとめた `(<stack>: 全ステージ …)`。**ツールが無い・壊れているだけの状態を `FAIL` にしない**(ユーザーのコードの問題ではないため)
 - **検査対象ファイル**: Gitリポジトリなら `git ls-files --cached --others --exclude-standard`。**未コミットの新規ファイルも検査し**、`.gitignore` 済みは除外する
@@ -116,6 +119,14 @@ python3 scripts/feedback_log.py <サブコマンド> [引数]
 
 - **category**: `style` / `architecture` / `testing` / `naming` / `workflow` / `domain`
 - **entry-id**: 記録時刻 `%Y%m%d-%H%M%S`。同一秒に複数記録した場合は `-2`, `-3` … を付けて一意にする(重複すると `promote` が先頭の1件しか掴めず、残りが昇華不能になるため)
+
+### `audit.sh` — オンデマンド脆弱性監査(明示実行専用)
+
+```bash
+bash scripts/audit.sh [プロジェクトルート]
+```
+
+`check.sh` と異なり**ネットワークを使う**(pip-audit / npm audit --audit-level=high / govulncheck / cargo audit)。Stop フックからは呼ばれず、`feedback-loop` スキル等からの明示実行専用。成功時のみ `.feedback/.last-audit` に日付を書き、`stats` / `report` が「最終監査日」を表示する — **7日を超過するか未実行なら推奨行が出る**(WARN と同じ「ブロックせず、溜まったら見える」哲学)。失敗時にスタンプを書かないため、脆弱性が残っている間は推奨が消えない。
 
 ### `hooks/` — Claude Code Hooks ラッパ
 
