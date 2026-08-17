@@ -206,3 +206,55 @@ for p in sys.argv[1:]:
 sys.exit(bad)
 ' "$@"
 }
+
+# harness_check_md_links <file...> — Markdown の内部リンク切れを検出する。
+#
+# 外部URLは検証しない(ネットワークを使わない原則)。検証するのは相対パスだけで、
+# 「READMEに書いたパスが実在しない」「移動でリンクが腐った」を外部依存ゼロで捕まえる。
+#
+# 誤検出を出すと正当な文書で完了がブロックされるため、除外を厚くする:
+# コードブロック(``` / ~~~)とコードスパン(`...`)の中はリンクとして扱わない
+# (文書がリンク記法そのものを説明している箇所を拾わないため)。
+harness_check_md_links() {
+  has python3 || return 0
+  [[ $# -eq 0 ]] && return 0
+  python3 -c '
+import re, sys
+from pathlib import Path
+
+FENCE = re.compile(r"^\s*(```|~~~)")
+# [text](path) と ![alt](path)。パスに空白は含めず、後続の "title" は捨てる
+LINK = re.compile(r"!?\[[^\]]*\]\(([^)\s]+)(?:\s+\"[^\"]*\")?\)")
+SPAN = re.compile(r"`[^`]*`")
+
+bad = 0
+for p in sys.argv[1:]:
+    path = Path(p)
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError as e:
+        print(f"{p}: {e}")
+        bad = 1
+        continue
+    in_fence = False
+    for line in text.splitlines():
+        if FENCE.match(line):
+            in_fence = not in_fence
+            continue
+        if in_fence:
+            continue
+        for m in LINK.finditer(SPAN.sub("", line)):
+            target = m.group(1)
+            # 外部URL・アンカーのみ・絶対パスは対象外
+            if target.startswith(("http://", "https://", "mailto:", "#", "/")):
+                continue
+            # アンカー付きはファイル部分だけを見る(見出しの正規化はツール依存のため踏み込まない)
+            target = target.split("#")[0]
+            if not target:
+                continue
+            if not (path.parent / target).exists():
+                print(f"{p}: リンク先が見つかりません: {target}")
+                bad = 1
+sys.exit(bad)
+' "$@"
+}
