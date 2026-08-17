@@ -112,7 +112,7 @@ WARN は「今は直さないが、溜まったら見える」ための仕組み
 | 秘密情報(主) | `secretlint` 実行可能(npm)**かつ `.secretlintrc.*` が存在** | `npx --no-install secretlint "**/*"` | security | FAIL。設定が無ければ **SKIP**(理由: `.secretlintrc.* 未設定`)— §8.3 の実測により、設定なしでは exit 2 で実行できないため WARN にできない。マスクは既定で有効(`--maskSecrets` というオプションは存在しない) |
 | 秘密情報(代替) | `gitleaks` が PATH にある | `gitleaks detect --no-git --redact --no-banner -s .` | security | FAIL。OS固有バイナリのため任意扱い(P-B4)。**npm の `gitleaks` は別物なので使わない**(§8.1) |
 | 脆弱性(Python) | `pip-audit` あり | `pip-audit` | —(check.sh 外) | **オンデマンド限定**(2026-08-17 改訂)。check.sh には入れない |
-| 脆弱性(Node) | `package-lock.json` 等 + npm | `npm audit --audit-level=high` | —(check.sh 外) | **オンデマンド限定** |
+| 脆弱性(Node) | `package-lock.json` + npm | `npm audit --audit-level=high` | —(check.sh 外) | **オンデマンド限定**。`npm audit` が読めるのは `package-lock.json` だけで、`pnpm-lock.yaml` / `yarn.lock` しか無いと ENOLOCK で exit 1 になる(2026-08-17 実測)。誤FAILを避けるため npm 以外の lockfile は理由付き SKIP とし、`pnpm audit` / `yarn npm audit` の直接実行を案内する |
 | 脆弱性(Go) | `govulncheck` あり | `govulncheck ./...` | —(check.sh 外) | **オンデマンド限定** |
 | 脆弱性(Rust) | `cargo-audit` あり | `cargo audit` | —(check.sh 外) | **オンデマンド限定** |
 
@@ -126,8 +126,8 @@ WARN は「今は直さないが、溜まったら見える」ための仕組み
 
 | 検査 | 検出条件 | コマンド | ステージ | 判定 |
 |---|---|---|---|---|
-| Node | `node_modules` が存在 | `npm ls --all` | lint | FAIL(宣言と実体の不一致・欠損を検出)。`node_modules` 不在時は SKIP(未インストールを欠陥と呼ばない) |
-| Python | `deptry` あり | `deptry .` | lint | FAIL(宣言に無い import・未使用依存) |
+| Node | `node_modules` が存在**かつ PM が npm** | `npm ls --all` | lint | FAIL(宣言と実体の不一致・欠損を検出)。`node_modules` 不在時は SKIP(未インストールを欠陥と呼ばない)。`--all` は npm 固有で pnpm には無く Yarn Berry には `ls` 自体が無いため、他PMでは健全なプロジェクトが usage error で FAIL する — よって npm 以外は SKIP(2026-08-17 実装時に修正) |
+| Python | `deptry` あり | `deptry .` | lint | 宣言(`[tool.deptry]`)あり → FAIL / 無し → **WARN**。§8.2 のとおり誤検出率が未知のため宣言ゲートを敷く(2026-08-17 実装時に確定) |
 | Go | `go.sum` が存在 | `go mod verify` | lint | FAIL |
 | Rust | `Cargo.lock` が存在 | `cargo metadata --offline --format-version 1 >/dev/null` | lint | FAIL |
 
@@ -148,7 +148,7 @@ Go だけ扱いが違うのは、gofmt が事実上の言語仕様であり「�
 |---|---|---|---|
 | Python | `pytest-cov` が import 可能 | `pytest -q -x --cov --cov-report=term-missing` | 閾値宣言(`--cov-fail-under` が設定ファイルにある)→ その閾値で FAIL / 無し → 数値を **WARN** で報告 |
 | Go | 常に(標準機能) | `go test -cover ./...` | 閾値の標準的な宣言方法が無いため常に **WARN**(数値報告) |
-| Node | `package.json` に `test:coverage` スクリプト | `npm run test:coverage` | スクリプトを書いた=宣言 → FAIL |
+| Node | `package.json` に `test:coverage` スクリプト | `npm run test:coverage`(`npm test` の**差し替え**) | スクリプトを書いた=宣言 → FAIL |
 
 閾値が宣言されていない場合にカバレッジ低下で FAIL にしない理由: 初期段階のプロジェクトが常時ブロックされるため。数値は WARN として `events.jsonl` に載るので、傾向は `stats` で追える。
 
@@ -242,7 +242,7 @@ harness_validate_yaml <file...>       # 同上
 | `README.md` | 仕組み・必要ツール |
 | `AGENTS.md` / `docs/pointer_agents.md` | 最終行の意味表に WARN 付きの行を追加(規約3) |
 | `CLAUDE.md` | 変更履歴 |
-| `.claude-plugin/plugin.json` | 0.3.0 → 0.4.0 |
+| `.claude-plugin/plugin.json` | 0.3.0 → 0.6.0(フェーズごとに P1=0.4.0 / P2=0.5.0 / P3=0.6.0 と刻む) |
 | `tests/` | 新規4本(§7) |
 
 ## 7. テスト方針
@@ -253,8 +253,8 @@ harness_validate_yaml <file...>       # 同上
 |---|---|
 | `tests/test_config_syntax.sh` | 壊れたJSON/YAMLを検出 / 複数文書YAML・カスタムタグYAMLを**誤検出しない**(D3回帰)/ JSONC除外(D2回帰)/ PyYAML不在でSKIP / `check_file.sh` と `check.sh` で同判定 |
 | `tests/test_check_warn.sh` | WARN が exit 0 のままであること / 最終行に件数が出ること / FAIL と混在したときは exit 1 になること / 宣言(設定ファイル)の有無で FAIL/WARN が切り替わること |
-| `tests/test_audit_ondemand.sh` | 監査コマンドが check.sh を実行しないこと / 最終監査日スタンプの更新 / report/stats に推奨行が出ること(期間経過時)・出ないこと(期限内) |
-| `tests/test_check_extended.sh` | 偽ツールで各検査の (a) 検出条件 (b) FAIL伝播 (c) ツール不在でSKIP (d) gitleaks に `--redact` が渡ること / 内部リンク切れの検出と外部URL・アンカーの除外 |
+| `tests/test_audit.sh`(実装時に `test_audit_ondemand.sh` から改称) | 監査コマンドが check.sh を実行しないこと / 最終監査日スタンプの更新(成功時のみ)/ ツール不在・npm以外のlockfileで SKIP。report/stats の推奨行は `test_stats.sh` が検証する |
+| `tests/test_check_p2.sh` / `tests/test_check_p3.sh`(実装時に `test_check_extended.sh` から分割) | 偽ツールで各検査の (a) 検出条件 (b) FAIL伝播 (c) ツール不在でSKIP (d) gitleaks に `--redact` が渡ること。内部リンクは `test_md_links.sh` が担当 |
 
 `bash scripts/check.sh` が `ALL PASS` であることを完了条件とする。
 
