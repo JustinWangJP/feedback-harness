@@ -94,7 +94,10 @@ list_files() { # list_files <glob> — 検査対象のファイルを1行1件で
     # --others を含めないと、まだコミットしていない新規ファイルが検査対象外になり、
     # 壊れた新規ファイルがあっても ALL PASS になる。--exclude-standard で
     # .gitignore 済み(ビルド成果物・依存ディレクトリ)は従来どおり除外する
-    git ls-files --cached --others --exclude-standard "$1"
+    # -c core.quotePath=false: 非ASCIIファイル名を8進エスケープ("\350\250...")で
+    # 出さず生のパスで出す。日本語ファイル名を持つプロジェクトで、受け取り側が
+    # ファイルを開けなくなる(実測: .feedback/log/*.md で FileNotFoundError)
+    git -c core.quotePath=false ls-files --cached --others --exclude-standard "$1"
   else
     find . -name "$1" -not -path './.git/*' -not -path './node_modules/*' -not -path './.venv/*'
   fi
@@ -234,6 +237,19 @@ if [[ ${#YAML_FILES[@]} -gt 0 ]]; then
   else
     RESULTS+=("SKIP  config: yaml 構文 (PyYAML 未インストール)")
   fi
+fi
+
+# ドキュメントの内部リンク。外部URLは検証しない(ネットワークを使わない原則)。
+# リンク先が実在しないのは好みの問題ではなく事実誤りなので、常に FAIL とする
+MD_FILES=()
+while IFS= read -r f; do
+  # -f で実在確認: list_files(git ls-files)は追跡済みだが作業ツリーから
+  # 削除されたファイルも列挙する。それは開けないだけでリンクの欠陥ではないため、
+  # 検査対象から外す(渡すと読み取りエラーで完了をブロックしてしまう)
+  [[ -n "$f" && -f "$f" ]] && MD_FILES+=("$f")
+done < <(list_files '*.md')
+if [[ ${#MD_FILES[@]} -gt 0 ]]; then
+  run_stage docs "-" "docs: 内部リンク" harness_check_md_links "${MD_FILES[@]}"
 fi
 
 # ---------- 汎用フォールバック ----------
