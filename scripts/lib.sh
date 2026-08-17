@@ -20,12 +20,6 @@ has() {
   return 0
 }
 
-# 重大度しきい値(shellcheck の -S に渡す)。既定は warning。
-# style/info まで拾うと、導入初日のプロジェクトが既存コードのSC2086等で
-# 完了をブロックされ続けるため、既定では拾わない。
-# shellcheck disable=SC2034  # 読み込み側(check.sh / check_file.sh)で使う
-SHELLCHECK_SEVERITY="${FEEDBACK_SHELLCHECK_SEVERITY:-warning}"
-
 # harness_project_root [明示パス] — 検査対象・状態保存先のプロジェクトルートを解決する。
 #
 # 解決順: 明示引数 → CLAUDE_PROJECT_DIR → git rev-parse --show-toplevel → cwd
@@ -49,6 +43,60 @@ harness_project_root() {
     return 0
   fi
   pwd
+}
+
+# harness_load_config [ルート] — .feedback/config.yaml を読み、解決済みの値を
+# 環境へ載せる。優先順位(環境変数 > 検査 > スタック > 全体 > 既定値)の判断は
+# すべて harness_config.py が行い、ここは受け取るだけ。bash 側に既定値を
+# 置くと2箇所管理になりドリフトするため、既定値もローダーの出力に含まれる。
+# shellcheck disable=SC2034  # 読み込み側(check.sh / check_file.sh / audit.sh)で使う
+harness_load_config() {
+  local root="${1:-}"
+  [[ -n "$root" ]] || root="$(harness_project_root)"
+  local libdir="${BASH_SOURCE[0]%/*}"
+  local shell_out
+  if ! shell_out="$(python3 "$libdir/harness_config.py" --shell "$root" 2>/dev/null)"; then
+    # ローダー自体が起動できない(python3 不在等)。設定なしと同じ扱いで続行する
+    HARNESS_CONFIG_ERROR=""
+    HARNESS_CHECK_SEVERITY=""
+    HARNESS_EXCLUDE=""
+    HARNESS_LOG_TAIL_LINES=40
+    HARNESS_SHELLCHECK_MIN_SEVERITY=warning
+    HARNESS_VULTURE_MIN_CONFIDENCE=80
+    HARNESS_OASDIFF_BASE=main
+    HARNESS_AUDIT_INTERVAL_DAYS=7
+    HARNESS_AUDIT_NPM_LEVEL=high
+    HARNESS_FEEDBACK_OPEN_THRESHOLD=3
+  else
+    eval "$shell_out"
+  fi
+  SHELLCHECK_SEVERITY="$HARNESS_SHELLCHECK_MIN_SEVERITY"
+}
+
+# harness_check_severity <検査ID> <呼び出し側の既定> — 実効判定(fail/warn/skip)。
+# config が触っていない検査は、呼び出し側が宣言ゲートで決めた既定をそのまま返す。
+harness_check_severity() {
+  local id="$1" default="$2" entry
+  for entry in ${HARNESS_CHECK_SEVERITY:-}; do
+    if [[ "${entry%%:*}" == "$id" ]]; then
+      entry="${entry#*:}"
+      printf '%s\n' "${entry%%:*}"
+      return
+    fi
+  done
+  printf '%s\n' "$default"
+}
+
+# harness_check_source <検査ID> — 判定がどこで決まったか(--list-checks 用)。
+harness_check_source() {
+  local id="$1" entry
+  for entry in ${HARNESS_CHECK_SEVERITY:-}; do
+    if [[ "${entry%%:*}" == "$id" ]]; then
+      printf '%s\n' "${entry##*:}"
+      return
+    fi
+  done
+  printf '%s\n' "既定"
 }
 
 # harness_tree_changed <ルート> <スタンプファイル> — 前回の成功検査以降に

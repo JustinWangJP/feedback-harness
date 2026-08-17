@@ -10,6 +10,10 @@ LIBDIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib.sh
 . "$LIBDIR/lib.sh"
 
+# 単一ファイル検査でも shellcheck の重大度は config に従う。python3 の起動は
+# 実測 約26ms で、このスクリプトが起動する ruff / eslint(数百ms)に対して誤差
+harness_load_config
+
 FILE="${1:-}"
 [[ -z "$FILE" || ! -f "$FILE" ]] && exit 0
 

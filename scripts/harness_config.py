@@ -457,6 +457,41 @@ def effective(root, env):
     return out
 
 
+def _cmd_shell(root, env):
+    """bash が eval する KEY=VALUE を出力する。
+
+    値は必ず shlex.quote で括る。config はリポジトリ内のファイルであり、
+    その中身が eval に渡る以上、引用を怠るとファイルがシェルコードとして
+    実行される。quote は改行を含む値も安全に括るため exclude もこの形で渡せる。
+    """
+    import shlex
+
+    eff = effective(root, env)
+    out = []
+
+    def emit(name, value):
+        out.append(f"{name}={shlex.quote(str(value))}")
+
+    emit("HARNESS_CONFIG_ERROR", eff["error"] or "")
+    # 判定は「id:severity:出所」の空白区切り。検査IDと severity と出所は
+    # いずれも空白を含まないため、この形で安全に1変数へ収まる
+    emit(
+        "HARNESS_CHECK_SEVERITY",
+        " ".join(f"{cid}:{sev}:{src}" for cid, (sev, src) in sorted(eff["severity"].items())),
+    )
+    # exclude だけは改行区切り。ユーザーが書く glob には空白を含むパスがありえ、
+    # 空白区切りだと "vendor dir/**" が2件に割れる
+    emit("HARNESS_EXCLUDE", "\n".join(eff["values"]["check.exclude"][0]))
+    emit("HARNESS_LOG_TAIL_LINES", eff["values"]["check.log_tail_lines"][0])
+    emit("HARNESS_SHELLCHECK_MIN_SEVERITY", eff["values"]["checks.shellcheck.min_severity"][0])
+    emit("HARNESS_VULTURE_MIN_CONFIDENCE", eff["values"]["checks.vulture.min_confidence"][0])
+    emit("HARNESS_OASDIFF_BASE", eff["values"]["checks.oasdiff.base"][0])
+    emit("HARNESS_AUDIT_INTERVAL_DAYS", eff["values"]["audit.interval_days"][0])
+    emit("HARNESS_AUDIT_NPM_LEVEL", eff["values"]["audit.npm_audit_level"][0])
+    emit("HARNESS_FEEDBACK_OPEN_THRESHOLD", eff["values"]["feedback.open_threshold"][0])
+    print("\n".join(out))
+
+
 def _cmd_keys():
     """検査IDと既定値を出力する。雛形・ガイド・check.sh とのドリフト検出に使う。"""
     for cid in sorted(CHECKS):
@@ -478,9 +513,13 @@ if __name__ == "__main__":
     if "--keys" in args:
         _cmd_keys()
         sys.exit(0)
+    if "--shell" in args:
+        rest = [a for a in args if not a.startswith("--")]
+        _cmd_shell(rest[0] if rest else os.getcwd(), os.environ)
+        sys.exit(0)
     if "--json" in args:
         rest = [a for a in args if not a.startswith("--")]
         root = rest[0] if rest else os.getcwd()
         print(json.dumps(effective(root, os.environ), ensure_ascii=False, sort_keys=True))
         sys.exit(0)
-    sys.exit("usage: harness_config.py [--keys | --json [root]]")
+    sys.exit("usage: harness_config.py [--keys | --json [root] | --shell [root]]")

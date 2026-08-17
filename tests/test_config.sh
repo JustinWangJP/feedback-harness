@@ -181,4 +181,33 @@ assert_contains "$OUT" "lnit" "エラーに原因が入る"
 assert_contains "$OUT" '"check.log_tail_lines": [40, "既定"]' "壊れていても既定値で続行できる"
 rm -f "$WORK/proj/.feedback/config.yaml"
 
+# --- シェルへの受け渡し ---
+# eval に渡る以上、引用の回帰は致命的。値にシェルメタ文字を入れて確認する
+cat > "$WORK/proj/.feedback/config.yaml" <<'EOF'
+check:
+  exclude:
+    - "vendor dir/**"
+    - "$(touch /tmp/harness_pwned); echo x"
+EOF
+eval "$(python3 "$CFG" --shell "$WORK/proj")"
+assert_file_absent "/tmp/harness_pwned" "config の値がシェルコードとして実行されない"
+ASSERT_CHECKS=$((ASSERT_CHECKS + 1))
+[[ "$(printf '%s' "$HARNESS_EXCLUDE" | wc -l | tr -d ' ')" == "1" ]] \
+  || fail "exclude は改行区切りで2件になる(実際: [$HARNESS_EXCLUDE])"
+assert_contains "$HARNESS_EXCLUDE" "vendor dir/**" "空白を含む glob が割れない"
+
+# --- 判定の参照 ---
+cat > "$WORK/proj/.feedback/config.yaml" <<'EOF'
+checks:
+  vulture:
+    severity: skip
+EOF
+. "$REPO/scripts/lib.sh"
+harness_load_config "$WORK/proj"
+assert_eq "skip" "$(harness_check_severity vulture warn)" "config の判定が返る"
+assert_eq "checks.vulture" "$(harness_check_source vulture)" "出所が返る"
+assert_eq "fail" "$(harness_check_severity ruff fail)" "指定の無い検査は呼び出し側の既定"
+assert_eq "既定" "$(harness_check_source ruff)" "指定が無ければ出所は既定"
+rm -f "$WORK/proj/.feedback/config.yaml"
+
 assert_summary
