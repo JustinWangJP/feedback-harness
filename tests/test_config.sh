@@ -127,7 +127,7 @@ get() { python3 -c 'import json,sys; d=json.load(sys.stdin); print(json.dumps(d,
 
 # config 不在 → 全て既定値
 OUT="$(resolve_json | get)"
-assert_contains "$OUT" '"log_tail_lines": [40, "既定"]' "config 不在で既定値になる"
+assert_contains "$OUT" '"check.log_tail_lines": [40, "既定"]' "config 不在で既定値になる"
 
 cat > "$WORK/proj/.feedback/config.yaml" <<'EOF'
 check:
@@ -145,8 +145,8 @@ OUT="$(resolve_json)"
 assert_contains "$OUT" '"pytest": ["warn", "check.python.warn_on"]' "スタック層がステージを展開する"
 assert_contains "$OUT" '"vulture": ["skip", "checks.vulture"]' "検査層が効く"
 assert_contains "$OUT" '"oasdiff": ["skip", "check.skip"]' "全体層が contract ステージを展開する"
-assert_contains "$OUT" '"log_tail_lines": [10, "check.log_tail_lines"]' "全体層の値が効く"
-assert_contains "$OUT" '"min_confidence": [60, "checks.vulture.min_confidence"]' "検査固有パラメータが効く"
+assert_contains "$OUT" '"check.log_tail_lines": [10, "check.log_tail_lines"]' "全体層の値が効く"
+assert_contains "$OUT" '"checks.vulture.min_confidence": [60, "checks.vulture.min_confidence"]' "検査固有パラメータが効く"
 
 # スタック層は他スタックに漏れない
 assert_not_contains "$OUT" '"go-test":' "Python の warn_on が Go に漏れない"
@@ -171,14 +171,14 @@ assert_contains "$OUT" '"ruff": ["skip", "env.FEEDBACK_CHECK_SKIP"]' "環境変�
 assert_contains "$OUT" '"pytest": ["fail", "checks.pytest"]' "環境変数が触らない検査は config のまま"
 
 OUT="$(resolve_json FEEDBACK_SHELLCHECK_SEVERITY=style)"
-assert_contains "$OUT" '"min_severity": ["style", "env.FEEDBACK_SHELLCHECK_SEVERITY"]' "環境変数がパラメータにも効く"
+assert_contains "$OUT" '"checks.shellcheck.min_severity": ["style", "env.FEEDBACK_SHELLCHECK_SEVERITY"]' "環境変数がパラメータにも効く"
 
 # 壊れた config はエラーを返し、値は既定値のまま
 printf 'check:\n  skip: [lnit]\n' > "$WORK/proj/.feedback/config.yaml"
 OUT="$(resolve_json)"
 assert_contains "$OUT" '"error"' "壊れた config はエラーを返す"
 assert_contains "$OUT" "lnit" "エラーに原因が入る"
-assert_contains "$OUT" '"log_tail_lines": [40, "既定"]' "壊れていても既定値で続行できる"
+assert_contains "$OUT" '"check.log_tail_lines": [40, "既定"]' "壊れていても既定値で続行できる"
 rm -f "$WORK/proj/.feedback/config.yaml"
 
 assert_summary

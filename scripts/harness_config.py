@@ -401,20 +401,19 @@ def resolve(layers, env):
     レイヤ内の優先は 検査 > スタック > 全体。環境変数はすべてに優先する。
     """
     severity = {}
-    # values は "section.key" / "checks.<id>.key" のパスをネストした dict として持つ
-    # (values["check"]["log_tail_lines"], values["checks"]["vulture"]["min_confidence"])。
-    # 出所(source)は変わらずフルパスの文字列(例: "checks.vulture.min_confidence")。
-    values = {"checks": {}}
+    # values はフルパス "section.key" / "checks.<id>.key" を1本のキーとして持つ
+    # フラットな dict(例: values["check.log_tail_lines"], values["checks.vulture.min_confidence"])。
+    # Task 4(シェル配線)・Task 8(feedback_log.py 配線)がこのフルパスキーで直接引くため、
+    # ここをネストした dict に変えると両タスクの消費コードが壊れる。
+    values = {}
 
     # 既定値
     for section, keys in SECTIONS.items():
-        values[section] = {}
         for key, (_, default, _allowed) in keys.items():
-            values[section][key] = (default, "既定")
+            values[f"{section}.{key}"] = (default, "既定")
     for cid, params in CHECK_PARAMS.items():
-        values["checks"][cid] = {}
         for key, (_, default, _allowed) in params.items():
-            values["checks"][cid][key] = (default, "既定")
+            values[f"checks.{cid}.{key}"] = (default, "既定")
 
     # レイヤは後ろから適用する(先頭のレイヤが最後に上書きして勝つ)
     for layer in reversed(layers):
@@ -429,12 +428,12 @@ def resolve(layers, env):
                 severity[cid] = (body["severity"], f"checks.{cid}")
             for key, val in body.items():
                 if key != "severity":
-                    values["checks"].setdefault(cid, {})[key] = (val, f"checks.{cid}.{key}")
+                    values[f"checks.{cid}.{key}"] = (val, f"checks.{cid}.{key}")
         for section, keys in SECTIONS.items():
             body = layer.get(section) or {}
             for key in keys:
                 if key in body:
-                    values[section][key] = (body[key], f"{section}.{key}")
+                    values[f"{section}.{key}"] = (body[key], f"{section}.{key}")
 
     # 環境変数(最優先)
     raw = env.get(ENV_STAGE_SKIP, "").strip()
@@ -445,7 +444,7 @@ def resolve(layers, env):
                     severity[cid] = ("skip", f"env.{ENV_STAGE_SKIP}")
     for var, (cid, key) in ENV_PARAM_OVERRIDES.items():
         if env.get(var):
-            values["checks"].setdefault(cid, {})[key] = (env[var], f"env.{var}")
+            values[f"checks.{cid}.{key}"] = (env[var], f"env.{var}")
 
     return {"severity": severity, "values": values}
 
