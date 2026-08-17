@@ -287,6 +287,42 @@ if anything_detected && has gitleaks; then
   fi
 fi
 
+# GitHub Actions のワークフロー。YAML構文は上で検証済みなので、ここで見るのは
+# アクションの使い方(存在しない入力・シェルの誤り等)。actionlint は Go 製
+# バイナリのため任意扱い(あれば使う)
+if compgen -G ".github/workflows/*.y*ml" >/dev/null 2>&1; then
+  if has actionlint; then
+    run_stage lint "-" "ci: actionlint" actionlint
+  else
+    RESULTS+=("SKIP  ci: actionlint (actionlint 未インストール)")
+  fi
+fi
+
+# Dockerfile。git pathspec の * は / を跨ぐため 'Dockerfile*' 単独では
+# ルート直下しか当たらない(*.py が全階層に当たるのとは非対称)
+DOCKER_FILES=()
+while IFS= read -r f; do
+  [[ -n "$f" && -f "$f" ]] && DOCKER_FILES+=("$f")
+done < <(list_files 'Dockerfile*'; list_files '*/Dockerfile*')
+# 上の2つのグロブは Dockerfile がリポジトリ直下にある場合に重複しない
+# (git pathspec の 'Dockerfile*' はルート直下のみ、'*/Dockerfile*' は1階層以上)。
+# ただし git 外(find フォールバック)では両方が同じファイルを拾うため重複排除する
+if [[ ${#DOCKER_FILES[@]} -gt 1 ]]; then
+  IFS=$'\n' read -r -d '' -a DOCKER_FILES < <(printf '%s\n' "${DOCKER_FILES[@]}" | sort -u && printf '\0')
+fi
+if [[ ${#DOCKER_FILES[@]} -gt 0 ]]; then
+  if has npx && npx --no-install dockerfilelint --version >/dev/null 2>&1; then
+    # dockerfilelint は問題があると exit 2 を返す(実測)。run_stage は非0を
+    # FAIL とするため、そのまま扱える
+    run_stage lint "-" "docker: dockerfilelint" \
+      npx --no-install dockerfilelint "${DOCKER_FILES[@]}"
+  elif has hadolint; then
+    run_stage lint "-" "docker: hadolint" hadolint "${DOCKER_FILES[@]}"
+  else
+    RESULTS+=("SKIP  docker: lint (dockerfilelint / hadolint 未インストール)")
+  fi
+fi
+
 # ---------- 汎用フォールバック ----------
 # 再帰ガード: make check のテストが check.sh を呼び返す循環を断つ。フック実行時は
 # CLAUDE_PROJECT_DIR が子孫まで伝播し、テスト内の check.sh がルートを本リポジトリに

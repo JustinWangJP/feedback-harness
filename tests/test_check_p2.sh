@@ -163,4 +163,40 @@ assert_eq "0" "$RC" "非対応版では完了をブロックしない"
 assert_contains "$OUT" "SKIP  security: gitleaks" "非対応版は理由付きSKIP"
 rm -f "$FAKEBIN/gitleaks"
 
+# --- ci: actionlint(ワークフローがある時だけ) ---
+P12="$(new_project ci_ws)"
+mkdir -p "$P12/.github/workflows"
+printf 'name: t\non: push\njobs:\n  a:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo hi\n' \
+  > "$P12/.github/workflows/ci.yml"
+make_fake actionlint 1
+OUT="$(PATH="$FAKEBIN:$PATH" bash "$CHECK" "$P12" 2>&1)"; RC=$?
+assert_eq "1" "$RC" "actionlint の失敗は exit 1"
+assert_contains "$OUT" "FAIL  ci: actionlint" "FAILとして記録される"
+
+# ワークフローが無ければ何も出さない
+P13="$(new_project ci_none)"
+printf 'x\n' > "$P13/a.txt"
+OUT="$(PATH="$FAKEBIN:$PATH" bash "$CHECK" "$P13" 2>&1)"
+assert_not_contains "$OUT" "ci: actionlint" "ワークフローが無ければステージを出さない"
+rm -f "$FAKEBIN/actionlint"
+
+# --- docker: dockerfilelint(exit 2 を FAIL として扱う) ---
+P14="$(new_project df)"
+printf 'FROM node:latest\n' > "$P14/Dockerfile"
+DFARGS="$WORK/df_args.txt"; : > "$DFARGS"
+make_fake npx 2 "$DFARGS"
+OUT="$(PATH="$FAKEBIN:$PATH" bash "$CHECK" "$P14" 2>&1)"; RC=$?
+assert_eq "1" "$RC" "dockerfilelint の exit 2 を FAIL として扱う"
+assert_contains "$OUT" "FAIL  docker: dockerfilelint" "FAILとして記録される"
+assert_contains "$(cat "$DFARGS")" "Dockerfile" "対象ファイルを渡している"
+
+# サブディレクトリの Dockerfile も拾う
+P15="$(new_project df_sub)"
+mkdir -p "$P15/docker"
+printf 'FROM node:20-alpine\n' > "$P15/docker/Dockerfile"
+make_fake npx 0
+OUT="$(PATH="$FAKEBIN:$PATH" bash "$CHECK" "$P15" 2>&1)"; RC=$?
+assert_eq "0" "$RC" "問題が無ければ exit 0"
+assert_contains "$OUT" "PASS  docker: dockerfilelint" "サブディレクトリの Dockerfile も検査する"
+
 assert_summary
