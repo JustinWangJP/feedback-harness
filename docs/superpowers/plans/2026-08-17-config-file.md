@@ -1852,7 +1852,7 @@ assert_file_exists "$WORK/target/.feedback/config.example.yaml" "config.example.
 
 - [ ] **Step 6: 文書を更新**
 
-`README.md` の環境変数の表の後に設定ファイルの節を追加し、[docs/configuration.md](docs/configuration.md) へリンクする。構成ツリーの `.feedback/` に `config.yaml` / `config.example.yaml` を追加する。
+`README.md` の環境変数の表の後に設定ファイルの節を追加し、設定ガイドへのリンク `[設定ガイド](docs/configuration.md)` を張る(README はリポジトリ直下にあるためこの相対パスで正しい)。構成ツリーの `.feedback/` に `config.yaml` / `config.example.yaml` を追加する。
 
 `scripts/README.md` の `check.sh` 節に `--list-checks` の使い方を追加し、環境変数の説明に「config より優先される」旨を書く。構成ツリーに `harness_config.py` を追加する。
 
