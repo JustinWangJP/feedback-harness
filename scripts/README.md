@@ -184,6 +184,7 @@ Claude Code はプラグインが提供する Hooks(`hooks/hooks.json`)を起動
 
 - **ルールの反映**: `apply-feedback` スキルが `.feedback/rules.md` を読み込む。`CLAUDE.md` のポインタが作業開始前にスキル使用を促す。
 - **指摘の記録**: `capture-feedback` / `feedback-loop` スキルが `feedback_log.py` を呼ぶ。
+- スキル・エージェントの起動条件と手順は上位の [README](../README.md#skills--agents--commands-の使い方プラグイン導入時) を参照(**`init.sh` 導入ではこれらは配られない** — Hooks を持たない環境向けの代替が下記の規約駆動)。
 - **設定ファイル**: プラグインの `hooks/hooks.json` + `skills/` + `agents/` + 導入先の `CLAUDE.md`。(このリポジトリ自身の開発では、これに加えて自己ドッグフーディング用の `.claude/settings.json` を使う)
 
 ### Codex / 汎用エージェント — 規約駆動(手動)
