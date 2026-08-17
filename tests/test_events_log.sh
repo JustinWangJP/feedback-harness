@@ -86,4 +86,24 @@ if harness_tree_changed "$WORK/proj" "$STAMP"; then
   fail "events.jsonl の更新でフルチェックが再燃した(.feedback prune前提が崩れた)"
 fi
 
+# --- WARN は events.jsonl に記録される(成功時の出力はエージェントに届かないため、
+#     WARN を握り潰さずフィードバックループに載せる唯一の経路になる) ---
+: > "$EVENTS"
+mkdir -p "$WORK/fake"
+{ echo '#!/usr/bin/env bash'
+  echo 'echo "=== feedback-harness check ==="'
+  echo 'echo "PASS  python: ruff"'
+  echo 'echo "WARN  python: ruff format"'
+  echo 'echo "ALL PASS (1件WARN — 未対応の指摘があります)"'
+  echo 'exit 0'
+} > "$WORK/fake/check.sh"
+chmod +x "$WORK/fake/check.sh"
+rm -f "$STAMP"
+printf '{"stop_hook_active": false}' \
+  | CLAUDE_PROJECT_DIR="$WORK/proj" bash "$WORK/fake/hooks/on_stop.sh" >/dev/null 2>&1
+EV="$(cat "$EVENTS")"
+assert_contains "$EV" '"result":"warn"' "WARN イベントが記録される"
+assert_contains "$EV" '"check":"python: ruff format"' "WARN のラベルが check として記録される"
+assert_contains "$EV" '"result":"pass"' "同じ実行の stop 成功イベントも残る"
+
 assert_summary

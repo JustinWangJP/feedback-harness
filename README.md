@@ -9,10 +9,54 @@ Claude Code / Codex 両対応のフィードバックハーネス。2つのル�
 
 | 環境 | 自動チェック | ルール反映 |
 |------|-------------|-----------|
-| Claude Code(プラグイン導入) | Hooks(プラグインの `hooks/hooks.json` が提供): 編集直後に `check_file.sh`、応答完了前に `check.sh`(前回の成功検査以降に変更があるときだけ)。失敗時はexit 2でエージェントに差し戻し | `apply-feedback` スキル + CLAUDE.md ポインタ(プラグインが提供) |
+| Claude Code(プラグイン導入) | Hooks(プラグインの `hooks/hooks.json` が提供): 編集直後に `check_file.sh`、応答完了前に `check.sh`(前回の成功検査以降に変更があるときだけ)。失敗時はexit 2でエージェントに差し戻し。設定ファイル(JSON/YAML)の構文も横断的に検査し、宣言していない検査の指摘は WARN(非ブロッキング)として `events.jsonl` に記録される。秘密情報・内部リンク・依存整合性・CI設定も検査する(ツール未導入は SKIP。ハーネスがツールを勝手に導入することはない) | `apply-feedback` スキル + CLAUDE.md ポインタ(プラグインが提供) |
 | Codex ほか(`scripts/init.sh` で導入) | AGENTS.md の規約: 変更ごとに `check_file.sh`、完了前に `check.sh` をエージェント自身が実行 | AGENTS.md の規約で `.feedback/rules.md` を必読化 |
 
 スクリプトとフィードバック蓄積(`.feedback/`)は両環境で完全共有。環境固有なのはエントリポイント(CLAUDE.md / AGENTS.md)と、Hooksの提供元(プラグイン、または `init.sh` 導入時はAGENTS.mdの手動規約)だけ。このリポジトリ自身の `.claude/settings.json` は開発用のHooks設定であり、導入先には配布されない(「構成」節を参照)。
+
+## 機能一覧
+
+検査は**スタックを自動検出**して走る。設定は不要で、ツールが無ければ理由付きで `SKIP` する(勝手に導入しない)。
+
+| ステージ | 検査内容 | 対象 |
+|---|---|---|
+| `lint` | 静的解析 | ruff / eslint / go vet / clippy / shellcheck・bash -n |
+| `typecheck` | 型検査 | mypy(`[tool.mypy]` 宣言時)/ tsc |
+| `test` | テスト(**カバレッジ計装を相乗り**) | pytest(`--cov`)/ go test `-cover` / npm `test:coverage` / cargo test / mvn verify |
+| `build` | ビルド | go build / npm run build / cargo check |
+| `format` | 整形崩れ | ruff format / prettier / gofmt / cargo fmt |
+| `security` | 秘密情報の混入 | secretlint(`.secretlintrc.*` 宣言時)/ gitleaks |
+| `docs` | Markdown の内部リンク切れ | 自前実装(python3 のみ) |
+| `contract` | API の破壊的変更 | oasdiff(OpenAPI)/ cargo semver-checks(`[lib]` crate) |
+| — | 設定ファイルの構文 | `*.json` / `*.yaml`(JSONC・複数文書YAMLを誤検出しない) |
+| — | 依存の実在性・整合性 | npm ls / go mod verify / cargo metadata / deptry |
+| — | CI設定・Dockerfile | actionlint / dockerfilelint・hadolint |
+| — | デッドコード・アーキ制約 | vulture / knip / import-linter(いずれも宣言時) |
+
+蓄積側の機能:
+
+| 機能 | コマンド | 用途 |
+|---|---|---|
+| 指摘の記録 | `feedback_log.py add` | 人間の指摘・成功パターンをその場で記録(signal 付き) |
+| ルール昇華 | `promote` / `merge` / `close` / `retire` | `rules.md` への昇華・統合・退役 |
+| 測定 | `stats` | 初回通過率・平均再チェック回数・頻出WARN・**再発候補** |
+| 報告 | `report` | 朝会/振り返り用の期間ダイジェスト(前期間との比較つき) |
+| 脆弱性監査 | `audit.sh` | オンデマンド実行(唯一ネットワークを使う) |
+
+## できること / できないこと
+
+意図的に**やらない**ことがある。以下は設計判断であり、未実装ではない。
+
+| できること | できないこと(と、その理由) |
+|---|---|
+| 検査失敗をエージェントに自動で差し戻し、自己修正させる | **完了の強制はしない** — WARN(宣言していない検査の指摘)は exit 0 のままで、ブロックするのは FAIL だけ |
+| ツールがあれば使い、無ければ SKIP して理由を出す | **ツールを自動インストールしない**。環境を変える判断はユーザーのもの |
+| オフラインで完結する検査を毎ターン走らせる | **`check.sh` はネットワークを使わない**。脆弱性監査だけは `audit.sh` に分離し、Stop フックからは呼ばない |
+| カバレッジを計測する | **テストを2回走らせない**。既存の test コマンドに計装を足す(または `test:coverage` に差し替える)だけ |
+| 破壊的変更を git ベースラインとの差分で検出する | **リモートを参照しない**。比較元は `git merge-base HEAD <既定ブランチ>`、解決できなければ `HEAD` |
+| 指摘を記録し、次セッションで参照させる | **ルールの自動適用はしない**。`rules.md` 以外(CLAUDE.md 追記・lint 追加)は提案止まりで、反映は人間が承認する |
+| 数字を出す(`stats` / `report`) | **ダッシュボードを作らない**。常駐プロセス・グラフ・外部送信はなく、要求時のテキスト出力のみ |
+| 秘密情報を検出する | **値を出力しない**(secretlint は既定マスク、gitleaks は `--redact` 必須)。失敗ログはエージェントの文脈に入るため |
 
 ## 構成
 
@@ -27,22 +71,29 @@ commands/
 hooks/
   hooks.json        # 配布用 Hooks 定義 (${CLAUDE_PLUGIN_ROOT} 基準)
 scripts/
-  check.sh          # スタック自動検出 (Python/Node/Go/Rust/Java/Shell/Make) → lint/test/build、要約出力
+  check.sh          # スタック自動検出 (Python/Node/Go/Rust/Java/Shell/Make) → 8ステージ + 横断チェック
   check_file.sh     # 単一ファイルの高速チェック (拡張子ベース)
-  lib.sh            # 共有ユーティリティ (has / SHELLCHECK_SEVERITY / harness_project_root / harness_tree_changed)
-  feedback_log.py   # フィードバック記録CLI (add / list / search / promote / merge / close / retire / rules)
+  audit.sh          # オンデマンド脆弱性監査 (唯一のネットワーク検査・Stopフック対象外)
+  lib.sh            # 共有ユーティリティ (has / harness_project_root / harness_tree_changed /
+                    #   harness_validate_json|yaml / harness_check_md_links / harness_log_event|warn)
+  feedback_log.py   # フィードバック記録CLI (add / list / search / promote / merge / close /
+                    #   retire / rules / stats / report)
   init.sh           # 導入スクリプト (Codex 向け資産の展開)
   hooks/            # Claude Code Hooks ラッパー (SessionStart / PostToolUse / Stop)
 .feedback/
-  rules.md          # 一般化された恒久ルール (エージェント必読)
+  rules.md          # 一般化された恒久ルール (エージェント必読・失敗由来/成功由来の2セクション)
   rules.template.md # rules.md のシード (導入時・再生成時に使う雛形)
   log/              # 生のフィードバックエントリ (frontmatter付きMarkdown)
   .last-check       # Stopフックの検査スタンプ (mtime比較用のローカル状態・gitignore対象)
-  events.jsonl      # フック合否のイベントログ (stats用のローカル状態・gitignore対象)
+  .last-retro       # 振り返りの基点 (report --mark が更新・gitignore対象)
+  .last-audit       # 脆弱性監査の最終実行日 (audit.sh が成功時のみ更新・gitignore対象)
+  events.jsonl      # フック合否とWARNのイベントログ (stats/report用のローカル状態・gitignore対象)
+package.json        # 検査ツール(secretlint 等)を npx --no-install で解決するためだけの宣言
 tests/              # bash テスト (make check → check.sh から自動実行される)
 docs/
   pointer_claude.md # 導入先の CLAUDE.md へ追記する断片
   pointer_agents.md # 導入先の AGENTS.md へ追記する断片
+  superpowers/      # 設計書 (specs/) と実装計画 (plans/)
 .claude/
   settings.json     # このリポジトリ自身の開発用 Hooks (配布対象外)
 ```
@@ -90,12 +141,174 @@ cd /path/to/your-project && bash scripts/check.sh   # スタック検出の確�
 
 `scripts/` と `AGENTS.md` が導入先に展開される。`CLAUDE.md` / `AGENTS.md` が既存なら `docs/pointer_*.md` の断片を追記する(重複追記はしない)。`.feedback/rules.md` は空のテンプレートから始まる。
 
+### 導入形態ごとの配布物
+
+| 資産 | プラグイン | `init.sh` |
+|---|---|---|
+| `scripts/check.sh` `check_file.sh` `audit.sh` `lib.sh` `feedback_log.py` | プラグイン側に置かれ `${CLAUDE_PLUGIN_ROOT}` 経由で実行 | 導入先の `scripts/` に実体をコピー |
+| Hooks(`hooks.json`) | ○ 自動起動 | ✗(AGENTS.md の規約が代替) |
+| skills / agents / commands | ○ | ✗(Claude Code 専用のため) |
+| `scripts/hooks/*`・`init.sh` 自身 | ○ | ✗ |
+| `.feedback/`(蓄積データ) | SessionStart フックが初回シード | `init.sh` がシード |
+| `CLAUDE.md` / `AGENTS.md` ポインタ | CLAUDE.md ポインタのみ | 両方(既存なら追記・重複しない) |
+
 ### 更新
 
 | 導入形態 | 更新方法 |
 |---------|---------|
 | プラグイン | 自動(Claude Code がマーケットプレイスを `git pull` する) |
-| `init.sh` でベンダリングした `scripts/` | `init.sh` を再実行する(冪等) |
+| `init.sh` でベンダリングした `scripts/` | `init.sh` を再実行する(冪等)。**新しいスクリプトが増えた場合も再実行で追従する** |
+
+## Skills / Agents / Commands の使い方(プラグイン導入時)
+
+マーケットプレイスから導入すると、スクリプトに加えて **3つの Skill・2つの Agent・1つの Command** が使えるようになる。これらは Claude Code 専用で、`init.sh` 導入(Codex 等)には含まれない — その環境では `AGENTS.md` の規約が代替になる。
+
+### 呼び出され方の違い
+
+| 種別 | 起動のしかた | 誰が起動するか |
+|---|---|---|
+| **Skill** | 依頼の文面に反応して**自動起動**する。明示したいときは名前を出して頼む(例: 「apply-feedback スキルでルールを反映して」) | Claude 自身 |
+| **Agent** | `feedback-loop` スキルが内部で `Agent` ツール経由で起動する | スキル(**直接呼ぶ必要はない**) |
+| **Command** | `/feedback-harness:init` と入力する | ユーザー |
+
+**普段は何も意識しなくてよい。** 導入先の `CLAUDE.md` に置かれるポインタが「実装前は apply-feedback」「指摘を受けたら capture-feedback」と促すため、通常の会話の中で自動的に起動する。以下は「意図して動かしたいとき」の手順。
+
+### Skill 1: `apply-feedback` — 作業前に過去のルールを反映する
+
+**いつ起動するか**: 実装・編集・レビュー・設計を始める前。「過去の指摘を踏まえて」「前回のフィードバックを反映して」「ルールに従って」と言ったとき、およびやり直し・修正の依頼のとき。
+
+**何をするか**:
+
+1. `.feedback/rules.md` を読む(**失敗由来**=守るべき制約 / **成功由来**=再現すべき正例 の2セクション)
+2. 未昇華の open エントリも `list --status open` で確認する(昇華待ちで死蔵させないため)
+3. 今回の作業カテゴリに一致するルールを特定し、方針に組み込んでから実装を始める
+4. ルールと今回の指示が矛盾する場合は**今回の指示を優先**し、矛盾があった旨を伝える(ルール更新の機会になる)
+
+```
+あなた: 認証まわりをリファクタして
+  → apply-feedback が自動起動し、rules.md を読んでから着手する
+```
+
+### Skill 2: `capture-feedback` — 指摘や成功パターンを記録する
+
+**いつ起動するか**: あなたが成果物を修正・指摘した、「こうして」「次からはこうやって」と言った、方針を訂正した — そのすべて。うまくいった進め方を残したいときにも使う。
+
+**何をするか**:
+
+1. 指摘を1文の要約に整理する
+2. 失敗系なら根因を1行判定する(`文脈欠落` / `指示欠陥` / `モデル限界`)— 根因が昇華先を決める
+3. signal を決める(省略時は CLI が推論)
+4. カテゴリを選び `feedback_log.py add` で記録する
+5. open が3件以上になったら昇華(`feedback-loop`)を提案する
+
+```
+あなた: エラーメッセージは日本語で書いて。次からもそうして
+  → capture-feedback が自動起動し、根因つきで記録する
+```
+
+### Skill 3: `feedback-loop` — 全体のオーケストレーター
+
+**いつ起動するか**: 「フィードバックを整理して」「ルール化して」「ハーネスを点検して」「○○プロジェクトに導入して」「ルールを棚卸しして」「調子はどう?」「監査して」など。
+
+依頼の内容から **Phase を自動判定**して実行する:
+
+| 依頼の例 | Phase | 実行内容 |
+|---|---|---|
+| 「フィードバックを整理して」「ルール化して」 | 1 | **feedback-curator エージェント**を起動し、promote / merge / close を判断 |
+| 「ハーネスを点検して」「検証して」 | 2 | **harness-qa エージェント**を起動し、整合性レポートを `_workspace/` に出力 |
+| 「このハーネスを ○○ に導入して」 | 3 | `init.sh` を実行し、導入先で `check.sh` を1回流して確認 |
+| 「ルールを棚卸しして」「定期審査」 | 4 | `stats` を起点に、各ルールを 維持 / 文言強化 / 退役候補 に分類して提示 |
+| 「調子は?」「初回通過率は?」「振り返りの議題」 | — | `stats` / `report --last`(実施後は `--mark` で基点更新) |
+| 「監査して」「脆弱性チェック」 | — | `audit.sh` を実行(ネットワークを使うためフックでは走らない) |
+
+```
+あなた: 溜まったフィードバックを整理してルールにして
+  → feedback-loop が Phase 1 と判定 → feedback-curator を起動
+  → 昇華結果と rules.md の差分が提示される(採否はあなたが決める)
+```
+
+### Agents(スキル経由で起動される)
+
+直接呼ぶ必要はないが、何が動いているかを知っておくと結果を読みやすい。
+
+| Agent | 起動元 | 役割 | 出力 |
+|---|---|---|---|
+| `feedback-curator` | `feedback-loop` Phase 1(Phase 4 は起動せず判断原則だけ援用する) | 指摘を一般化ルールへ昇華する。signal で昇華先を振り分け、失敗系はさらに根因でサブルーティングする | `promote`/`merge`/`close` の実行結果と判断の要約。`rules.md` 以外への反映案(CLAUDE.md 追記・lint 追加)は**提案止まり** |
+| `harness-qa` | `feedback-loop` Phase 2 | ハーネス自体の整合性を境界面クロス比較で検証する(スクリプト実行可否・Hooks 設定・CLAUDE.md/AGENTS.md/rules.md の同期) | `_workspace/qa_report_{日付}.md` に PASS/FAIL/SKIP レポート |
+
+どちらも**共有アーティファクトを勝手に書き換えない**。`rules.md` 以外への変更は提案として提示され、反映するかどうかはユーザーが決める。
+
+### Command: `/feedback-harness:init`
+
+Codex や他の汎用エージェントと**併用する**とき、現在のプロジェクトに `scripts/` と `AGENTS.md` を展開する。Claude Code だけで使うなら不要(スクリプトはプラグイン側にあるため)。
+
+```
+/feedback-harness:init
+```
+
+### 導入できているかの確認
+
+```
+/plugin                      # feedback-harness が enabled になっているか
+```
+
+スキルが起動しているかは、応答中に該当スキルが使われた旨の表示で確認できる。フックが動いているかは、ファイルを1つ編集して `.feedback/events.jsonl` に行が増えるかで確認できる。
+
+## 使い方
+
+### 日常の開発(Claude Code)
+
+自動で走るため、通常は**何も実行しなくてよい**。ファイルを編集すれば `check_file.sh` が、応答を終えようとすれば `check.sh` が動く。失敗は自動でエージェントに差し戻される。
+
+明示的に使うのは次の場面:
+
+```bash
+bash scripts/check.sh                    # 完了前の全体確認(CIでも同じものを使う)
+bash scripts/check.sh /path/to/project   # 別プロジェクトを検査
+FEEDBACK_CHECK_SKIP="test build" bash scripts/check.sh   # 重いステージを外す
+bash scripts/audit.sh                    # 脆弱性監査(ネットワークを使うので手動)
+```
+
+### 指摘を記録する
+
+```bash
+# 人間から指摘を受けたとき(失敗系は根因を1行添える)
+python3 scripts/feedback_log.py add --category style --source human \
+  --summary "エラーメッセージは日本語で書く" --detail "根因: 指示欠陥"
+
+# 効いた進め方・措辞を残すとき(signal は省略時に推論される)
+python3 scripts/feedback_log.py add --category workflow --source agent \
+  --summary "設計を固めてから実装すると手戻りが無い"
+```
+
+Claude Code では `capture-feedback` スキルが同じことを行うため、コマンドを直接叩く必要はない。
+
+### 溜まった指摘を整理する
+
+```bash
+python3 scripts/feedback_log.py list                    # open エントリ一覧
+python3 scripts/feedback_log.py list --signal failure   # 失敗系だけ絞る
+python3 scripts/feedback_log.py promote <id> --rule "<一般化した1行>"
+python3 scripts/feedback_log.py merge <id> --into <既存ルールの出典id>   # 再発時
+python3 scripts/feedback_log.py retire <出典id> --reason "<退役理由>"    # 棚卸し
+```
+
+### 効果を測る・共有する
+
+```bash
+python3 scripts/feedback_log.py stats                 # 初回通過率・再発候補・最終監査日
+python3 scripts/feedback_log.py report --since yesterday   # 朝会の1問
+python3 scripts/feedback_log.py report --last --mark       # 振り返り後に基点を更新
+```
+
+### 環境変数
+
+| 変数 | 既定 | 効果 |
+|---|---|---|
+| `FEEDBACK_CHECK_SKIP` | (空) | 空白区切りでステージを除外(`lint typecheck test build format security docs contract`) |
+| `FEEDBACK_SHELLCHECK_SEVERITY` | `warning` | shellcheck の重大度しきい値。`style` で厳しくする |
+| `FEEDBACK_CONTRACT_BASE` | `main` | API 契約差分のベースラインブランチ |
+| `CLAUDE_PROJECT_DIR` | (自動) | 検査対象・状態保存先のルート。フックが設定する |
 
 ## フィードバック運用フロー
 
@@ -118,6 +331,8 @@ cd /path/to/your-project && bash scripts/check.sh   # スタック検出の確�
 [棚卸]  定期審査 (feedback-loop Phase 4) → 陳腐化したルールは retire で撤去
 [測定]  feedback_log.py stats            — 初回通過率・再発候補(要求時のみ・テキスト出力)
 [報告]  feedback_log.py report --last → 朝会/振り返りの5分議題(実施後に --mark で基点更新)
+[監査]  bash scripts/audit.sh          — 脆弱性監査(オンデマンド・ネットワーク使用)
+                                          成功時のみ .last-audit を更新 → report が期限を見る
 ```
 
 記録は promote を待たずにその時点から次の作業に効く。「溜めてから一括で昇華する」設計にすると、昇華までの間に同じ指摘が再発する。

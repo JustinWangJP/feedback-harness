@@ -64,4 +64,21 @@ EOF
 assert_contains "$(fb list --status open --signal unknown)" "20260101-000000" "signal無しエントリは unknown で絞り込める"
 assert_not_contains "$(fb list --status open --signal context)" "20260101-000000" "unknown は他の信号種に出ない"
 
+# --- signal による正の絞り込み(unknown 以外)---
+# 照合は ID ではなく要約で行う: 同一秒に作られた ID には -2/-3 が付くため、
+# 片方の ID がもう片方の部分文字列になり assert_not_contains が誤検知する
+FAIL_LIST="$(fb list --status open --signal failure)"
+assert_contains "$FAIL_LIST" "指示欠陥の指摘" "failure 指定で failure エントリが出る"
+assert_contains "$FAIL_LIST" "モデル限界の指摘" "同じ signal の別エントリもまとめて出る"
+assert_not_contains "$FAIL_LIST" "文脈欠落の指摘" "context エントリは failure の絞り込みに出ない"
+assert_not_contains "$FAIL_LIST" "効いた措辞" "instruction エントリは failure の絞り込みに出ない"
+assert_not_contains "$FAIL_LIST" "移行前のエントリ" "signal 無しエントリは failure の絞り込みに出ない"
+
+# --- signal と category は AND で効く ---
+# S4(signal=workflow/category=workflow)と S6(signal=workflow/category=style)は
+# signal が同じで category だけ違うため、1組で AND 条件を検証できる
+BOTH="$(fb list --status open --signal workflow --category style)"
+assert_contains "$BOTH" "明示指定" "signal と category の両方に合致すれば出る"
+assert_not_contains "$BOTH" "効いた進め方" "signal が合っても category が違えば出ない"
+
 assert_summary

@@ -32,6 +32,9 @@ cat > "$WORK/project/.feedback/events.jsonl" <<'EOF'
 {"ts":"2026-08-13T04:00:00Z","hook":"stop","result":"pass"}
 {"ts":"2026-08-13T05:00:00Z","hook":"stop","result":"fail"}
 {"ts":"2026-08-13T06:00:00Z","hook":"stop","result":"pass"}
+{"ts":"2026-08-13T07:00:00Z","hook":"stop","result":"warn","check":"python: ruff format"}
+{"ts":"2026-08-13T08:00:00Z","hook":"stop","result":"warn","check":"python: ruff format"}
+{"ts":"2026-08-13T09:00:00Z","hook":"stop","result":"warn","check":"config: yaml 構文"}
 this is not json
 EOF
 
@@ -92,6 +95,8 @@ OUT="$(fb stats --since 2026-08-10)"
 assert_contains "$OUT" "PostToolUse 初回通過率: 1/3 (33%)" "初回通過率(a=fail,b=pass,c=fail → 1/3)"
 assert_contains "$OUT" "1ファイルあたりの平均再チェック回数: 1.00" "平均再チェック回数(fail3/3ファイル)"
 assert_contains "$OUT" "Stop フルチェック初回通過率: 2/3 (67%)" "stop の pass 率"
+# WARN イベントは stop の通過率の分母に混ぜない(warn は「テストの失敗」ではない)
+assert_contains "$OUT" "頻出WARN: python: ruff format(2), config: yaml 構文(1)" "頻出WARNが件数降順で出る"
 assert_contains "$OUT" "失敗上位: src/c.py(2), src/a.py(1)" "失敗上位(件数降順・ファイル名昇順)"
 
 # --- 期間指定(a.py の2026-08-10を除外 → b,c の2ファイル) ---
@@ -115,5 +120,24 @@ rm "$WORK/project/.feedback/events.jsonl"
 OUT3="$(fb stats)"
 assert_contains "$OUT3" "イベント記録が無い" "events.jsonl 不在でもログ集計を続ける"
 assert_contains "$OUT3" "再発候補" "再発候補セクションは出る"
+
+# --- 最終監査日(.last-audit)の表示と期限切れ推奨 ---
+mkdir -p "$WORK/project/.feedback"
+printf '2026-01-01\n' > "$WORK/project/.feedback/.last-audit"
+OUT="$(fb stats)"
+assert_contains "$OUT" "最終監査: 2026-01-01 (" "最終監査日が表示される"
+assert_contains "$OUT" "日前)" "経過日数が表示される"
+assert_contains "$OUT" "監査を推奨" "7日超過なら推奨行が出る"
+
+printf '%s\n' "$(python3 -c 'import datetime; print(datetime.date.today().isoformat())')" \
+  > "$WORK/project/.feedback/.last-audit"
+OUT="$(fb stats)"
+assert_contains "$OUT" "最終監査:" "当日でも表示される"
+assert_not_contains "$OUT" "監査を推奨" "期限内なら推奨は出ない"
+
+rm -f "$WORK/project/.feedback/.last-audit"
+OUT="$(fb stats)"
+assert_contains "$OUT" "最終監査: 未実行" "スタンプ無しは未実行表示"
+assert_contains "$OUT" "scripts/audit.sh" "未実行なら実行方法を案内する"
 
 assert_summary

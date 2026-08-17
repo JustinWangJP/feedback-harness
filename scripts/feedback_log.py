@@ -62,6 +62,9 @@ RULES = ROOT / ".feedback" / "rules.md"
 RULES_TEMPLATE = ROOT / ".feedback" / "rules.template.md"
 EVENTS_FILE = ROOT / ".feedback" / "events.jsonl"
 LAST_RETRO = ROOT / ".feedback" / ".last-retro"
+# audit.sh が監査成功時にだけ書くスタンプ。stats/report が「最終監査日」として表示する
+LAST_AUDIT = ROOT / ".feedback" / ".last-audit"
+AUDIT_INTERVAL_DAYS = 7
 # バンドル資産は状態と違い、スクリプトに同梱されて配られる読み取り専用のファイル。
 # 導入先が rules.template.md を持たない(プラグインのみで導入した)場合の供給元。
 BUNDLED_TEMPLATE = Path(__file__).resolve().parent.parent / ".feedback" / "rules.template.md"
@@ -496,6 +499,26 @@ def cmd_retire(args):
     print(f"retired: rules.md からルールを撤去し、出典エントリ({', '.join(updated) if updated else 'なし'})を retired に更新")
 
 
+def audit_status_lines() -> list:
+    """最終監査日と期限切れ推奨の行を返す(report と stats で共有)。
+
+    audit.sh は成功時のみスタンプを書くため、脆弱性が残っている間は
+    「未実行/期限切れ」表示が消えず修正を促し続ける。
+    """
+    if not LAST_AUDIT.exists():
+        return ["最終監査: 未実行 — bash scripts/audit.sh の実行を推奨"]
+    raw = LAST_AUDIT.read_text(encoding="utf-8").strip()
+    try:
+        d = datetime.date.fromisoformat(raw)
+    except ValueError:
+        return [f"最終監査: {raw} (日付不明)"]
+    days = (datetime.date.today() - d).days
+    line = f"最終監査: {raw} ({days}日前)"
+    if days > AUDIT_INTERVAL_DAYS:
+        line += " — 7日超過、監査を推奨(bash scripts/audit.sh)"
+    return [line]
+
+
 def cmd_stats(args):
     since = resolve_since(args)
     print(f"# feedback stats(イベント集計: {since} 以降 / ログ集計: 全期間)")
@@ -512,11 +535,26 @@ def cmd_stats(args):
             print(f"1ファイルあたりの平均再チェック回数: {sum(fails.values()) / total:.2f}")
         else:
             print("(期間内の post_edit イベントが無い)")
-        stops = [e for e in evs if e.get("hook") == "stop" and str(e.get("ts", ""))[:10] >= since]
+        # warn は「テストの失敗」ではなく指摘の一種なので通過率の分母から除く
+        stops = [
+            e for e in evs
+            if e.get("hook") == "stop"
+            and e.get("result") in ("pass", "fail")
+            and str(e.get("ts", ""))[:10] >= since
+        ]
         if stops:
             spass = sum(1 for e in stops if e.get("result") == "pass")
             print(f"Stop フルチェック初回通過率: {spass}/{len(stops)} ({round(spass * 100 / len(stops))}%)")
         top = sorted(fails.items(), key=lambda kv: (-kv[1], kv[0]))[:5]
+        warns = {}
+        for e in evs:
+            if e.get("result") != "warn" or str(e.get("ts", ""))[:10] < since:
+                continue
+            k = e.get("check", "-")
+            warns[k] = warns.get(k, 0) + 1
+        if warns:
+            top_warn = sorted(warns.items(), key=lambda kv: (-kv[1], kv[0]))[:5]
+            print("頻出WARN: " + ", ".join(f"{k}({v})" for k, v in top_warn))
         if top:
             print("失敗上位: " + ", ".join(f"{f}({n})" for f, n in top))
 
@@ -549,6 +587,11 @@ def cmd_stats(args):
             print(f"open: {len(opens)}件")
         if len(opens) >= 3:
             print("NOTE: openが3件以上 — promote/close を検討してください")
+
+    print()
+    print("[監査]")
+    for line in audit_status_lines():
+        print(line)
 
     print()
     print("[再発候補] 昇華後に同カテゴリの失敗系エントリが再記録されたルール")
@@ -626,8 +669,26 @@ def cmd_report(args):
         print(f"- [{c['category']}] {', '.join(c['sources'])} ({c['date']} 昇華) ← 以降の同カテゴリ: {', '.join(c['recurrences'])}")
 
     print()
-    print("## 数字")
+    print("## 監査")
+    for line in audit_status_lines():
+        print(line)
+
+    print()
+    print("## WARN(ブロックしないが溜まっている指摘)")
     evs = load_events()
+    warns = {}
+    for e in evs:
+        if e.get("result") != "warn" or str(e.get("ts", ""))[:10] < since:
+            continue
+        k = e.get("check", "-")
+        warns[k] = warns.get(k, 0) + 1
+    if not warns:
+        print("(なし)")
+    for k, v in sorted(warns.items(), key=lambda kv: (-kv[1], kv[0])):
+        print(f"- {k}: {v}件")
+
+    print()
+    print("## 数字")
     if not evs:
         print("(イベント記録が無い)")
     else:

@@ -20,6 +20,10 @@ assert_file_exists "$WORK/target/scripts/check.sh" "check.sh"
 assert_file_exists "$WORK/target/scripts/check_file.sh" "check_file.sh"
 assert_file_exists "$WORK/target/scripts/lib.sh" "lib.sh"
 assert_file_exists "$WORK/target/scripts/feedback_log.py" "feedback_log.py"
+# audit.sh は導入先に必要。scripts/README.md が使い方を載せ、feedback_log.py の
+# stats/report が「bash scripts/audit.sh の実行を推奨」と案内するため、
+# 配り漏れると案内先が存在しないコマンドになる
+assert_file_exists "$WORK/target/scripts/audit.sh" "audit.sh"
 assert_file_exists "$WORK/target/AGENTS.md" "AGENTS.md"
 assert_file_exists "$WORK/target/CLAUDE.md" "CLAUDE.md"
 assert_file_exists "$WORK/target/.feedback/rules.md" "rules.md"
