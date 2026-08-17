@@ -159,6 +159,8 @@ feedback:
 
 表示ラベルは ID に使えない。Node のラベルは `node: $PM run lint` のようにパッケージマネージャで変動するため。各呼び出し箇所に安定 ID を明示的に持たせる。
 
+**この表を暗記させない。** 実際に使うときは `--list-checks`(§4.5)が対象プロジェクトの検査IDと現在の判定を並べるので、そこからコピーする。以下は全体像の把握と、実装時の突き合わせ用。
+
 | スタック/群 | 検査ID |
 |---|---|
 | python | `ruff` / `ruff-format` / `mypy` / `pytest` / `deptry` / `vulture` / `import-linter` |
@@ -254,6 +256,32 @@ Python 側(`feedback_log.py`)も同じローダーを import するため、解�
 
 python3 の空起動は実測 **約26ms**(2026-08-17)。`check_file.sh` は毎編集で走るが、同スクリプトは既に ruff / eslint / shellcheck(数百ms)を起動しており、26ms は誤差の範囲。キャッシュ機構は導入しない(スタンプ破損・無効化条件という新しい障害面を作る割に得るものが小さい)。
 
+### 4.5 実効設定の表示(`--list-checks`)
+
+3層にした以上、**「なぜこの判定になっているのか」を見る手段が無いと調査不能になる**。また出力ラベル(`python: vulture`)と設定キー(`vulture`)は別物で、41件の対応を暗記させるのは無理がある。両方を1つのコマンドで解決する。
+
+```
+$ bash scripts/check.sh --list-checks
+
+検査ID       ラベル               ステージ  判定   出所
+ruff         python: ruff         lint      fail   既定
+ruff-format  python: ruff format  format    warn   既定(宣言なし)
+pytest       python: pytest       test      warn   config: check.python.warn_on
+vulture      python: vulture      lint      skip   config: checks.vulture
+deptry       python: deptry       lint      fail   config: checks.deptry
+shellcheck   shell: shellcheck    lint      fail   既定
+```
+
+- **左端の列がそのまま設定キー**になる(コピーして `checks:` の下に貼れる)
+- **`出所` 列**が3層のどこで決まったかを答える。`既定` / `config: <キーのパス>` / `env: <変数名>` の3種
+- 設定を書いた後にもう一度叩けば、意図どおり効いたかが確認できる
+
+**列挙するのは、このプロジェクトで実際に対象になる検査だけ**とする(Python リポジトリで `cargo-fmt` を並べても読みにくくなるだけ)。スタック検出とツール存在確認は通常実行と同じ経路を通すため、ツール未導入は `skip(未インストール)` として現れる。検査コマンド自体は実行しない。
+
+**実装**: `run_stage` に「実行せず行を出力する」モードを設ける。行(ID・ラベル・ステージ)は `check.sh` が持ち、判定と出所は `harness_config.py` が解決する。整形も後者が行う — ラベルに日本語(`config: json 構文` 等)が含まれ、bash の `printf %-20s` はバイト数で数えるため桁がずれる。Python 側で `unicodedata.east_asian_width` を見て揃える。
+
+`--list-checks --json` で機械可読な形も出す(テストがこの出力を突き合わせる)。
+
 ## 5. YAML サブセット
 
 ### 5.1 解釈する記法
@@ -295,7 +323,7 @@ FAIL  config: .feedback/config.yaml
 
 | ファイル | 変更 |
 |---|---|
-| `scripts/harness_config.py` | **新規**。パーサ・スキーマ・既定値・shell/JSON 出力 |
+| `scripts/harness_config.py` | **新規**。パーサ・スキーマ・既定値・shell/JSON 出力・判定と出所の解決・`--list-checks` の表整形(日本語ラベルの桁揃え) |
 | `scripts/lib.sh` | `harness_load_config` を追加。`SHELLCHECK_SEVERITY` の既定値解決を config 経由に変更 |
 | `scripts/check.sh` | 冒頭で config を読む。**46箇所の `run_stage` 呼び出しに検査IDを追加**(論理的な検査は41件 — 宣言ゲートの if/else で1つの検査が2箇所に分かれるため、同じIDを両方に付ける)。`skip` / `exclude` / 判定解決 / ツール固有パラメータ / `log_tail_lines` を反映 |
 | `scripts/check_file.sh` | ルート解決と config 読み込みを追加 |
@@ -323,7 +351,10 @@ FAIL  config: .feedback/config.yaml
 | 未知キー・型不一致・列挙外の値でエラー | 打ち間違いを黙って無視しない契約。**未知の検査ID・スタック名**も含む |
 | **層の優先順位: 検査 > スタック > 全体** | 3層の中核。`check.skip: [test]` と `checks.pytest.severity: fail` が同時にあるとき後者が勝つ |
 | スタック層が他スタックに漏れない | `check.python.skip: [test]` で Go の test が消えないこと |
-| **検査IDの一覧が実装と一致する** | ID は41箇所に散る。`--keys` の出力と `check.sh` の呼び出しを突き合わせ、追加漏れ・重複を機械的に防ぐ |
+| **検査IDの一覧が実装と一致する** | ID は46箇所に散る。`--keys` の出力と `check.sh` の呼び出しを突き合わせ、追加漏れ・重複を機械的に防ぐ |
+| **`--list-checks` の `出所` が正しい** | 3層のどこで決まったかを誤ると調査手段そのものが嘘になる。既定 / config の各層 / 環境変数 の4通りを固定する |
+| `--list-checks` が検査コマンドを実行しない | 一覧表示で `pytest` や `mvn verify` が走ると使い物にならない |
+| `--list-checks` が対象外スタックを並べない | Python リポジトリに `cargo-fmt` が出ないこと |
 | 未対応記法で行番号付きエラー | サブセットの境界を固定する |
 | **値にシェルメタ文字を入れても実行されない** | `eval` を使う以上、引用の回帰は致命的 |
 | `exclude` が実際に検査対象を減らす(check.sh 経由) | 単体のパーサテストでは配線を検証できない |
@@ -332,14 +363,36 @@ FAIL  config: .feedback/config.yaml
 
 ## 9. 設定ガイド(`docs/configuration.md`)の構成
 
-運用されることを目的に、以下の順で書く:
+項目の羅列は読まれない。**動機から引ける形**にする — 「困っていること」から入って、書くべき YAML にたどり着く順で構成する。
 
-1. **3分で始める** — 雛形をコピーし、1項目だけ変えて効果を確認するまで
-2. **優先順位** — 環境変数 > config > 既定値。どちらを使うべきかの指針(commit したい設定は config、その場限りは環境変数)
-3. **項目リファレンス** — 全項目について「既定値 / 型 / 意味 / 変えるとどうなるか / 典型的な値」
-4. **よくある設定例** — 「既存プロジェクトに導入した初日」「CI を厳しくする」「モノレポで一部だけ検査する」など、動機から引ける形
-5. **効かないとき** — 優先順位の確認方法、`--json` での実効値の確認、サポート外記法の一覧
+1. **3分で始める** — `--list-checks` で現状を見る → 雛形をコピー → 1項目だけ変える → もう一度 `--list-checks` で `出所` が変わったことを確認する。この往復を最初に体験させる
+2. **困りごとから引く**(本体) — 各項目に「症状 → 書く YAML → 出力がどう変わるか」を載せる:
+   - 導入初日、既存コードが大量に FAIL する → `warn_on` で段階的に返済する
+   - 誤検出の多い検査を止めたい → `checks.<id>.severity: skip`
+   - モノレポで言語ごとに事情が違う → `check.<stack>`
+   - 生成物・ベンダコードを見せたくない → `exclude`(効かない範囲の注意つき)
+   - CI だけ厳しくしたい → 環境変数で config を被せる
+   - 特定のツールだけ絶対に止めたい → `checks.<id>.severity: fail`
+3. **優先順位** — 環境変数 > 検査 > スタック > 全体 > 既定値。「commit したい設定は config、その場限りは環境変数」という使い分けの指針を添える
+4. **項目リファレンス** — 全項目の「既定値 / 型 / 意味 / 変えるとどうなるか」。ここは辞書として引く章であり、通読させない
+5. **効かないとき** — `--list-checks` で `出所` を見る手順を最初に置く。次に優先順位の確認、サポート外記法の一覧
 6. **YAML サブセットの仕様** — 書ける記法・書けない記法
+
+**設定ファイルの差分が負債返済の記録になる**という運用上の含意も書く — `warn_on: [lint]` を消せたことが、その負債を返した証拠になる。
+
+### 9.1 運用の流れ(ガイド冒頭に置く図)
+
+```
+[導入]   check.sh を1回流す → 落ちるものを把握
+   ↓
+[調整]   --list-checks で検査IDと現在の判定を見る
+   ↓     config.example.yaml をコピーして .feedback/config.yaml へ
+[確認]   --list-checks で「出所」が config になっているか確認
+   ↓
+[共有]   config.yaml を commit → チーム全員に同じ設定が届く
+   ↓
+[返済]   負債を直したら該当行を削除 → 既定値に戻る
+```
 
 ## 10. 未採用の選択肢
 
