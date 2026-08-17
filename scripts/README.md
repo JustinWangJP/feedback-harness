@@ -107,7 +107,7 @@ python3 scripts/feedback_log.py <サブコマンド> [引数]
 | サブコマンド | 引数 | 説明 |
 |-------------|------|------|
 | `add` | `--category <cat>` `--summary "<要約>"` `[--detail "<詳細>"]` `[--source human\|hook\|agent]` `[--signal <context\|instruction\|workflow\|failure>]` | エントリを記録。`open` が3件以上で promote 候補の通知を出す。`--signal` は信号種(省略時は detail/category から推論。昇華先ルーティングの軸) |
-| `list` | `[--status open\|promoted\|closed\|retired\|all]` `[--category <cat>]` | エントリ一覧(既定は `open`) |
+| `list` | `[--status open\|promoted\|closed\|retired\|all]` `[--category <cat>]` `[--signal <context\|instruction\|workflow\|failure\|unknown>]` | エントリ一覧(既定は `open`)。`--signal unknown` は signal を持たない旧エントリを拾う |
 | `search` | `<キーワード>` | エントリの全文検索 |
 | `promote` | `<entry-id>` `--rule "<一般化ルール1行>"` | `rules.md` に**新規ルールを追記**し、対象エントリを `promoted` に更新 |
 | `merge` | `<entry-id>` `--into <既存ルールの出典id>` `[--rule "<更新後の本文>"]` | 既存ルールの**出典に追記**し(新規行を増やさない)、対象を `promoted` に更新。同じ原則の指摘が再発したとき用 |

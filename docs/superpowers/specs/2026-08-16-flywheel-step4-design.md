@@ -167,7 +167,8 @@ events.jsonl が不在・空ならセクション1は「(イベント記録が�
 | `.feedback/rules.template.md` | 2セクションのマーカーと見出し |
 | `skills/capture-feedback/SKILL.md` / `skills/apply-feedback/SKILL.md` / `agents/feedback-curator.md` | §3.5 の文言 |
 | `skills/feedback-loop/SKILL.md` | Phase 0 の実行モード判定に「レポート/数字」系の依頼を追加し、Phase 4 棚卸しの前処理として `stats`/`report` の実行を案内 |
-| `AGENTS.md` / `docs/pointer_agents.md` / `docs/pointer_claude.md` | 規約4のコマンド例に `--signal`、report の案内 |
+| `AGENTS.md` / `docs/pointer_agents.md` | 規約4のコマンド例に `--signal`、report の案内 |
+| ~~`docs/pointer_claude.md`~~ | **変更なし**(実装時に確定)。CLAUDE.md 用ポインタはスキル起動のトリガーだけを持ち、規約4のようなコマンド例を含まない構造のため。Claude Code 側の report/stats 経路は `feedback-loop` の Phase 0 判定が担う |
 | `README.md` | 運用フロー・構成・`stats`/`report` の説明、events.jsonl の位置づけ |
 | `tests/` | §7 の新規テスト |
 | `CLAUDE.md` / `.claude-plugin/plugin.json` | 変更履歴 1 行 / バージョン 0.3.0 |
@@ -180,7 +181,7 @@ events.jsonl が不在・空ならセクション1は「(イベント記録が�
 |---|---|
 | `tests/test_signal_inference.sh` | 根因/category の組合せ推論・明示指定優先・既存エントリ unknown |
 | `tests/test_rules_sections.sh` | マーカーの遅延挿入・promote のセクション選択・retire のセクション跨ぎ撤去 |
-| `tests/test_events_exclusion.sh` | `.feedback/` 内(events.jsonl)の更新で `harness_tree_changed` が「変更なし」を維持する(prune 前提の固定) |
+| `tests/test_events_log.sh`(実装時に `test_events_exclusion.sh` から改称。prune 固定に加えローテーションも見るため) | `.feedback/` 内(events.jsonl)の更新で `harness_tree_changed` が「変更なし」を維持する(prune 前提の固定) |
 | `tests/test_stats.sh` | 数値既知のフィクスチャ events.jsonl/log/rules から初回通過率・再発候補の期待値一致・不正 JSON 行の読み飛ばし |
 | `tests/test_report.sh` | フィクスチャからの期間集計セクション・`--mark` によるスタンプ更新 |
 
