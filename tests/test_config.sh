@@ -117,4 +117,68 @@ checks:
 assert_contains "$(python3 "$CFG" --keys)" "vulture" "--keys が検査IDを出す"
 assert_contains "$(python3 "$CFG" --keys)" "ruff-format" "--keys がハイフン付きIDを出す"
 
+# --- 解決規則(3層 + 環境変数)---
+# 実効値は --json で確認する。出所(どの層で決まったか)も一緒に返る
+mkdir -p "$WORK/proj/.feedback"
+resolve_json() { # resolve_json [環境変数の代入...]
+  env "$@" python3 "$CFG" --json "$WORK/proj"
+}
+get() { python3 -c 'import json,sys; d=json.load(sys.stdin); print(json.dumps(d, sort_keys=True, ensure_ascii=False))'; }
+
+# config 不在 → 全て既定値
+OUT="$(resolve_json | get)"
+assert_contains "$OUT" '"log_tail_lines": [40, "既定"]' "config 不在で既定値になる"
+
+cat > "$WORK/proj/.feedback/config.yaml" <<'EOF'
+check:
+  skip: [contract]
+  log_tail_lines: 10
+  python:
+    warn_on: [test]
+checks:
+  vulture:
+    severity: skip
+    min_confidence: 60
+EOF
+
+OUT="$(resolve_json)"
+assert_contains "$OUT" '"pytest": ["warn", "check.python.warn_on"]' "スタック層がステージを展開する"
+assert_contains "$OUT" '"vulture": ["skip", "checks.vulture"]' "検査層が効く"
+assert_contains "$OUT" '"oasdiff": ["skip", "check.skip"]' "全体層が contract ステージを展開する"
+assert_contains "$OUT" '"log_tail_lines": [10, "check.log_tail_lines"]' "全体層の値が効く"
+assert_contains "$OUT" '"min_confidence": [60, "checks.vulture.min_confidence"]' "検査固有パラメータが効く"
+
+# スタック層は他スタックに漏れない
+assert_not_contains "$OUT" '"go-test":' "Python の warn_on が Go に漏れない"
+
+# 検査層 > スタック層 > 全体層
+cat > "$WORK/proj/.feedback/config.yaml" <<'EOF'
+check:
+  skip: [test]
+  python:
+    warn_on: [test]
+checks:
+  pytest:
+    severity: fail
+EOF
+OUT="$(resolve_json)"
+assert_contains "$OUT" '"pytest": ["fail", "checks.pytest"]' "検査層がスタック層に勝つ"
+assert_contains "$OUT" '"go-test": ["skip", "check.skip"]' "指定の無いスタックは全体層に従う"
+
+# 環境変数が config に勝つ
+OUT="$(resolve_json FEEDBACK_CHECK_SKIP=lint)"
+assert_contains "$OUT" '"ruff": ["skip", "env.FEEDBACK_CHECK_SKIP"]' "環境変数が最優先"
+assert_contains "$OUT" '"pytest": ["fail", "checks.pytest"]' "環境変数が触らない検査は config のまま"
+
+OUT="$(resolve_json FEEDBACK_SHELLCHECK_SEVERITY=style)"
+assert_contains "$OUT" '"min_severity": ["style", "env.FEEDBACK_SHELLCHECK_SEVERITY"]' "環境変数がパラメータにも効く"
+
+# 壊れた config はエラーを返し、値は既定値のまま
+printf 'check:\n  skip: [lnit]\n' > "$WORK/proj/.feedback/config.yaml"
+OUT="$(resolve_json)"
+assert_contains "$OUT" '"error"' "壊れた config はエラーを返す"
+assert_contains "$OUT" "lnit" "エラーに原因が入る"
+assert_contains "$OUT" '"log_tail_lines": [40, "既定"]' "壊れていても既定値で続行できる"
+rm -f "$WORK/proj/.feedback/config.yaml"
+
 assert_summary

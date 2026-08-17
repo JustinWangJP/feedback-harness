@@ -343,6 +343,121 @@ def validate(cfg, path):
     return cfg
 
 
+# ---------- 解決 ----------
+
+CONFIG_RELPATH = ".feedback/config.yaml"
+
+# 環境変数 -> 何を上書きするか
+ENV_STAGE_SKIP = "FEEDBACK_CHECK_SKIP"
+ENV_PARAM_OVERRIDES = {
+    "FEEDBACK_SHELLCHECK_SEVERITY": ("shellcheck", "min_severity"),
+    "FEEDBACK_CONTRACT_BASE": ("oasdiff", "base"),
+}
+
+
+def load(root):
+    """<root>/.feedback/config.yaml を読んで検証する。
+
+    戻り値は (cfg, error)。ファイルが無ければ ({}, None)。
+    壊れていれば ({}, メッセージ) — 呼び出し側が FAIL を立てたうえで
+    既定値のまま続行できるようにするため、例外を投げない。
+    """
+    import os
+
+    path = os.path.join(root, CONFIG_RELPATH)
+    if not os.path.isfile(path):
+        return {}, None
+    try:
+        with open(path, encoding="utf-8") as fh:
+            return validate(parse_yaml(fh.read(), CONFIG_RELPATH), CONFIG_RELPATH), None
+    except ConfigError as exc:
+        return {}, str(exc)
+    except OSError as exc:
+        return {}, f"{CONFIG_RELPATH}: 読み取れません({exc})"
+
+
+def _stage_verdicts(scope, body, prefix, out, only_stack=None):
+    """skip/fail_on/warn_on のステージ集合を、検査ID単位の判定へ展開する。
+
+    fail_on と warn_on の両方に同じステージがある場合は fail_on を優先する(安全側)。
+    """
+    for key, sev in (("warn_on", "warn"), ("fail_on", "fail"), ("skip", "skip")):
+        for stage in body.get(key) or []:
+            for cid, (stack, cstage) in CHECKS.items():
+                if cstage != stage:
+                    continue
+                if only_stack is not None and stack != only_stack:
+                    continue
+                out[cid] = (sev, f"{prefix}.{key}")
+    _ = scope
+
+
+def resolve(layers, env):
+    """設定レイヤの列と環境変数から、実効値と出所を決める。
+
+    レイヤは「先に来たものが勝つ」。v1 ではレイヤは1つだが、個人設定
+    (.feedback/local/config.yaml)を後から足すときに、この関数を書き直さず
+    呼び出し側の1行で済ませられるよう最初から列で受ける。
+    レイヤ内の優先は 検査 > スタック > 全体。環境変数はすべてに優先する。
+    """
+    severity = {}
+    # values は "section.key" / "checks.<id>.key" のパスをネストした dict として持つ
+    # (values["check"]["log_tail_lines"], values["checks"]["vulture"]["min_confidence"])。
+    # 出所(source)は変わらずフルパスの文字列(例: "checks.vulture.min_confidence")。
+    values = {"checks": {}}
+
+    # 既定値
+    for section, keys in SECTIONS.items():
+        values[section] = {}
+        for key, (_, default, _allowed) in keys.items():
+            values[section][key] = (default, "既定")
+    for cid, params in CHECK_PARAMS.items():
+        values["checks"][cid] = {}
+        for key, (_, default, _allowed) in params.items():
+            values["checks"][cid][key] = (default, "既定")
+
+    # レイヤは後ろから適用する(先頭のレイヤが最後に上書きして勝つ)
+    for layer in reversed(layers):
+        check = layer.get("check") or {}
+        _stage_verdicts("global", check, "check", severity)
+        for stack in STACKS:
+            body = check.get(stack) or {}
+            if body:
+                _stage_verdicts(stack, body, f"check.{stack}", severity, only_stack=stack)
+        for cid, body in (layer.get("checks") or {}).items():
+            if "severity" in body:
+                severity[cid] = (body["severity"], f"checks.{cid}")
+            for key, val in body.items():
+                if key != "severity":
+                    values["checks"].setdefault(cid, {})[key] = (val, f"checks.{cid}.{key}")
+        for section, keys in SECTIONS.items():
+            body = layer.get(section) or {}
+            for key in keys:
+                if key in body:
+                    values[section][key] = (body[key], f"{section}.{key}")
+
+    # 環境変数(最優先)
+    raw = env.get(ENV_STAGE_SKIP, "").strip()
+    if raw:
+        for stage in raw.split():
+            for cid, (_stack, cstage) in CHECKS.items():
+                if cstage == stage:
+                    severity[cid] = ("skip", f"env.{ENV_STAGE_SKIP}")
+    for var, (cid, key) in ENV_PARAM_OVERRIDES.items():
+        if env.get(var):
+            values["checks"].setdefault(cid, {})[key] = (env[var], f"env.{var}")
+
+    return {"severity": severity, "values": values}
+
+
+def effective(root, env):
+    """load + resolve をまとめた入口。error は呼び出し側が FAIL に使う。"""
+    cfg, error = load(root)
+    out = resolve([cfg] if cfg else [], env)
+    out["error"] = error
+    return out
+
+
 def _cmd_keys():
     """検査IDと既定値を出力する。雛形・ガイド・check.sh とのドリフト検出に使う。"""
     for cid in sorted(CHECKS):
@@ -357,7 +472,16 @@ def _cmd_keys():
 
 
 if __name__ == "__main__":
-    if "--keys" in sys.argv:
+    import json
+    import os
+
+    args = sys.argv[1:]
+    if "--keys" in args:
         _cmd_keys()
         sys.exit(0)
-    sys.exit("usage: harness_config.py --keys")
+    if "--json" in args:
+        rest = [a for a in args if not a.startswith("--")]
+        root = rest[0] if rest else os.getcwd()
+        print(json.dumps(effective(root, os.environ), ensure_ascii=False, sort_keys=True))
+        sys.exit(0)
+    sys.exit("usage: harness_config.py [--keys | --json [root]]")
