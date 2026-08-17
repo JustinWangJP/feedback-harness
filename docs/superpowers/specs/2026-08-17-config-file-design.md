@@ -29,7 +29,7 @@
 | 論点 | 決定 | 理由 |
 |---|---|---|
 | 配置 | `.feedback/config.yaml` | `.feedback/` は既にハーネスの名前空間。リポジトリ直下にドットファイルを増やさない |
-| 優先順位 | **環境変数 > config > 既定値**(項目単位) | config はチームの既定値(commit)、環境変数はその場の一時上書き(CI・調査中)。既存の環境変数運用を壊さない |
+| 優先順位 | **環境変数 > 検査単位 > スタック単位 > 全体 > 既定値**(項目単位・最も具体的な指定が勝つ) | config はチームの既定値(commit)、環境変数はその場の一時上書き(CI・調査中)。既存の環境変数運用を壊さない。3層にする理由は §3 |
 | YAML パーサ | **最小サブセットを自前実装**(python3 標準ライブラリのみ) | PyYAML はこのハーネスが任意扱いにしている依存で、**開発機にも入っていない**(2026-08-17 実測)。PyYAML 必須にすると設定が読めない環境が生まれ、「設定が黙って効かない」という最悪の失敗モードになる |
 | 壊れた config | **行番号付きで FAIL を立てる**(黙って既定値に落とさない) | 設定が効いていないことに気づけない状態は、検査が SKIP されるより危険。ハーネスの既存原則(SKIP には必ず理由を出す)の延長。FAIL を立てたうえで残りの検査は既定値で続行する(§6) |
 | 雛形 | `config.example.yaml` を配布し `config.yaml` は**自動生成しない** | 空の雛形が commit されると「設定した」のか「置いただけ」なのか区別できなくなる |
@@ -41,18 +41,61 @@
 
 ## 3. スキーマ(v1)
 
+### 3.0 なぜ3層か
+
+ステージ単位だけでは粒度が粗すぎる。実測(2026-08-17)で `check.sh` には**個別の検査が41個**あり、そのうち **21個が `lint` ステージに同居**している。`warn_on: [lint]` と書くと、`shell: bash -n`(構文エラー)や `config: json 構文` まで一斉に WARN へ落ちてしまう。
+
+また `skip` の語彙は全スタック共通のため、「Python の test だけ外す」「Node の build は動かさない」といったモノレポで頻出する要求を表現できない。
+
+そこで**最も具体的な指定が勝つ**3層にする:
+
+```yaml
+check:
+  skip: [contract]              # ① 全体 — 全スタックに効く
+  python:
+    skip: [test]                # ② スタック単位 — Python の test だけ外す
+  node:
+    warn_on: [lint]             # Node の lint 群だけ WARN に落とす
+
+checks:                          # ③ 検査単位 — 最も具体的
+  vulture:
+    severity: skip              # この検査だけ実行しない
+    min_confidence: 60          # ツール固有パラメータもここに置く
+  deptry:
+    severity: fail              # 宣言が無くても FAIL に上げる
+  shellcheck:
+    severity: warn              # FAIL を WARN に落とす
+    min_severity: style         # shellcheck -S に渡す値
+```
+
+**glob パターン(`"python: *"` のような書き方)は採らない。** 任意の文字列が有効なキーになり、`vultrue` のような打ち間違いを検出できなくなる。§5.3 で「未知キーはエラー」を要件にした以上、キーは閉じた集合でなければならない。
+
+**②のキーはスタックに限る**(`python` / `node` / `go` / `rust` / `java` / `shell`)。横断検査の群名(`config` / `docs` / `security` / `ci` / `docker` / `contract`)を②に許すと、`docs` / `security` / `contract` がステージ語彙と衝突して同じ語が2つの意味を持つ。横断検査は群あたりの数が少ないので③で個別に指定すれば足りる。
+
+### 3.1 全体像
+
 ```yaml
 version: 1                      # スキーマ版。省略時は 1
 
 check:
+  # ① 全体
   skip: []                      # 実行しないステージ
-  exclude: []                   # 検査対象から外すパス glob
   fail_on: []                   # 宣言が無くても FAIL にするステージ
   warn_on: []                   # FAIL を WARN に落とすステージ
-  shellcheck_severity: warning  # style | info | warning | error
-  vulture_min_confidence: 80    # 0-100
-  contract_base: main           # API契約差分のベースラインブランチ
+  exclude: []                   # 検査対象から外すパス glob
   log_tail_lines: 40            # 失敗ログの表示行数
+
+  # ② スタック単位(python / node / go / rust / java / shell)
+  python:
+    skip: []
+    fail_on: []
+    warn_on: []
+
+# ③ 検査単位(検査IDは §3.4)
+checks:
+  vulture:
+    severity: warn              # fail | warn | skip
+    min_confidence: 80
 
 audit:
   interval_days: 7              # 「監査を推奨」を出すまでの日数
@@ -62,36 +105,73 @@ feedback:
   open_threshold: 3             # promote を促す open エントリ件数
 ```
 
-### 3.1 各項目の意味と既定値
+### 3.2 各項目の意味と既定値
+
+**① 全体(`check`)**
 
 | キー | 型 | 既定値 | 対応する環境変数 | 効果 |
 |---|---|---|---|---|
-| `check.skip` | 文字列リスト | `[]` | `FEEDBACK_CHECK_SKIP` | 指定ステージを `SKIP (FEEDBACK_CHECK_SKIP)` として飛ばす。語彙は `lint` / `typecheck` / `test` / `build` / `format` / `security` / `docs` / `contract` |
-| `check.exclude` | glob リスト | `[]` | — | ハーネスが列挙するファイルから除外する(§3.3 に限界を明記) |
-| `check.fail_on` | 文字列リスト | `[]` | — | 宣言(設定ファイル)が無くても WARN ではなく FAIL にするステージ |
-| `check.warn_on` | 文字列リスト | `[]` | — | FAIL するステージを WARN に落とす。`skip` より弱い緩和手段 |
-| `check.shellcheck_severity` | 文字列 | `warning` | `FEEDBACK_SHELLCHECK_SEVERITY` | shellcheck `-S` に渡す重大度 |
-| `check.vulture_min_confidence` | 整数 | `80` | — | vulture の誤検出しきい値。下げると検出が増える |
-| `check.contract_base` | 文字列 | `main` | `FEEDBACK_CONTRACT_BASE` | `git merge-base HEAD <値>` のベースライン |
-| `check.log_tail_lines` | 整数 | `40` | — | FAIL / WARN 時に出すログ行数。エージェントの文脈量に直結する |
-| `audit.interval_days` | 整数 | `7` | — | `stats` / `report` が「監査を推奨」を出すまでの経過日数 |
-| `audit.npm_audit_level` | 文字列 | `high` | — | `npm audit --audit-level=<値>` |
-| `feedback.open_threshold` | 整数 | `3` | — | `add` / `stats` / `report` が promote を促す open 件数 |
+| `skip` | ステージリスト | `[]` | `FEEDBACK_CHECK_SKIP` | 指定ステージを飛ばす。語彙は `lint` / `typecheck` / `test` / `build` / `format` / `security` / `docs` / `contract` |
+| `fail_on` | ステージリスト | `[]` | — | 宣言が無くても WARN ではなく FAIL にする |
+| `warn_on` | ステージリスト | `[]` | — | FAIL するステージを WARN に落とす |
+| `exclude` | glob リスト | `[]` | — | ハーネスが列挙するファイルから除外する(§3.5 に限界) |
+| `log_tail_lines` | 整数 | `40` | — | FAIL / WARN 時に出すログ行数。エージェントの文脈量に直結する |
 
-### 3.2 `fail_on` / `warn_on` の適用規則
+**② スタック単位(`check.<stack>`)**
 
-現在の判定は呼び出し側で `run_stage`(FAIL)と `run_stage_soft`(WARN)を選び分けている。config はこの選択を**ステージ単位で上書き**する:
+`skip` / `fail_on` / `warn_on` の3キーのみ。①と同じ意味で、そのスタックの検査にだけ効く。スタックは `python` / `node` / `go` / `rust` / `java` / `shell`。
 
-| 呼び出し | `fail_on` に含む | `warn_on` に含む | どちらにも無い |
+**③ 検査単位(`checks.<id>`)**
+
+| キー | 型 | 既定値 | 効果 |
 |---|---|---|---|
-| `run_stage`(宣言あり) | FAIL | **WARN** | FAIL |
-| `run_stage_soft`(宣言なし) | **FAIL** | WARN | WARN |
+| `severity` | `fail` \| `warn` \| `skip` | 検査ごと(現行の宣言ゲートの結果) | この検査の判定。`skip` は実行しない |
+| ツール固有キー | — | — | 下表 |
 
-両方に同じステージを書いた場合は `fail_on` を優先する(安全側)。
+| 検査ID | 固有キー | 型 | 既定値 | 対応する環境変数 |
+|---|---|---|---|---|
+| `shellcheck` | `min_severity` | `style`\|`info`\|`warning`\|`error` | `warning` | `FEEDBACK_SHELLCHECK_SEVERITY` |
+| `vulture` | `min_confidence` | 整数 0-100 | `80` | — |
+| `oasdiff` | `base` | 文字列 | `main` | `FEEDBACK_CONTRACT_BASE` |
+
+**その他のセクション**
+
+| キー | 型 | 既定値 | 効果 |
+|---|---|---|---|
+| `audit.interval_days` | 整数 | `7` | `stats` / `report` が「監査を推奨」を出すまでの経過日数 |
+| `audit.npm_audit_level` | 文字列 | `high` | `npm audit --audit-level=<値>` |
+| `feedback.open_threshold` | 整数 | `3` | `add` / `stats` / `report` が promote を促す open 件数 |
+
+### 3.3 判定の解決規則
+
+現在の判定は呼び出し側で `run_stage`(FAIL)と `run_stage_soft`(WARN)を選び分けている。config はこの選択を上書きする。**最も具体的な指定が勝つ**:
+
+1. `checks.<id>.severity` があればそれを使う
+2. 無ければ `check.<stack>` の `fail_on` / `warn_on` / `skip` を見る
+3. 無ければ `check`(全体)の同キーを見る
+4. どれも無ければ呼び出し側の既定(宣言ゲートの結果)
+
+同じ層で `fail_on` と `warn_on` の両方に同じステージを書いた場合は `fail_on` を優先する(安全側)。
 
 `warn_on` は `skip` より弱い緩和手段である点に注意する — `skip` は検査自体を行わないが、`warn_on` は検査して報告だけする。「今は直せないが見えていてほしい」ときに使う。
 
-### 3.3 `exclude` の適用範囲(重要な限界)
+### 3.4 検査ID(41件)
+
+表示ラベルは ID に使えない。Node のラベルは `node: $PM run lint` のようにパッケージマネージャで変動するため。各呼び出し箇所に安定 ID を明示的に持たせる。
+
+| スタック/群 | 検査ID |
+|---|---|
+| python | `ruff` / `ruff-format` / `mypy` / `pytest` / `deptry` / `vulture` / `import-linter` |
+| node | `node-lint` / `node-typecheck` / `tsc` / `node-test` / `node-test-coverage` / `node-build` / `npm-ls` / `prettier` / `knip` |
+| go | `go-vet` / `go-build` / `go-test` / `go-mod-verify` / `gofmt` |
+| rust | `clippy` / `cargo-check` / `cargo-test` / `cargo-metadata` / `cargo-fmt` / `cargo-semver-checks` |
+| java | `mvn` / `gradle` |
+| shell | `bash-syntax` / `shellcheck` |
+| 横断 | `json-syntax` / `yaml-syntax` / `md-links` / `secretlint` / `gitleaks` / `actionlint` / `dockerfilelint` / `hadolint` / `oasdiff` / `make-check` |
+
+`gradle` は `./gradlew check` と `gradle check` の両方を指す(起動方法の違いであって別の検査ではない)。
+
+### 3.5 `exclude` の適用範囲(重要な限界)
 
 `exclude` が効くのは**ハーネス自身がファイルを列挙する検査**に限る:
 
@@ -120,19 +200,31 @@ lib.sh: harness_load_config [root]   # 上記を eval する薄いラッパ
 
 ### 4.2 シェルへの受け渡し
 
+3層を bash 側で解決させると解決規則が2箇所(Python と bash)に散る。**解決はローダー側で済ませ、bash には解決済みの値だけを渡す**:
+
 ```
-HARNESS_CHECK_SKIP='test build'
-HARNESS_CHECK_EXCLUDE='vendor/** dist/**'
-HARNESS_CHECK_FAIL_ON='format'
-HARNESS_CHECK_WARN_ON=''
-HARNESS_CHECK_SHELLCHECK_SEVERITY='warning'
-HARNESS_CHECK_VULTURE_MIN_CONFIDENCE='80'
-HARNESS_CHECK_CONTRACT_BASE='main'
-HARNESS_CHECK_LOG_TAIL_LINES='40'
+# 全体・スタック層は解決済みのステージ集合として出す
+HARNESS_SKIP_STAGES='contract'                 # 全体
+HARNESS_SKIP_STAGES_PYTHON='test'              # スタック単位(存在するスタックの分だけ)
+HARNESS_FAIL_ON_PYTHON=''
+HARNESS_WARN_ON_NODE='lint'
+
+# 検査層は「ID→判定」の解決済みマップ(空白区切りの id:severity)
+HARNESS_CHECK_SEVERITY='vulture:skip deptry:fail shellcheck:warn'
+
+# ツール固有パラメータと全体設定
+HARNESS_SHELLCHECK_MIN_SEVERITY='warning'
+HARNESS_VULTURE_MIN_CONFIDENCE='80'
+HARNESS_OASDIFF_BASE='main'
+HARNESS_LOG_TAIL_LINES='40'
+HARNESS_EXCLUDE='vendor/**
+dist/**'
 HARNESS_AUDIT_INTERVAL_DAYS='7'
 HARNESS_AUDIT_NPM_LEVEL='high'
 HARNESS_FEEDBACK_OPEN_THRESHOLD='3'
 ```
+
+`run_stage` は自分の `<id>` と `<stage>` を持っているので、`HARNESS_CHECK_SEVERITY` を引き、無ければスタック層・全体層のステージ集合を見る、という**参照だけ**を行う。優先順位の判断ロジックはローダーが持つ。
 
 出力される値は**必ず `shlex.quote` で括る**。config はリポジトリ内のファイルであり、その値が `eval` に渡る以上、引用を怠るとファイルの中身がシェルコードとして実行される。
 
@@ -147,14 +239,14 @@ HARNESS_FEEDBACK_OPEN_THRESHOLD='3'
 
 ### 4.3 優先順位の実現
 
-env > config > 既定値 は、config が既定値を埋めた変数に対して環境変数を被せるだけで実現する:
+環境変数は config の3層すべてに優先する。ローダーが `os.environ` を最初に見て解決するため、bash 側は解決済みの値を使うだけでよい:
 
 ```bash
-SKIP="${FEEDBACK_CHECK_SKIP:-$HARNESS_CHECK_SKIP}"
-SHELLCHECK_SEVERITY="${FEEDBACK_SHELLCHECK_SEVERITY:-$HARNESS_CHECK_SHELLCHECK_SEVERITY}"
+SKIP="$HARNESS_SKIP_STAGES"                    # FEEDBACK_CHECK_SKIP は解決済み
+SHELLCHECK_SEVERITY="$HARNESS_SHELLCHECK_MIN_SEVERITY"
 ```
 
-Python 側も同じ順で解決する(`os.environ` → config → 既定値)。
+Python 側(`feedback_log.py`)も同じローダーを import するため、解決規則は1箇所にしか存在しない。
 
 ### 4.4 呼び出し箇所と実行コスト
 
@@ -183,7 +275,7 @@ python3 の空起動は実測 **約26ms**(2026-08-17)。`check_file.sh` は毎�
 
 - **未知キーはエラー** — `shelcheck_severity` のような打ち間違いを黙って無視しない。既知キーの一覧をエラーに添える
 - 型不一致はエラー(`interval_days: "seven"` 等)
-- 列挙値の検証(`shellcheck_severity` / `npm_audit_level` / ステージ名)
+- 列挙値の検証(`severity` / `checks.shellcheck.min_severity` / `audit.npm_audit_level` / ステージ名 / スタック名 / 検査ID)
 - `version` が 1 より大きければエラー(「このハーネスは version 1 まで対応」)
 
 ## 6. エラー処理
@@ -205,7 +297,7 @@ FAIL  config: .feedback/config.yaml
 |---|---|
 | `scripts/harness_config.py` | **新規**。パーサ・スキーマ・既定値・shell/JSON 出力 |
 | `scripts/lib.sh` | `harness_load_config` を追加。`SHELLCHECK_SEVERITY` の既定値解決を config 経由に変更 |
-| `scripts/check.sh` | 冒頭で config を読む。`skip` / `exclude` / `fail_on` / `warn_on` / `vulture_min_confidence` / `contract_base` / `log_tail_lines` を反映 |
+| `scripts/check.sh` | 冒頭で config を読む。**46箇所の `run_stage` 呼び出しに検査IDを追加**(論理的な検査は41件 — 宣言ゲートの if/else で1つの検査が2箇所に分かれるため、同じIDを両方に付ける)。`skip` / `exclude` / 判定解決 / ツール固有パラメータ / `log_tail_lines` を反映 |
 | `scripts/check_file.sh` | ルート解決と config 読み込みを追加 |
 | `scripts/audit.sh` | `npm_audit_level` を反映 |
 | `scripts/feedback_log.py` | `harness_config` を import し `interval_days` / `open_threshold` を反映 |
@@ -228,7 +320,10 @@ FAIL  config: .feedback/config.yaml
 | config の値が反映される | 基本機能 |
 | **環境変数が config に勝つ** | 優先順位の中核。逆転すると CI の一時上書きができなくなる |
 | 未設定項目だけ既定値に落ちる(部分指定) | 「全項目書かないと動かない」設定ファイルは使われない |
-| 未知キー・型不一致・列挙外の値でエラー | 打ち間違いを黙って無視しない契約 |
+| 未知キー・型不一致・列挙外の値でエラー | 打ち間違いを黙って無視しない契約。**未知の検査ID・スタック名**も含む |
+| **層の優先順位: 検査 > スタック > 全体** | 3層の中核。`check.skip: [test]` と `checks.pytest.severity: fail` が同時にあるとき後者が勝つ |
+| スタック層が他スタックに漏れない | `check.python.skip: [test]` で Go の test が消えないこと |
+| **検査IDの一覧が実装と一致する** | ID は41箇所に散る。`--keys` の出力と `check.sh` の呼び出しを突き合わせ、追加漏れ・重複を機械的に防ぐ |
 | 未対応記法で行番号付きエラー | サブセットの境界を固定する |
 | **値にシェルメタ文字を入れても実行されない** | `eval` を使う以上、引用の回帰は致命的 |
 | `exclude` が実際に検査対象を減らす(check.sh 経由) | 単体のパーサテストでは配線を検証できない |
