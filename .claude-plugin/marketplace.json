@@ -1,6 +1,6 @@
 {
   "name": "feedback-harness",
-  "description": "lint/test/build の自動フィードバックと、人間のレビュー指摘の蓄積・ルール化を行う Claude Code プラグイン兼マーケットプレイス",
+  "description": "コード検査の結果をエージェントへ自動で差し戻し、人間のレビュー指摘を蓄積してルール化する Claude Code プラグイン兼マーケットプレイス。スタックを自動検出して検査し、未導入のツールは理由付きでスキップする",
   "owner": {
     "name": "JustinWangJP",
     "url": "https://github.com/JustinWangJP"
@@ -9,7 +9,7 @@
     {
       "name": "feedback-harness",
       "source": "./",
-      "description": "lint/test/build の自動フィードバックと、人間のレビュー指摘の蓄積・ルール化"
+      "description": "lint・型・テスト・ビルド・整形・秘密情報・ドキュメント・API契約の8ステージを Hooks で自動実行し、失敗はエージェントに差し戻す。レビュー指摘は記録・一般化して次セッションへ引き継ぐ"
     }
   ]
 }
