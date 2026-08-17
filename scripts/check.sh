@@ -123,6 +123,15 @@ if [[ -f pyproject.toml || -f setup.py || -f requirements.txt ]]; then
   if [[ -d tests ]] || ls ./test_*.py ./*_test.py >/dev/null 2>&1; then
     run_stage test "pytest" "python: pytest" pytest -q -x
   fi
+  # 宣言に無い import・未使用依存の検出(ネットワーク不使用)。
+  # 誤検出の可能性があるため、設定の宣言があるときだけ FAIL にする
+  if has deptry; then
+    if grep -q "^\[tool\.deptry" pyproject.toml 2>/dev/null; then
+      run_stage lint "deptry" "python: deptry" deptry .
+    else
+      run_stage_soft lint "deptry" "python: deptry" deptry .
+    fi
+  fi
 else
   # マニフェストが無くても .py があれば lint はできる(check_file.sh と対称)
   PY_FILES=()
@@ -159,6 +168,14 @@ if [[ -f package.json ]]; then
     fi
     npm_script_exists test  && run_stage test  "$PM" "node: $PM test"      "$PM" test
     npm_script_exists build && run_stage build "$PM" "node: $PM run build" "$PM" run build
+    # 依存の実在性・整合性(ネットワーク不使用)。宣言と実体のずれ・欠損を
+    # 検出する — AIが存在しないパッケージ名を書く欠陥はここで捕まる。
+    # node_modules が無いのは「未インストール」であって欠陥ではないので SKIP
+    if [[ -d node_modules ]]; then
+      run_stage lint "$PM" "node: npm ls" "$PM" ls --all
+    else
+      RESULTS+=("SKIP  node: npm ls (node_modules 未インストール)")
+    fi
   fi
 fi
 
@@ -168,6 +185,10 @@ if [[ -f go.mod ]]; then
   run_stage lint  "go" "go: vet"   go vet ./...
   run_stage build "go" "go: build" go build ./...
   run_stage test  "go" "go: test"  go test ./...
+  # go.sum のチェックサム検証(ネットワーク不使用)。依存の改竄・欠損を検出する
+  if [[ -f go.sum ]]; then
+    run_stage lint "go" "go: mod verify" go mod verify
+  fi
 fi
 
 # ---------- Rust ----------
@@ -182,6 +203,11 @@ if [[ -f Cargo.toml ]]; then
       run_stage build "-" "rust: check" cargo check --quiet
     fi
     run_stage test "-" "rust: test" cargo test --quiet
+    # Cargo.lock と実体の整合(--offline でネットワークを使わない)
+    if [[ -f Cargo.lock ]]; then
+      run_stage lint "-" "rust: metadata" \
+        cargo metadata --offline --format-version 1
+    fi
   fi
 fi
 

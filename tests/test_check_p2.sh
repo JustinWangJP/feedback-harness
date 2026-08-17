@@ -199,4 +199,49 @@ OUT="$(PATH="$FAKEBIN:$PATH" bash "$CHECK" "$P15" 2>&1)"; RC=$?
 assert_eq "0" "$RC" "問題が無ければ exit 0"
 assert_contains "$OUT" "PASS  docker: dockerfilelint" "サブディレクトリの Dockerfile も検査する"
 
+# --- 依存の実在性: node_modules があるときだけ npm ls を走らせる ---
+P16="$(new_project dep_node)"
+printf '{"name":"t","version":"1.0.0","private":true}\n' > "$P16/package.json"
+mkdir -p "$P16/node_modules"
+NPMARGS="$WORK/npm_args.txt"; : > "$NPMARGS"
+{ echo '#!/usr/bin/env bash'
+  echo 'case "$1" in --version) exit 0 ;; esac'
+  echo "echo \"\$@\" >> \"$NPMARGS\""
+  echo 'case "$1" in ls) exit 1 ;; esac'
+  echo 'exit 0'
+} > "$FAKEBIN/npm"
+chmod +x "$FAKEBIN/npm"
+{ echo '#!/usr/bin/env bash'; echo 'exit 0'; } > "$FAKEBIN/node"
+chmod +x "$FAKEBIN/node"
+OUT="$(PATH="$FAKEBIN:$PATH" bash "$CHECK" "$P16" 2>&1)"; RC=$?
+assert_eq "1" "$RC" "npm ls の失敗は exit 1"
+assert_contains "$OUT" "FAIL  node: npm ls" "宣言と実体の不一致をFAILにする"
+assert_contains "$(cat "$NPMARGS")" "ls --all" "推移的依存まで見る --all を渡している"
+
+# node_modules が無ければ SKIP(未インストールを欠陥と呼ばない)
+P17="$(new_project dep_node_noinstall)"
+printf '{"name":"t","version":"1.0.0","private":true}\n' > "$P17/package.json"
+OUT="$(PATH="$FAKEBIN:$PATH" bash "$CHECK" "$P17" 2>&1)"; RC=$?
+assert_eq "0" "$RC" "node_modules 不在で完了をブロックしない"
+assert_contains "$OUT" "SKIP  node: npm ls" "node_modules 不在は理由付きSKIP"
+rm -f "$FAKEBIN/npm" "$FAKEBIN/node"
+
+# --- Go: go.sum があれば go mod verify ---
+P18="$(new_project dep_go)"
+printf 'module t\n\ngo 1.21\n' > "$P18/go.mod"
+printf 'x\n' > "$P18/go.sum"
+GOARGS="$WORK/go_args.txt"; : > "$GOARGS"
+{ echo '#!/usr/bin/env bash'
+  echo 'case "$1" in version|--version) exit 0 ;; esac'
+  echo "echo \"\$@\" >> \"$GOARGS\""
+  echo 'case "$*" in "mod verify") exit 1 ;; esac'
+  echo 'exit 0'
+} > "$FAKEBIN/go"
+chmod +x "$FAKEBIN/go"
+OUT="$(PATH="$FAKEBIN:$PATH" bash "$CHECK" "$P18" 2>&1)"; RC=$?
+assert_eq "1" "$RC" "go mod verify の失敗は exit 1"
+assert_contains "$OUT" "FAIL  go: mod verify" "FAILとして記録される"
+assert_contains "$(cat "$GOARGS")" "mod verify" "go mod verify を呼んでいる"
+rm -f "$FAKEBIN/go"
+
 assert_summary
