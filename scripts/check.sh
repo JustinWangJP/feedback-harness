@@ -196,12 +196,15 @@ if [[ -f package.json ]]; then
         RESULTS+=("SKIP  node: tsc --noEmit (typescript 未インストール)")
       fi
     fi
-    npm_script_exists test  && run_stage test  "$PM" "node: $PM test"      "$PM" test
-    # カバレッジ相乗り: test:coverage スクリプトを書いた=計装を宣言した。
-    # 通常の test ステージはそのまま残す(両方走るのではなく coverage 側に統合したい
-    # プロジェクトは test スクリプトを省けばよい)
-    npm_script_exists test:coverage \
-      && run_stage test "$PM" "node: $PM run test:coverage" "$PM" run test:coverage
+    # カバレッジ相乗り(M3): test:coverage スクリプトを書いた=計装を宣言した。
+    # 通常の test の「差し替え」であって追加ではない — 両方走らせると、カバレッジを
+    # 測るためだけにテストスイートが2回実行される(M3 が禁じているもの)。
+    # Python の --cov / Go の -cover が既存コマンドに計装を足すのと同じ扱いに揃える
+    if npm_script_exists test:coverage; then
+      run_stage test "$PM" "node: $PM run test:coverage" "$PM" run test:coverage
+    elif npm_script_exists test; then
+      run_stage test "$PM" "node: $PM test" "$PM" test
+    fi
     npm_script_exists build && run_stage build "$PM" "node: $PM run build" "$PM" run build
     # 依存の実在性・整合性(ネットワーク不使用)。宣言と実体のずれ・欠損を
     # 検出する — AIが存在しないパッケージ名を書く欠陥はここで捕まる。

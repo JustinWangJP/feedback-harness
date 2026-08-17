@@ -77,6 +77,11 @@ OUT="$(PATH="$FAKEBIN:$PATH" bash "$CHECK" "$P4" 2>&1)"; RC=$?
 assert_eq "0" "$RC" "test:coverage が成功すれば exit 0"
 assert_contains "$OUT" "node: npm run test:coverage" "test:coverage ステージが出る"
 assert_contains "$(cat "$NARGS")" "run test:coverage" "スクリプトを呼んでいる"
+# M3(テストを2回走らせない): test:coverage は test の「差し替え」であって追加ではない。
+# 両方走らせると、カバレッジ計測のためだけにテストスイートが2回実行される
+ASSERT_CHECKS=$((ASSERT_CHECKS + 1))
+grep -qx "test" "$NARGS" && fail "test:coverage があるとき npm test は走らせない(M3: テスト二重実行の禁止)"
+assert_not_contains "$OUT" "node: npm test" "test ステージは coverage に差し替わる"
 
 P5="$(new_project cov_node_none)"
 printf '{"name":"t","private":true,"scripts":{"test":"exit 0"}}\n' > "$P5/package.json"

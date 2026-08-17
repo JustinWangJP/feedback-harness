@@ -80,6 +80,19 @@ printf '{"name":"t","private":true}\n' > "$P5/package.json"
 OUT="$(PATH="$FAKEBIN:$PATH" bash "$AUDIT" "$P5" 2>&1)"
 assert_not_contains "$OUT" "npm audit" "lockfileが無ければステージを出さない"
 
+# --- pnpm/yarn の lockfile しか無ければ npm audit を走らせない ---
+# npm audit が読めるのは package-lock.json だけで、pnpm-lock.yaml しか無いと
+# ENOLOCK で exit 1 になる(実測)。走らせると脆弱性ゼロのプロジェクトが
+# 「脆弱性あり」と誤報告される(check.sh の npm ls を npm 限定にしたのと同じ欠陥クラス)
+P8="$(new_project node_pnpm)"
+printf '{"name":"t","private":true}\n' > "$P8/package.json"
+printf 'lockfileVersion: 9\n' > "$P8/pnpm-lock.yaml"
+: > "$NARGS"
+OUT="$(PATH="$FAKEBIN:$PATH" bash "$AUDIT" "$P8" 2>&1)"; RC=$?
+assert_eq "0" "$RC" "pnpm プロジェクトを誤FAILさせない"
+assert_contains "$OUT" "SKIP  node: npm audit" "理由付きSKIPになる"
+assert_eq "" "$(cat "$NARGS")" "npm audit を起動しない"
+
 # --- Rust: cargo はあるが cargo-audit が無ければ SKIP(FAILにしない) ---
 # cargo audit は cargo 内蔵ではなく cargo-audit クレート由来。cargo だけある環境では
 # `cargo audit` が exit 101 になるため、probe が cargo のままだと「未導入」が誤FAILする

@@ -54,9 +54,15 @@ fi
 
 # ---------- Node ----------
 # lockfile が無いと npm audit は依存解決からやり直す(ネットワーク+時間)。
-# lockfile の存在 = 監査可能な状態が固定されている、という前提を置く
-if [[ -f package-lock.json || -f pnpm-lock.yaml || -f yarn.lock ]]; then
+# lockfile の存在 = 監査可能な状態が固定されている、という前提を置く。
+# ただし npm audit が読めるのは package-lock.json だけで、pnpm-lock.yaml や
+# yarn.lock しか無いと ENOLOCK で exit 1 になる(実測)。そのまま走らせると
+# 脆弱性ゼロのプロジェクトが「脆弱性あり」と誤報告されるため、npm 以外の
+# lockfile は理由付き SKIP に留める(check.sh の npm ls を npm 限定にしたのと同じ判断)
+if [[ -f package-lock.json ]]; then
   run_audit "npm" "node: npm audit" npm audit --audit-level=high
+elif [[ -f pnpm-lock.yaml || -f yarn.lock ]]; then
+  RESULTS+=("SKIP  node: npm audit (npm 以外の lockfile — pnpm audit / yarn npm audit を直接実行してください)")
 fi
 
 # ---------- Go ----------
