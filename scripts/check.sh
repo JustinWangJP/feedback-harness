@@ -132,6 +132,16 @@ if [[ -f pyproject.toml || -f setup.py || -f requirements.txt ]]; then
       run_stage_soft lint "deptry" "python: deptry" deptry .
     fi
   fi
+
+  # デッドコード。動的呼び出し・フレームワークのフックを誤検出しやすいため
+  # 確信度80%以上に絞り、宣言があるときだけ FAIL にする
+  if has vulture; then
+    if [[ -f .vulture ]] || grep -q "^\[tool\.vulture" pyproject.toml 2>/dev/null; then
+      run_stage lint "vulture" "python: vulture" vulture . --min-confidence 80
+    else
+      run_stage_soft lint "vulture" "python: vulture" vulture . --min-confidence 80
+    fi
+  fi
 else
   # マニフェストが無くても .py があれば lint はできる(check_file.sh と対称)
   PY_FILES=()
@@ -181,6 +191,33 @@ if [[ -f package.json ]]; then
     else
       run_stage lint "npm" "node: npm ls" npm ls --all
     fi
+
+    # フォーマット。設定が無い prettier は既定スタイルの押し付けになるため
+    # 走らせない(WARN でもノイズになる)。
+    # 設定ファイル名は prettier が探索する主要な形を網羅する(.prettierrc / .prettierrc.*
+    # / prettier.config.*)。ls のグロブで一括判定し、列挙漏れを避ける
+    if [[ -f .prettierrc ]] || compgen -G ".prettierrc.*" >/dev/null 2>&1 \
+       || compgen -G "prettier.config.*" >/dev/null 2>&1 \
+       || node -e "process.exit(require('./package.json').prettier ? 0 : 1)" 2>/dev/null; then
+      if npx --no-install prettier --version >/dev/null 2>&1; then
+        run_stage format "-" "node: prettier" npx --no-install prettier --check .
+      else
+        RESULTS+=("SKIP  node: prettier (prettier 未インストール)")
+      fi
+    fi
+
+    # デッドコード。設定なしの knip はエントリポイント推定を誤り、実測では
+    # 検査ツールとして入れた devDependencies まで「未使用」と報告する。
+    # 設定を書いた=対象を宣言した、というときだけ走らせる
+    # ls は複数引数の1つでも欠けると全体が非0になるため、パターンごとに compgen で判定する
+    if [[ -f knip.json || -f knip.jsonc ]] || compgen -G "knip.config.*" >/dev/null 2>&1 \
+       || node -e "process.exit(require('./package.json').knip ? 0 : 1)" 2>/dev/null; then
+      if npx --no-install knip --version >/dev/null 2>&1; then
+        run_stage lint "-" "node: knip" npx --no-install knip
+      else
+        RESULTS+=("SKIP  node: knip (knip 未インストール)")
+      fi
+    fi
   fi
 fi
 
@@ -193,6 +230,19 @@ if [[ -f go.mod ]]; then
   # go.sum のチェックサム検証(ネットワーク不使用)。依存の改竄・欠損を検出する
   if [[ -f go.sum ]]; then
     run_stage lint "go" "go: mod verify" go mod verify
+  fi
+
+  # gofmt は言語標準であり「宣言しないと従わない」性質のものではないため、
+  # 宣言ゲートを設けず常に FAIL とする(Goコミュニティの普遍的合意)
+  GO_FILES=()
+  while IFS= read -r f; do
+    [[ -n "$f" && -f "$f" ]] && GO_FILES+=("$f")
+  done < <(list_files '*.go')
+  if [[ ${#GO_FILES[@]} -gt 0 ]] && has gofmt; then
+    # gofmt -l は未整形ファイル名を「出力する」形式で、終了コードは 0 のまま。
+    # 出力があれば未整形なので、非0に変換して run_stage に伝える
+    run_stage format "-" "go: gofmt" \
+      bash -c 'out="$(gofmt -l "$@")"; [[ -z "$out" ]] || { echo "未フォーマット:"; echo "$out"; exit 1; }' _ "${GO_FILES[@]}"
   fi
 fi
 
@@ -212,6 +262,13 @@ if [[ -f Cargo.toml ]]; then
     if [[ -f Cargo.lock ]]; then
       run_stage lint "-" "rust: metadata" \
         cargo metadata --offline --format-version 1
+    fi
+
+    # rustfmt.toml があれば FAIL、無ければ WARN(既定スタイルの押し付けを避ける)
+    if [[ -f rustfmt.toml || -f .rustfmt.toml ]]; then
+      run_stage format "-" "rust: cargo fmt" cargo fmt --check
+    else
+      run_stage_soft format "-" "rust: cargo fmt" cargo fmt --check
     fi
   fi
 fi

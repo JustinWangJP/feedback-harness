@@ -250,6 +250,63 @@ assert_eq "0" "$RC" "pnpm プロジェクトで usage error による誤FAILを�
 assert_contains "$OUT" "SKIP  node: npm ls (pnpm は ls --all 非対応)" "pnpm は理由付きSKIPになる"
 rm -f "$FAKEBIN/pnpm" "$FAKEBIN/node"
 
+# --- format: prettier(設定ゲート。設定が無ければ走らせない) ---
+# 偽 node は -e(scripts判定)で失敗 = スクリプト未定義の実プロジェクトと同じ挙動
+P20="$(new_project fmt_nocfg)"
+printf '{"name":"t","version":"1.0.0","private":true}\n' > "$P20/package.json"
+mkdir -p "$P20/node_modules"
+{ echo '#!/usr/bin/env bash'
+  echo 'case "$1" in --version) exit 0 ;; esac'
+  echo 'exit 1'
+} > "$FAKEBIN/node"
+{ echo '#!/usr/bin/env bash'; echo 'exit 0'; } > "$FAKEBIN/npm"
+make_fake npx 1
+chmod +x "$FAKEBIN/node" "$FAKEBIN/npm"
+OUT="$(PATH="$FAKEBIN:$PATH" bash "$CHECK" "$P20" 2>&1)"; RC=$?
+assert_eq "0" "$RC" "prettier 設定が無ければ完了をブロックしない"
+assert_not_contains "$OUT" "FAIL  node: prettier" "設定が無ければ prettier を FAIL にしない"
+
+# 設定があれば FAIL になる
+P21="$(new_project fmt_cfg)"
+printf '{"name":"t","version":"1.0.0","private":true}\n' > "$P21/package.json"
+printf '{}' > "$P21/.prettierrc"
+mkdir -p "$P21/node_modules"
+OUT="$(PATH="$FAKEBIN:$PATH" bash "$CHECK" "$P21" 2>&1)"; RC=$?
+assert_eq "1" "$RC" "prettier 設定があり未整形なら exit 1"
+assert_contains "$OUT" "FAIL  node: prettier" "設定があれば FAIL になる"
+
+# --- knip: 設定が無ければ走らせない(実測: 設定なしは誤検出が多い) ---
+assert_not_contains "$OUT" "node: knip" "knip 設定が無ければステージを出さない"
+
+P22="$(new_project knip_cfg)"
+printf '{"name":"t","version":"1.0.0","private":true}\n' > "$P22/package.json"
+printf '{}' > "$P22/knip.json"
+mkdir -p "$P22/node_modules"
+OUT="$(PATH="$FAKEBIN:$PATH" bash "$CHECK" "$P22" 2>&1)"; RC=$?
+assert_eq "1" "$RC" "knip 設定があり検出されたら exit 1"
+assert_contains "$OUT" "FAIL  node: knip" "設定があれば FAIL になる"
+rm -f "$FAKEBIN/npx" "$FAKEBIN/npm" "$FAKEBIN/node"
+
+# --- format: gofmt は宣言不要で常に FAIL(言語標準のため) ---
+P23="$(new_project fmt_go)"
+printf 'module t\n\ngo 1.21\n' > "$P23/go.mod"
+printf 'package main\n' > "$P23/main.go"
+{ echo '#!/usr/bin/env bash'
+  echo 'case "$1" in version|--version) exit 0 ;; esac'
+  echo 'exit 0'
+} > "$FAKEBIN/go"
+# gofmt -l は「未整形ファイル名を出力する」形式。出力があれば未整形
+{ echo '#!/usr/bin/env bash'
+  echo 'case "$1" in --version) exit 0 ;; esac'
+  echo 'echo main.go'
+  echo 'exit 0'
+} > "$FAKEBIN/gofmt"
+chmod +x "$FAKEBIN/go" "$FAKEBIN/gofmt"
+OUT="$(PATH="$FAKEBIN:$PATH" bash "$CHECK" "$P23" 2>&1)"; RC=$?
+assert_eq "1" "$RC" "gofmt は宣言が無くても未整形を FAIL にする"
+assert_contains "$OUT" "FAIL  go: gofmt" "gofmt の FAIL が記録される"
+rm -f "$FAKEBIN/go" "$FAKEBIN/gofmt"
+
 # --- Go: go.sum があれば go mod verify ---
 P18="$(new_project dep_go)"
 printf 'module t\n\ngo 1.21\n' > "$P18/go.mod"
