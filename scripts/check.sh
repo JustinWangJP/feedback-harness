@@ -438,6 +438,39 @@ if [[ ${#DOCKER_FILES[@]} -gt 0 ]]; then
   fi
 fi
 
+# ---------- API契約・破壊的変更 ----------
+# ベースラインは git から取る(ネットワーク不要・自己完結)。merge-base が
+# 解決できなければ HEAD(=未コミット変更のみ)と比較する。spec ファイルの
+# 検出は for+[[ -f ]] で行う(ls の複数引数は1つでも欠けると全体が非0になる)
+OPENAPI_SPEC=""
+for f in openapi.yaml openapi.json api/openapi.yaml api/openapi.json; do
+  if [[ -f "$f" ]]; then
+    OPENAPI_SPEC="$f"
+    break
+  fi
+done
+if [[ -n "$OPENAPI_SPEC" ]] && has oasdiff; then
+  BASE_SHA="$(git merge-base HEAD "${FEEDBACK_CONTRACT_BASE:-main}" 2>/dev/null \
+    || git rev-parse HEAD 2>/dev/null)"
+  TMP_BASE="$(mktemp)"
+  if [[ -n "$BASE_SHA" ]] && git show "$BASE_SHA:$OPENAPI_SPEC" > "$TMP_BASE" 2>/dev/null; then
+    run_stage contract "-" "contract: oasdiff" oasdiff breaking "$TMP_BASE" "$OPENAPI_SPEC"
+  else
+    RESULTS+=("SKIP  contract: oasdiff (ベースライン取得不能 — $OPENAPI_SPEC がベースラインに無い)")
+  fi
+  rm -f "$TMP_BASE"
+elif [[ -n "$OPENAPI_SPEC" ]]; then
+  RESULTS+=("SKIP  contract: oasdiff (oasdiff 未インストール)")
+fi
+
+# Rust ライブラリの破壊的変更。cargo-semver-checks の導入自体が宣言
+# (ビルドを伴い重いため、入れたプロジェクトだけがコストを払う)
+if [[ -f Cargo.toml ]] && has cargo \
+   && cargo semver-checks --version >/dev/null 2>&1 \
+   && grep -q "^\[lib\]" Cargo.toml; then
+  run_stage contract "-" "contract: cargo semver-checks" cargo semver-checks check-release
+fi
+
 # ---------- 汎用フォールバック ----------
 # 再帰ガード: make check のテストが check.sh を呼び返す循環を断つ。フック実行時は
 # CLAUDE_PROJECT_DIR が子孫まで伝播し、テスト内の check.sh がルートを本リポジトリに

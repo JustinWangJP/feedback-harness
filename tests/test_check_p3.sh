@@ -84,4 +84,69 @@ printf '{"name":"t","private":true,"scripts":{"test":"exit 0"}}\n' > "$P5/packag
 OUT="$(PATH="$FAKEBIN:$PATH" bash "$CHECK" "$P5" 2>&1)"
 assert_not_contains "$OUT" "test:coverage" "スクリプトが無ければステージを出さない"
 
+# --- contract: oasdiff(git ベースラインとの破壊的変更差分) ---
+P6="$(new_project oas)"
+( cd "$P6" && git checkout -q -b main )
+printf 'openapi: 3.0.0\ninfo:\n  title: t\n  version: 1.0.0\n' > "$P6/openapi.yaml"
+( cd "$P6" && git add openapi.yaml \
+  && git -c user.email=t@t -c user.name=t commit -qm v1 )
+# 破壊的変更(フィールド削除)を作業ツリーに載せる
+printf 'openapi: 3.0.0\ninfo:\n  title: t\n' > "$P6/openapi.yaml"
+OARGS="$WORK/oasdiff_args.txt"; : > "$OARGS"
+{ echo '#!/usr/bin/env bash'
+  echo 'case "$*" in *--version*) exit 0 ;; esac'
+  echo "echo \"\$@\" >> \"$OARGS\""
+  echo 'exit 1'
+} > "$FAKEBIN/oasdiff"
+chmod +x "$FAKEBIN/oasdiff"
+OUT="$(PATH="$FAKEBIN:$PATH" bash "$CHECK" "$P6" 2>&1)"; RC=$?
+assert_eq "1" "$RC" "破壊的変更の検出で exit 1"
+assert_contains "$OUT" "FAIL  contract: oasdiff" "FAILとして記録される"
+# ベースラインと現行の2ファイルを渡していること
+ASSERT_CHECKS=$((ASSERT_CHECKS + 1))
+[[ "$(wc -w <"$OARGS" | tr -d ' ')" == "3" ]] || fail "oasdiff に breaking <base> <current> の3語が渡る(実際: $(cat "$OARGS"))"
+assert_contains "$(cat "$OARGS")" "breaking" "breaking サブコマンドを使う"
+
+# spec ファイルが無ければステージを出さない
+P7="$(new_project oas_none)"
+printf 'x\n' > "$P7/a.txt"
+OUT="$(PATH="$FAKEBIN:$PATH" bash "$CHECK" "$P7" 2>&1)"
+assert_not_contains "$OUT" "contract: oasdiff" "specが無ければステージを出さない"
+
+# 未コミットの新規 spec はベースラインが取れない → SKIP(FAILにしない)
+P8="$(new_project oas_new)"
+printf 'openapi: 3.0.0\n' > "$P8/openapi.yaml"
+OUT="$(PATH="$FAKEBIN:$PATH" bash "$CHECK" "$P8" 2>&1)"; RC=$?
+assert_eq "0" "$RC" "ベースライン取得不能はブロックしない"
+assert_contains "$OUT" "SKIP  contract: oasdiff" "理由付きSKIPになる"
+rm -f "$FAKEBIN/oasdiff"
+
+# --- contract: cargo semver-checks ---
+P9="$(new_project semver)"
+printf '[package]\nname = "t"\nversion = "0.1.0"\n\n[lib]\npath = "src/lib.rs"\n' > "$P9/Cargo.toml"
+SARGS="$WORK/semver_args.txt"; : > "$SARGS"
+# 偽 cargo: 通常サブコマンド(clippy/test等)は成功させ、semver-checks だけ失敗させる
+# (全部落とすと rust: clippy 等もFAILになり、contract の配線検証が曖昧になるため)
+{ echo '#!/usr/bin/env bash'
+  echo 'case "$*" in'
+  echo '  *--version*) exit 0 ;;'
+  echo '  *"semver-checks check-release"*) echo "$@" >> "'"$SARGS"'"; exit 1 ;;'
+  echo 'esac'
+  echo "echo \"\$@\" >> \"$SARGS\""
+  echo 'exit 0'
+} > "$FAKEBIN/cargo"
+chmod +x "$FAKEBIN/cargo"
+OUT="$(PATH="$FAKEBIN:$PATH" bash "$CHECK" "$P9" 2>&1)"; RC=$?
+assert_eq "1" "$RC" "破壊的変更の検出で exit 1"
+assert_contains "$OUT" "FAIL  contract: cargo semver-checks" "FAILとして記録される"
+assert_contains "$(cat "$SARGS")" "check-release" "check-release を呼んでいる"
+
+# [lib] が無い crate(バイナリのみ)は対象外
+P10="$(new_project semver_bin)"
+printf '[package]\nname = "t"\nversion = "0.1.0"\n' > "$P10/Cargo.toml"
+: > "$SARGS"
+OUT="$(PATH="$FAKEBIN:$PATH" bash "$CHECK" "$P10" 2>&1)"
+assert_not_contains "$OUT" "cargo semver-checks" "[lib]が無ければステージを出さない"
+rm -f "$FAKEBIN/cargo"
+
 assert_summary
