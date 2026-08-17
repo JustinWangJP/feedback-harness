@@ -13,17 +13,22 @@ scripts/
 ├── lib.sh            # check.sh / check_file.sh の共有ユーティリティ(has() ほか)
 ├── feedback_log.py   # フィードバック記録CLI: add/list/search/promote/merge/close/retire/rules
 ├── audit.sh          # オンデマンド脆弱性監査(唯一のネットワーク検査。Stopフックからは呼ばれない)
+├── init.sh           # 導入スクリプト(Codex 向け資産の展開。導入先にはコピーされない)
 └── hooks/
-    ├── post_edit.sh  # Claude Code PostToolUse(Edit|Write) ラッパ → check_file.sh
-    └── on_stop.sh    # Claude Code Stop ラッパ → check.sh
+    ├── on_session_start.sh  # Claude Code SessionStart ラッパ → .feedback/ の初回シード
+    ├── post_edit.sh         # Claude Code PostToolUse(Edit|Write|MultiEdit) ラッパ → check_file.sh
+    └── on_stop.sh           # Claude Code Stop ラッパ → check.sh
 ```
 
-2系統に分かれる:
+3系統に分かれる:
 
 | 系統 | スクリプト | 役割 |
 |------|-----------|------|
-| 自動チェック | `check.sh`, `check_file.sh`, `hooks/*` | lint/test/build 結果をエージェントに返し、自己修正させる |
-| フィードバック蓄積 | `feedback_log.py` | 人間の指摘を記録・一般化し、次セッションに引き継ぐ |
+| 自動チェック(オフライン) | `check.sh`, `check_file.sh`, `hooks/*` | lint/test/build 結果をエージェントに返し、自己修正させる |
+| フィードバック蓄積・測定 | `feedback_log.py` | 人間の指摘を記録・一般化し、次セッションに引き継ぐ。数字と期間ダイジェストを出す |
+| オンデマンド監査(ネットワーク) | `audit.sh` | 依存の脆弱性を調べる。フックからは呼ばれない |
+
+配布のされ方が2通りある。**プラグイン導入**では全ファイルがプラグイン側に置かれ `${CLAUDE_PLUGIN_ROOT}` 経由で実行される。**`init.sh` 導入**では `check.sh` / `check_file.sh` / `audit.sh` / `lib.sh` / `feedback_log.py` / このREADMEが導入先の `scripts/` にコピーされる(`hooks/` と `init.sh` 自身はコピーされない — 前者は Claude Code 専用、後者は配布元から実行するもの)。
 
 ## 設計思想(共通)
 
@@ -45,7 +50,28 @@ bash scripts/check.sh [プロジェクトルート]          # 省略時はカ�
 FEEDBACK_CHECK_SKIP="test build" bash scripts/check.sh   # 特定ステージをスキップ
 ```
 
-**動作:** 検出したスタックごとに `lint` / `typecheck` / `test` / `build` / `format` を走らせ、スタック非依存の横断チェック(設定ファイルの構文・内部リンク・秘密情報・CI設定・Dockerfile)も実行して、`PASS`/`FAIL`/`WARN`/`SKIP` の要約を出す。
+**動作:** 検出したスタックごとにステージを走らせ、スタック非依存の横断チェックも実行して、`PASS`/`FAIL`/`WARN`/`SKIP` の要約を出す。
+
+**ステージ別の実行内容**(ツールが無ければ理由付き `SKIP`):
+
+| ステージ | Python | Node | Go | Rust | Java | Shell |
+|---|---|---|---|---|---|---|
+| `lint` | `ruff check` | `run lint` / `npm ls --all` | `go vet` / `go mod verify` | `clippy` / `cargo metadata --offline` | — | `bash -n` / `shellcheck` |
+| `typecheck` | `mypy`(宣言時) | `run typecheck` / `tsc --noEmit` | — | — | — | — |
+| `test` | `pytest`(+`--cov`) | `test` または `test:coverage` | `go test -cover` | `cargo test` | `mvn verify` / `gradle check` | — |
+| `build` | — | `run build` | `go build` | `cargo check`(clippy 不在時) | — | — |
+| `format` | `ruff format` | `prettier`(宣言時) | `gofmt -l` | `cargo fmt` | — | — |
+| `contract` | — | — | — | `cargo semver-checks`(`[lib]`) | — | — |
+
+**横断チェック**(スタック非依存・`security` / `docs` / `lint` / `contract` ステージ): 設定ファイル構文・内部リンク・秘密情報・CI設定・Dockerfile・OpenAPI 契約差分。
+
+**このスクリプトがしないこと:**
+
+- **ネットワークを使わない** — 脆弱性監査は `audit.sh` に分離。`npx` は必ず `--no-install` を付け、未導入なら取得せず `SKIP`
+- **ツールを導入しない** — 未導入は `SKIP` と理由表示に留める
+- **テストを2回走らせない** — カバレッジは既存 test コマンドへの計装(または `test:coverage` への差し替え)で賄う
+- **宣言していない検査で完了をブロックしない** — 該当する失敗は `WARN`(exit 0)
+- **リモートを参照しない** — 契約差分のベースラインは `git merge-base HEAD <FEEDBACK_CONTRACT_BASE:-main>`、解決不能なら `HEAD`
 
 - **検出対象**: Python(`pyproject.toml`/`setup.py`/`requirements.txt`、無くても `*.py` があれば `ruff` のみ実行) / Node(`package.json`) / Go(`go.mod`) / Rust(`Cargo.toml`) / Java(`pom.xml`/`build.gradle`) / Shell(`*.sh`) / 汎用(`Makefile` の `check` ターゲット)
 - **横断チェック(スタック非依存)**: `*.json` / `*.yaml` / `*.yml` の構文検証。`tsconfig*.json` / `jsconfig*.json` / `devcontainer.json` / `.vscode/` 配下はコメント付き(JSONC)が慣例のため対象外。YAML は複数文書(`---` 区切り)に対応し、未知のカスタムタグ(`!Ref` 等)は構文エラーとして扱わない。PyYAML 未導入なら YAML は理由付き `SKIP`
@@ -130,9 +156,10 @@ bash scripts/audit.sh [プロジェクトルート]
 
 ### `hooks/` — Claude Code Hooks ラッパ
 
-Claude Code の Hooks から起動される薄いラッパ。判定・実行は `check_file.sh` / `check.sh` に委譲し、フック固有の処理(stdin JSONのパース、exit code 2 によるエージェントへの差し戻し、無限ループ防止)だけを担う。
+Claude Code の Hooks から起動される薄いラッパ。判定・実行は `check_file.sh` / `check.sh` に委譲し、フック固有の処理(stdin JSONのパース、exit code 2 によるエージェントへの差し戻し、無限ループ防止)だけを担う。**`init.sh` 導入ではコピーされない**(Hooks を持つのは Claude Code だけのため)。
 
-- **`post_edit.sh`** (PostToolUse: `Edit|Write`): stdin の `tool_input.file_path` を取り出し `check_file.sh` でチェック。問題あれば **`exit 2` + stderr** で Claude にフィードバックし、自己修正ループを起動する。
+- **`on_session_start.sh`** (SessionStart): `.feedback/log/` と `rules.md` をテンプレートから初回シードする。プラグインのみで導入したプロジェクトには `.feedback/` を作る担い手が居ない(`init.sh` を実行するのは Codex 併用時だけ)ため。**既存の `.feedback/` には一切触れず**、失敗してもセッションをブロックしない。
+- **`post_edit.sh`** (PostToolUse: `Edit|Write|MultiEdit`): stdin の `tool_input.file_path` を取り出し `check_file.sh` でチェック。問題あれば **`exit 2` + stderr** で Claude にフィードバックし、自己修正ループを起動する。`file_path` が取れないときは何も記録しない。
   - 合否(成功・失敗の両方)を `.feedback/events.jsonl` に1行追記する(`stats` の初回通過率の原料。ローカル状態で共有しない)
 - **`on_stop.sh`** (Stop): 応答完了前に `check.sh` を実行。失敗すれば **`exit 2`** で完了をブロックし失敗内容を返す。`stop_hook_active` が `true`(2周目以降)のときは何もせず `exit 0` し、**無限ループを防止**する。
   - **検査の実行条件**: 前回の成功検査(`.feedback/.last-check` のmtime)以降に作業ツリーが変わっているときだけ走る。無条件だと、ファイルを1つも編集しない質問応答のターンでも導入先のフルビルド(`mvn verify` / `npm run build` 等)が毎回動く。判定は mtime なので Edit/Write だけでなく Bash 経由の編集も拾い、判定できないときは必ず「実行する」側に倒す。
@@ -169,6 +196,8 @@ Codex など **Hooks を持たない環境**では、`AGENTS.md` の規約が自
 | コード変更のたび | `bash scripts/check_file.sh <編集したファイル>` | 即時チェック、問題あれば修正 (§2) |
 | 完了前 | `bash scripts/check.sh` | `ALL PASS` を確認してから完了。FAILのまま報告してはならない (§3) |
 | 指摘を受けたら | `python3 scripts/feedback_log.py add --category … --summary … --source human` | その場で記録(引き継ぐ唯一の手段) (§4) |
+| 振り返り・朝会 | `python3 scripts/feedback_log.py report --last --mark` | 期間ダイジェストを議題にし、実施後に基点を更新 |
+| 監査を促されたら | `bash scripts/audit.sh` | `stats`/`report` が「監査を推奨」を出したとき(7日超過・未実行) |
 
 - **ルールの反映**: `AGENTS.md` §1 で `.feedback/rules.md` の必読を規定。
 - **設定ファイル**: `AGENTS.md` のみ(Hooks 不要)。
@@ -189,8 +218,12 @@ Codex など **Hooks を持たない環境**では、`AGENTS.md` の規約が自
 
 ## 必要ツール
 
-- **必須**: `bash`, `python3`(hooks内のJSONパース・`feedback_log.py`・json/yaml検証で使用)
-- **任意**(スタックに応じて自動検出・未インストールなら `SKIP`): `ruff`, `mypy`, `pytest` / `npm`/`pnpm`/`yarn`, `eslint`, `tsc` / `go`, `gofmt` / `cargo`, `rustfmt`, `clippy` / `mvn`, `gradle` / `shellcheck`
+- **必須**: `bash`, `python3`(hooks内のJSONパース・`feedback_log.py`・json/yaml検証・内部リンク検証で使用)
+- **任意 — スタック標準**(自動検出・未インストールなら `SKIP`): `ruff`, `mypy`, `pytest` / `npm`/`pnpm`/`yarn`, `eslint`, `tsc` / `go`, `gofmt` / `cargo`, `rustfmt`, `clippy` / `mvn`, `gradle` / `shellcheck`
+- **任意 — 拡張検査**: `pytest-cov`(カバレッジ)/ `deptry`, `vulture`, `import-linter`(Python の依存・デッドコード・アーキ制約)/ `secretlint`, `dockerfilelint`, `knip`, `prettier`(npm 経由。このリポジトリの `package.json` が例)/ `gitleaks`, `actionlint`, `hadolint`, `oasdiff`, `cargo-semver-checks`(OS固有バイナリのため PATH にあれば使う)
+- **任意 — 監査専用**(`audit.sh` のみ・ネットワーク使用): `pip-audit` / `npm` / `govulncheck` / `cargo-audit`
+
+いずれもハーネスが導入することはない。`npx --no-install` を使うのは、未導入時にネットワークから勝手に取得させないため。
 
 ## 他プロジェクトへの導入
 
