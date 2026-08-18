@@ -11,6 +11,7 @@ scripts/
 ├── check.sh          # フルチェック: スタック自動検出 → lint/typecheck/test/build、要約出力
 ├── check_file.sh     # 単一ファイル高速チェック: 拡張子ベースの静的チェック
 ├── lib.sh            # check.sh / check_file.sh の共有ユーティリティ(has() ほか)
+├── harness_config.py # 設定(.feedback/config.yaml)の唯一のパーサ(YAMLサブセット・スキーマ検証・3層解決)
 ├── feedback_log.py   # フィードバック記録CLI: add/list/search/promote/merge/close/retire/rules
 ├── audit.sh          # オンデマンド脆弱性監査(唯一のネットワーク検査。Stopフックからは呼ばれない)
 ├── init.sh           # 導入スクリプト(Codex 向け資産の展開。導入先にはコピーされない)
@@ -28,7 +29,7 @@ scripts/
 | フィードバック蓄積・測定 | `feedback_log.py` | 人間の指摘を記録・一般化し、次セッションに引き継ぐ。数字と期間ダイジェストを出す |
 | オンデマンド監査(ネットワーク) | `audit.sh` | 依存の脆弱性を調べる。フックからは呼ばれない |
 
-配布のされ方が2通りある。**プラグイン導入**では全ファイルがプラグイン側に置かれ `${CLAUDE_PLUGIN_ROOT}` 経由で実行される。**`init.sh` 導入**では `check.sh` / `check_file.sh` / `audit.sh` / `lib.sh` / `feedback_log.py` / このREADMEが導入先の `scripts/` にコピーされる(`hooks/` と `init.sh` 自身はコピーされない — 前者は Claude Code 専用、後者は配布元から実行するもの)。
+配布のされ方が2通りある。**プラグイン導入**では全ファイルがプラグイン側に置かれ `${CLAUDE_PLUGIN_ROOT}` 経由で実行される。**`init.sh` 導入**では `check.sh` / `check_file.sh` / `lib.sh` / `audit.sh` / `harness_config.py` / `feedback_log.py` / このREADMEが導入先の `scripts/` にコピーされる(`hooks/` と `init.sh` 自身はコピーされない — 前者は Claude Code 専用、後者は配布元から実行するもの)。
 
 ## 設計思想(共通)
 
@@ -48,6 +49,7 @@ scripts/
 ```bash
 bash scripts/check.sh [プロジェクトルート]          # 省略時はカレントディレクトリ
 FEEDBACK_CHECK_SKIP="test build" bash scripts/check.sh   # 特定ステージをスキップ
+bash scripts/check.sh --list-checks   # 検査ID・実効判定・「出所」を一覧(検査コマンドは実行しない)
 ```
 
 **動作:** 検出したスタックごとにステージを走らせ、スタック非依存の横断チェックも実行して、`PASS`/`FAIL`/`WARN`/`SKIP` の要約を出す。
@@ -81,7 +83,9 @@ FEEDBACK_CHECK_SKIP="test build" bash scripts/check.sh   # 特定ステージを
 - **依存の実在性**(ネットワーク不使用): Node は `npm ls --all`(npm のときのみ。`node_modules` があるときのみ)、Go は `go mod verify`、Rust は `cargo metadata --offline`、Python は `deptry`。「存在しないパッケージ名」「宣言と実体のずれ」を検出する
 - **API契約・破壊的変更**(`contract` ステージ): `openapi.yaml`/`openapi.json`(ルートまたは `api/`)があれば `oasdiff breaking` をベースライン(`git merge-base HEAD <FEEDBACK_CONTRACT_BASE:-main>`、解決不能なら `HEAD`)との差分で実行する。Rust は `[lib]` を持つ crate で `cargo semver-checks check-release`。いずれもオフラインで完結する
 - **カバレッジ相乗り**: テストを2回走らせず計装フラグを足すだけ — Python は pytest-cov 検出時に `--cov --cov-report=term-missing`(設定の `--cov-fail-under` が自動的に FAIL ゲートになる)、Go は `go test -cover`、Node は `test:coverage` スクリプトがあればそれを `test` の**代わりに**実行する(両方走らせるとテストが2回動くため)
-- **ステージスキップ**: `FEEDBACK_CHECK_SKIP` に指定できるステージ名は `lint` / `typecheck` / `test` / `build` / `format` / `security` / `docs` / `contract`。空白区切りで複数指定できる
+- **設定ファイル**: `.feedback/config.yaml`(commit して共有)でステージの skip / FAIL・WARN の切替、検査対象の除外(`exclude`)、ログ行数、ツールの閾値(shellcheck の重大度・vulture の confidence・oasdiff のベースライン)、監査間隔等を調整できる。優先順位は**環境変数 > 検査単位(`checks.<id>`) > スタック単位(`check.<stack>`) > 全体(`check`) > 既定値** — `FEEDBACK_CHECK_SKIP` 等の環境変数は config より優先される一時上書き。全項目は[設定ガイド](../docs/configuration.md)を参照
+- **`--list-checks`**: 検査ID・ラベル・ステージ・実効判定・**出所**(どの層で判定が決まったか)を一覧する。検査コマンドは実行しない。左端の検査IDがそのまま `checks:` のキーになるため、コピーして config に貼れる。設定を書いた後にもう一度叩けば意図どおり効いたか確認できる。壊れた config では表を既定値で出した後に stderr へエラーを出し exit 1 する
+- **ステージスキップ**: `FEEDBACK_CHECK_SKIP` に指定できるステージ名は `lint` / `typecheck` / `test` / `build` / `format` / `security` / `docs` / `contract`。空白区切りで複数指定できる(config の `check.skip` と同じ語彙)
 - **make再帰ガード**: `make check` 実行時のみ `FEEDBACK_CHECK_RECURSION_GUARD` を子孫に伝え、その中で起動された check.sh は make フォールバックを `SKIP` する。フック実行時に `CLAUDE_PROJECT_DIR` が伝播し、テスト内の check.sh がルートを本リポジトリに解決し直して make check がテストを再実行する無限再帰(Stop フックの timeout を食い潰す)を断つためのもの。**通常の make 実行・直接ステージ(lint/test/build)には影響しない**
 - **SKIPの理由**: 出力に必ず理由が付く — `(<tool> 未インストール)` / `(<tool> 起動不可 — 環境を確認してください)` / `(実行不可)` / `(FEEDBACK_CHECK_SKIP)`、およびスタック単位でまとめた `(<stack>: 全ステージ …)`。**ツールが無い・壊れているだけの状態を `FAIL` にしない**(ユーザーのコードの問題ではないため)
 - **検査対象ファイル**: Gitリポジトリなら `git ls-files --cached --others --exclude-standard`。**未コミットの新規ファイルも検査し**、`.gitignore` 済みは除外する

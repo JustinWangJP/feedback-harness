@@ -34,3 +34,4 @@
 | 2026-08-16 | 適用範囲拡張 P1(基盤と既存欠陥) | lib.sh / check_file.sh / check.sh / on_stop.sh / feedback_log.py / tests | JSONC・複数文書YAMLの誤ブロック解消、設定ファイル構文の横断検査、非ブロッキングWARNとその測定連携 |
 | 2026-08-17 | 適用範囲拡張 P2(速い検査群) | check.sh / lib.sh / tests / package.json | 秘密情報・内部リンク・依存整合性・CI設定・Dockerfile・フォーマット・デッドコード・アーキ制約を追加。実測に基づき secretlint と knip は設定ゲート(設定なしは SKIP) |
 | 2026-08-17 | 適用範囲拡張 P3(重い検査群) | audit.sh / check.sh / feedback_log.py / tests | カバレッジ計装の相乗り、API契約差分(contract)、オンデマンド脆弱性監査と最終監査日の可視化。M2遅延実行は廃止し監査は Stop フックの外へ |
+| 2026-08-18 | プロジェクト設定ファイル(config.yaml) | harness_config.py / check.sh / lib.sh / docs | 環境変数3つしか可変点が無くチームで共有できない問題。3層(全体・スタック・検査)+ 環境変数の優先順位、--list-checks で実効値と出所を可視化 |

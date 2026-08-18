@@ -24,9 +24,15 @@ assert_file_exists "$WORK/target/scripts/feedback_log.py" "feedback_log.py"
 # stats/report が「bash scripts/audit.sh の実行を推奨」と案内するため、
 # 配り漏れると案内先が存在しないコマンドになる
 assert_file_exists "$WORK/target/scripts/audit.sh" "audit.sh"
+# harness_config.py は全スクリプトが config(.feedback/config.yaml)を読むための
+# 唯一のパーサ。欠けると config が効かないまま導入先が動く
+assert_file_exists "$WORK/target/scripts/harness_config.py" "harness_config.py"
 assert_file_exists "$WORK/target/AGENTS.md" "AGENTS.md"
 assert_file_exists "$WORK/target/CLAUDE.md" "CLAUDE.md"
 assert_file_exists "$WORK/target/.feedback/rules.md" "rules.md"
+# config の雛形。config.yaml 自体は自動生成しない(置いただけで「設定した」ように
+# 見えないため)ため、利用者はこの雛形から始める
+assert_file_exists "$WORK/target/.feedback/config.example.yaml" "config.example.yaml"
 
 # プラグインが担う領域はコピーしない
 assert_file_absent "$WORK/target/.claude/skills" ".claude/skills をコピーしない"

@@ -1,0 +1,54 @@
+# feedback-harness 設定の雛形
+#
+# 使い方: このファイルを config.yaml にコピーし、変えたい行だけを残す。
+#   cp .feedback/config.example.yaml .feedback/config.yaml
+#
+# 書かなかった項目はすべて既定値。全部書く必要はない。
+# 現在の実効値は `bash scripts/check.sh --list-checks` で確認できる。
+# 優先順位: 環境変数 > checks.<検査> > check.<スタック> > check(全体) > 既定値
+version: 1
+
+check:
+  # 実行しないステージ(全スタック)
+  # lint / typecheck / test / build / format / security / docs / contract
+  skip: []
+
+  # 宣言が無くても FAIL にするステージ
+  fail_on: []
+
+  # FAIL を WARN に落とすステージ(検査はするが完了をブロックしない)
+  warn_on: []
+
+  # 検査対象から外すパス glob
+  # 注意: 効くのはハーネスがファイルを列挙する検査だけ。ruff や pytest のように
+  # 自分でツリーを歩くツールは、それぞれの無視設定に従う
+  exclude: []
+
+  # FAIL / WARN 時に出すログの行数
+  log_tail_lines: 40
+
+  # スタック単位(python / node / go / rust / java / shell)
+  # 全体より優先される
+  # python:
+  #   skip: [test]
+  #   warn_on: [lint]
+
+# 検査単位。最も優先される。検査IDは --list-checks の左端の列
+# checks:
+#   vulture:
+#     severity: skip          # fail | warn | skip
+#     min_confidence: 80      # 0-100。下げると検出が増える
+#   shellcheck:
+#     min_severity: warning   # style | info | warning | error
+#   oasdiff:
+#     base: main              # API契約差分のベースラインブランチ
+
+audit:
+  # 「監査を推奨」を出すまでの経過日数
+  interval_days: 7
+  # npm audit --audit-level に渡す値: low | moderate | high | critical
+  npm_audit_level: high
+
+feedback:
+  # promote を促す open エントリ件数
+  open_threshold: 3

@@ -8,8 +8,10 @@
 # 必要とする実ファイルと、両環境で共有する状態だけである。
 #
 # 動作:
-# - scripts/(check.sh / check_file.sh / lib.sh / feedback_log.py)をコピー
-# - .feedback/ のシード(rules.template.md → rules.md)を作成(既存なら触らない)
+# - scripts/(check.sh / check_file.sh / lib.sh / audit.sh / harness_config.py /
+#   feedback_log.py)をコピー
+# - .feedback/ のシード(rules.template.md → rules.md、config.example.yaml)を
+#   作成(既存なら触らない)
 # - CLAUDE.md / AGENTS.md へ docs/pointer_*.md の断片を追記(なければ新規作成)
 # - .gitignore へ _workspace/ を追記
 set -euo pipefail
@@ -28,8 +30,12 @@ echo "導入先: $DEST"
 mkdir -p "$DEST/scripts"
 # audit.sh も配る。scripts/README.md が使い方を載せ、feedback_log.py の stats/report が
 # 「bash scripts/audit.sh の実行を推奨」と案内するため、欠けると案内先が存在しなくなる
+# harness_config.py も配る。check.sh / check_file.sh / audit.sh / feedback_log.py が
+# 設定(.feedback/config.yaml)の読み込みに使う唯一のパーサのため、欠けると config が
+# 読めないまま動く
 cp "$SRC/scripts/check.sh" "$SRC/scripts/check_file.sh" "$SRC/scripts/lib.sh" \
-   "$SRC/scripts/audit.sh" "$SRC/scripts/feedback_log.py" "$SRC/scripts/README.md" \
+   "$SRC/scripts/audit.sh" "$SRC/scripts/harness_config.py" \
+   "$SRC/scripts/feedback_log.py" "$SRC/scripts/README.md" \
    "$DEST/scripts/"
 # 755(+x ではなく明示指定)。シェルスクリプトの実行には読み取り権限が必要で、
 # 導入元が 711 の場合に +x だと所有者以外が実行できない権限のまま複製される
@@ -43,9 +49,12 @@ echo "  .claude/ ... スキップ(Claude Code ではプラグインを使って�
 # rules.md は導入元の promote 済みルール(と導入先に存在しない出典ID)を持ち込まないよう、
 # ヘッダのみのテンプレートをシードにする。template 自体も feedback_log.py が
 # rules.md 再生成時に参照するためコピーする。
+# config.yaml は自動生成しない — 空の雛形が commit されると「設定した」のか
+# 「置いただけ」なのか区別できなくなるため、config.example.yaml のコピーで始める
 mkdir -p "$DEST/.feedback/log"
 cp "$SRC/.feedback/rules.template.md" "$DEST/.feedback/rules.template.md"
 [[ -f "$DEST/.feedback/rules.md" ]] || cp "$SRC/.feedback/rules.template.md" "$DEST/.feedback/rules.md"
+cp "$SRC/.feedback/config.example.yaml" "$DEST/.feedback/config.example.yaml"
 echo "  .feedback/ ... OK"
 
 # CLAUDE.md / AGENTS.md — ポインタの追記

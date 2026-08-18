@@ -233,4 +233,27 @@ OUT="$(CLAUDE_PROJECT_DIR="$WORK/proj" python3 "$FB" stats)"
 assert_contains "$OUT" "openが2件以上" "open_threshold=2 で open 2件の NOTE が出る"
 rm -f "$WORK/proj/.feedback/log/e1.md" "$WORK/proj/.feedback/log/e2.md" "$WORK/proj/.feedback/config.yaml"
 
+# --- 雛形とガイドがスキーマと一致する ---
+# 設定項目は harness_config.py / config.example.yaml / docs/configuration.md の
+# 3箇所に現れる。文書が古いまま残るのを機械的に防ぐ
+EXAMPLE="$REPO/.feedback/config.example.yaml"
+GUIDE="$REPO/docs/configuration.md"
+assert_file_exists "$EXAMPLE" "雛形が存在する"
+assert_file_exists "$GUIDE" "設定ガイドが存在する"
+
+MISSING=""
+while IFS=$'\t' read -r kind name _ _; do
+  case "$kind" in
+    key|param) grep -q "${name##*.}" "$EXAMPLE" || MISSING="$MISSING $name(雛形)" ;;
+  esac
+done < <(python3 "$CFG" --keys)
+assert_eq "" "$MISSING" "全設定キーが雛形に載っている"
+
+MISSING=""
+while IFS=$'\t' read -r kind name _ _; do
+  [[ "$kind" == "check" ]] || continue
+  grep -q "\`$name\`" "$GUIDE" || MISSING="$MISSING $name"
+done < <(python3 "$CFG" --keys)
+assert_eq "" "$MISSING" "全検査IDが設定ガイドに載っている"
+
 assert_summary

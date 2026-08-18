@@ -83,6 +83,8 @@ scripts/
 .feedback/
   rules.md          # 一般化された恒久ルール (エージェント必読・失敗由来/成功由来の2セクション)
   rules.template.md # rules.md のシード (導入時・再生成時に使う雛形)
+  config.yaml       # プロジェクト設定 (任意・commitして共有。config.example.yaml から始める)
+  config.example.yaml # config.yaml の雛形 (全項目をコメント付きで並べたもの)
   log/              # 生のフィードバックエントリ (frontmatter付きMarkdown)
   .last-check       # Stopフックの検査スタンプ (mtime比較用のローカル状態・gitignore対象)
   .last-retro       # 振り返りの基点 (report --mark が更新・gitignore対象)
@@ -303,12 +305,25 @@ python3 scripts/feedback_log.py report --last --mark       # 振り返り後に�
 
 ### 環境変数
 
+環境変数は**config より優先される**一時上書き(CI や調査中のその場限りの調整用)。commit してチームで共有する設定は設定ファイルに書く。
+
 | 変数 | 既定 | 効果 |
 |---|---|---|
 | `FEEDBACK_CHECK_SKIP` | (空) | 空白区切りでステージを除外(`lint typecheck test build format security docs contract`) |
 | `FEEDBACK_SHELLCHECK_SEVERITY` | `warning` | shellcheck の重大度しきい値。`style` で厳しくする |
 | `FEEDBACK_CONTRACT_BASE` | `main` | API 契約差分のベースラインブランチ |
 | `CLAUDE_PROJECT_DIR` | (自動) | 検査対象・状態保存先のルート。フックが設定する |
+
+### 設定ファイル
+
+`.feedback/config.yaml` にプロジェクトの設定を書ける(commit して共有)。ステージの skip / FAIL・WARN の切替、検査対象の除外(`exclude`)、ログ行数、ツールの閾値、監査間隔等を環境変数なしで調整できる。書かなかった項目はすべて既定値。
+
+```bash
+cp .feedback/config.example.yaml .feedback/config.yaml   # 雛形から始める
+bash scripts/check.sh --list-checks    # 検査ID・実効判定・「出所」を一覧(検査は実行しない)
+```
+
+優先順位は 環境変数 > 検査単位 > スタック単位 > 全体 > 既定値。書き方と全項目は[設定ガイド](docs/configuration.md)を参照。
 
 ## フィードバック運用フロー
 
