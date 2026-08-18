@@ -30,6 +30,12 @@ for arg in "$@"; do
   esac
 done
 set -- "${ARGS[@]+"${ARGS[@]}"}"
+# --json 単独は黙って無視してフル検査を走らせない。診断系のつもりで叩いた
+# 引数がそのまま重い検査を起動するのは、--list-checks が避けた失敗の裏口になる
+if [[ "$LIST_JSON" == "1" && "$LIST_MODE" == "0" ]]; then
+  echo "ERROR: --json は --list-checks と組み合わせて使います" >&2
+  exit 2
+fi
 
 ROOT="$(harness_project_root "${1:-}")" \
   || { echo "ERROR: ディレクトリが見つかりません: ${1:-}"; exit 2; }
@@ -66,12 +72,18 @@ run_stage() {
   local stage="$1" id="$2" tool="$3" label="$4"; shift 4
   if [[ "$LIST_MODE" == "1" ]]; then
     # 検査コマンドは実行しない。ツール存在確認だけは通常経路と同じに保ち、
-    # 未導入が skip として現れるようにする
+    # 未導入・起動不能が skip として現れるようにする。command -v だけでは
+    # PATH 上にあるが起動できない(shebang切れのvenv等)ツールを見逃し、
+    # 「環境が壊れた」まさにその場面で --list-checks を叩く利用者に誤答する
     local lsev lsrc
     lsev="$(harness_check_severity "$id" "$([[ "$SOFT_STAGE" == "1" ]] && echo warn || echo fail)")"
     lsrc="$(harness_check_source "$id")"
-    if [[ "$tool" != "-" ]] && ! command -v "$tool" >/dev/null 2>&1; then
-      lsev="skip"; lsrc="$tool 未インストール"
+    if [[ "$tool" != "-" ]]; then
+      if ! command -v "$tool" >/dev/null 2>&1; then
+        lsev="skip"; lsrc="$tool 未インストール"
+      elif ! has "$tool"; then
+        lsev="skip"; lsrc="$tool 起動不可 — 環境を確認してください"
+      fi
     fi
     printf '%s\t%s\t%s\t%s\t%s\n' "$id" "$label" "$stage" "$lsev" "$lsrc" >> "$LOGDIR/list.txt"
     return

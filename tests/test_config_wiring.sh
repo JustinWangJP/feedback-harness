@@ -175,4 +175,20 @@ assert_eq "1" "$RC" "壊れた config なら --list-checks も失敗を返す"
 assert_contains "$OUT" "lnit" "一覧表示でも config の誤りが見える"
 rm -f "$FAKEBIN/ruff"
 
+# --- PATH上だが起動できないツールは一覧でも起動不可になる ---
+# venv の shebang 切れなど「環境が壊れた」場面こそ --list-checks を叩く動機。
+# 通常経路が SKIP(起動不可)にするツールが一覧で fail/既定 と出れば誤答になる
+P10="$(new_project broken_tool)"
+printf '[project]\nname = "t"\n' > "$P10/pyproject.toml"
+printf '#!/nonexistent/interpreter\n' > "$FAKEBIN/ruff"; chmod +x "$FAKEBIN/ruff"
+OUT="$(PATH="$FAKEBIN:$PATH" bash "$CHECK" --list-checks "$P10" 2>&1)"
+assert_contains "$OUT" "起動不可" "起動できないツールが一覧で skip(起動不可)になる"
+
+# --- --json 単独ではフル検査を走らせない ---
+# 診断系のつもりで叩いた引数が、黙って重い検査を起動するのは裏口になる
+OUT="$(PATH="$FAKEBIN:$PATH" bash "$CHECK" --json "$P10" 2>&1)"; RC=$?
+assert_eq "2" "$RC" "--json 単独は引数誤りとして exit 2"
+assert_contains "$OUT" "--list-checks" "使い方が案内される"
+rm -f "$FAKEBIN/ruff"
+
 assert_summary

@@ -223,4 +223,14 @@ OUT="$(CLAUDE_PROJECT_DIR="$WORK/proj" python3 "$FB" stats)"
 assert_not_contains "$OUT" "監査を推奨" "config で間隔を延ばすと推奨が消える"
 rm -f "$WORK/proj/.feedback/config.yaml" "$WORK/proj/.feedback/.last-audit"
 
+# open_threshold も config に従う(配線のタイポが黙って既定値に落ちるのを防ぐ)
+for i in 1 2; do
+  printf -- '---\nid: 20260101-00000%d\ndate: 2026-01-0%d\nsource: human\ncategory: style\nstatus: open\n---\n\n# t%d\ntest\n' "$i" "$i" "$i" \
+    > "$WORK/proj/.feedback/log/e$i.md"
+done
+printf 'feedback:\n  open_threshold: 2\n' > "$WORK/proj/.feedback/config.yaml"
+OUT="$(CLAUDE_PROJECT_DIR="$WORK/proj" python3 "$FB" stats)"
+assert_contains "$OUT" "openが2件以上" "open_threshold=2 で open 2件の NOTE が出る"
+rm -f "$WORK/proj/.feedback/log/e1.md" "$WORK/proj/.feedback/log/e2.md" "$WORK/proj/.feedback/config.yaml"
+
 assert_summary
