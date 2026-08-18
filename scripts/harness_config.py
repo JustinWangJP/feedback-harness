@@ -65,7 +65,10 @@ def _scalar(s, path, lineno):
         inner = s[1:-1].strip()
         if not inner:
             return []
-        return [_scalar(x.strip(), path, lineno) for x in inner.split(",")]
+        items = [x.strip() for x in inner.split(",")]
+        for x in items:
+            _reject_map_item(x, path, lineno)
+        return [_scalar(x, path, lineno) for x in items]
     if len(s) >= 2 and s[0] == s[-1] and s[0] in "\"'":
         return s[1:-1]
     low = s.lower()
@@ -76,6 +79,20 @@ def _scalar(s, path, lineno):
     if re.fullmatch(r"-?\d+", s):
         return int(s)
     return s
+
+
+def _reject_map_item(s, path, lineno):
+    """リスト要素として書かれた「キー: 値」形式を落とす(設計書 §5.2)。
+
+    マップのリストは未対応だが、黙って文字列として受け入れると exclude 等に
+    「何にも一致しない glob」が静かに入り、書いたのに効かない状態になる。
+    クォートされた文字列("x: y")はマップではないため素通しする。
+    """
+    if s[:1] in ("\"", "'"):
+        return
+    m = re.match(r"^(\S+):(\s|$)", s)
+    if m:
+        _die(path, lineno, f"リストの要素にマップは書けません({m.group(1)}: …)。マップのリストは未対応です")
 
 
 def parse_yaml(text, path):
@@ -122,7 +139,9 @@ def parse_yaml(text, path):
             cont = container_for(indent, lineno)
             if not isinstance(cont, list):
                 _die(path, lineno, "リスト要素を書ける位置ではありません")
-            item = _scalar(body[2:].strip(), path, lineno)
+            item_text = body[2:].strip()
+            _reject_map_item(item_text, path, lineno)
+            item = _scalar(item_text, path, lineno)
             if isinstance(item, (list, dict)):
                 _die(path, lineno, "リストの入れ子は使えません")
             cont.append(item)

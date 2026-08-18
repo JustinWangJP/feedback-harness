@@ -62,6 +62,19 @@ import sys; sys.path.insert(0, sys.argv[1]); import harness_config as hc
 hc.parse_yaml(open(sys.argv[2]).read(), sys.argv[2])' "$REPO/scripts" "$WORK/t.yaml" 2>&1)"
 assert_contains "$OUT" "タブ" "タブインデントを拒否する"
 
+# リスト要素のマップ形式は黙って文字列化せず拒否する(exclude に
+# 「何にも一致しない glob」が静かに増えるのを防ぐ — 設計書 §5.2)
+OUT="$(parse 'exclude:
+  - path: vendor/**')"
+assert_contains "$OUT" "マップ" "リスト要素のマップ形式を拒否する"
+assert_contains "$OUT" ":2:" "マップ形式の拒否にも行番号が出る"
+
+OUT="$(parse 'a: [path: x, y]')"
+assert_contains "$OUT" "マップ" "フローリストでもマップ形式を拒否する"
+
+# クォートされたコロン入り文字列はマップではないため素通しする
+assert_eq '{"a": ["x: y"]}' "$(parse 'a: ["x: y"]')" "クォート済みのコロン入り文字列は通る"
+
 # --- スキーマ検証 ---
 # 検証は parse の後段。打ち間違いを黙って無視しない契約を固定する
 val() { printf '%s' "$1" > "$WORK/v.yaml"; python3 -c '
