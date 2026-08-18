@@ -163,4 +163,16 @@ assert_contains "$OUT" '"id": "vulture"' "JSON に検査IDが出る"
 assert_contains "$OUT" '"source": "checks.vulture"' "JSON に出所が出る"
 rm -f "$FAKEBIN/ruff" "$FAKEBIN/pytest" "$FAKEBIN/vulture"
 
+# --- 壊れた config を --list-checks が黙って隠さない ---
+# 打ち間違いを調べるための診断コマンドなので、ここで黙って「既定」とだけ
+# 表示すると、利用者は原因に辿り着けないまま設定が効かない状態に留まる
+P9="$(new_project listing_broken)"
+printf '[project]\nname = "t"\n' > "$P9/pyproject.toml"
+make_fake ruff 0
+printf 'check:\n  skip: [lnit]\n' > "$P9/.feedback/config.yaml"
+OUT="$(PATH="$FAKEBIN:$PATH" bash "$CHECK" --list-checks "$P9" 2>&1)"; RC=$?
+assert_eq "1" "$RC" "壊れた config なら --list-checks も失敗を返す"
+assert_contains "$OUT" "lnit" "一覧表示でも config の誤りが見える"
+rm -f "$FAKEBIN/ruff"
+
 assert_summary

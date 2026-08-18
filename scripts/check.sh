@@ -582,6 +582,16 @@ print(json.dumps(rows, ensure_ascii=False, indent=2))
   else
     python3 "$LIBDIR/harness_config.py" --format-table < "$LOGDIR/list.txt"
   fi
+  # config が壊れていると一覧は「すべて既定」を並べる。これは事実だが、
+  # 打ち間違いを調べようと --list-checks を叩いた利用者には最も知りたい情報が
+  # 見えないまま「既定」とだけ映り、原因に辿り着けない。stdout ではなく stderr へ
+  # 出すのは --json の出力をパイプで処理する経路を壊さないため
+  if [[ -n "${HARNESS_CONFIG_ERROR:-}" ]]; then
+    echo "" >&2
+    echo "ERROR: .feedback/config.yaml を読めませんでした。以下はすべて既定値です。" >&2
+    echo "$HARNESS_CONFIG_ERROR" >&2
+    exit 1
+  fi
   exit 0
 fi
 
