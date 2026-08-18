@@ -131,6 +131,11 @@ list_files() { # list_files <glob> — 検査対象のファイルを1行1件で
   local f
   while IFS= read -r f; do
     [[ -n "$f" ]] || continue
+    # find 側は "./foo.sh" 形式で返すため先頭の ./ を落とし、git ls-files 由来の
+    # リポジトリ相対パスへ揃える。揃えないと同じ exclude パターンが git 管理下か
+    # 否かで効いたり効かなかったりする(利用者には見分けが付かない)。
+    # lib.sh の harness_is_jsonc も「先頭に ./ も / も付かない」形を前提にしている
+    f="${f#./}"
     harness_excluded "$f" || printf '%s\n' "$f"
   done < <(
     if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then

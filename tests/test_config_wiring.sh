@@ -116,4 +116,18 @@ OUT="$(run_check "$P6")"; RC=$?
 assert_eq "0" "$RC" "exclude で対象から外れ exit 0"
 assert_contains "$OUT" "PASS  shell: bash -n" "残ったファイルは検査される"
 
+# --- git 管理外でも同じパターンが効く ---
+# 非git環境ではファイル列挙が find になり "./vendor/broken.sh" 形式で返る。
+# 先頭の ./ を落とさないと、同じ config を書いても git 管理下かどうかで
+# exclude が効いたり効かなかったりし、利用者にはその違いが見えない
+P7="$WORK/nogit"
+mkdir -p "$P7/.feedback" "$P7/vendor dir"
+printf 'if [ ; then\n' > "$P7/vendor dir/broken.sh"
+printf '#!/usr/bin/env bash\necho ok\n' > "$P7/good.sh"
+OUT="$(run_check "$P7")"; RC=$?
+assert_eq "1" "$RC" "非git環境でも exclude 無しなら壊れた .sh で exit 1"
+printf 'check:\n  exclude:\n    - "vendor dir/**"\n' > "$P7/.feedback/config.yaml"
+OUT="$(run_check "$P7")"; RC=$?
+assert_eq "0" "$RC" "非git環境でも git 環境と同じパターンで除外できる"
+
 assert_summary
