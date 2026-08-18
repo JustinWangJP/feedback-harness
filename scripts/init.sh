@@ -10,8 +10,9 @@
 # 動作:
 # - scripts/(check.sh / check_file.sh / lib.sh / audit.sh / harness_config.py /
 #   feedback_log.py)をコピー
-# - .feedback/ のシード(rules.template.md → rules.md、config.example.yaml)を
-#   作成(既存なら触らない)
+# - .feedback/ のシードを作成(rules.md は既存なら触らない。config.example.yaml
+#   は毎回上書き — 雛形は本体側の更新を常に受け取るため。手元の config.yaml
+#   は別ファイルなので上書きされない)
 # - CLAUDE.md / AGENTS.md へ docs/pointer_*.md の断片を追記(なければ新規作成)
 # - .gitignore へ _workspace/ を追記
 set -euo pipefail

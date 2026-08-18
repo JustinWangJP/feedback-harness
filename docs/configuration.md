@@ -57,10 +57,10 @@ checks:
 もう一度 `--list-checks` を叩くと、判定と**出所**が変わる:
 
 ```
-ruff-format  python: ruff format  format    fail  config: checks.ruff-format
+ruff-format  python: ruff format  format    fail  checks.ruff-format
 ```
 
-出所が `既定` から `config: checks.ruff-format` に変わったことで、書いた設定が効いていることが確認できる。この「書く → `--list-checks` で出所を確認する」の往復が、config のすべての作業の基本形。
+出所が `既定` から `checks.ruff-format` に変わったことで、書いた設定が効いていることが確認できる。この「書く → `--list-checks` で出所を確認する」の往復が、config のすべての作業の基本形。
 
 ## 困りごとから引く
 
@@ -75,7 +75,7 @@ check:
   warn_on: [format]   # FAIL を WARN に落とす。検査はするが完了をブロックしない
 ```
 
-**出力がどう変わるか**: `--list-checks` の判定列が `fail` → `warn` に並ぶ。`check.sh` の最終行は `ALL PASS (N件WARN …)` になり exit 0。WARN は `events.jsonl` に記録され `stats` の「頻出WARN」に現れるため、直し忘れが見える。
+**出力がどう変わるか**: `--list-checks` の判定列が `fail` → `warn` に並ぶ。`check.sh` の最終行は `ALL PASS (N件WARN …)` になり exit 0。WARN はプラグインのフック経由で `events.jsonl` に記録され `stats` の「頻出WARN」に現れるため、直し忘れが見える(init.sh 配布のみでフックが無い環境では記録されない)。
 
 直し終わったら `warn_on` から外す。**検査そのものを消したいときだけ `skip` を使う** — `skip` は検査を行わないため、壊れたままで気づけなくなる。`warn_on` は「今は直せないが見えていてほしい」ためのもの。
 
@@ -93,7 +93,7 @@ checks:
 
 **出力がどう変わるか**: `check.sh` の該当行が `SKIP  python: vulture (config: checks.vulture)` になる。理由に `config: …` と付くため、自分で止めたのか既定の挙動なのかが区別できる。
 
-ステージ単位で止すこともできる(`check.skip: [security]` 等、語彙は `lint` / `typecheck` / `test` / `build` / `format` / `security` / `docs` / `contract`)。ただし `lint` には21個の検査が同居しているため、構文エラー検出(`bash-syntax` / `json-syntax`)まで消えたくなければ検査IDで指定する。
+ステージ単位で止すこともできる(`check.skip: [security]` 等、語彙は `lint` / `typecheck` / `test` / `build` / `format` / `security` / `docs` / `contract`)。ただし `lint` には18個の検査が同居しているため、構文エラー検出(`bash-syntax` / `json-syntax`)まで消えたくなければ検査IDで指定する。
 
 ### モノレポで言語ごとに事情が違う
 
@@ -139,7 +139,7 @@ FEEDBACK_CHECK_SKIP="test build" bash scripts/check.sh   # CI だけで重いス
 FEEDBACK_SHELLCHECK_SEVERITY=style bash scripts/check.sh # CI だけ厳しく
 ```
 
-**出力がどう変わるか**: `--list-checks` の出所が `env: FEEDBACK_CHECK_SKIP` のように `env:` 始まりになる。**環境変数で切り替えられるのはこの3項目**(`FEEDBACK_CHECK_SKIP` / `FEEDBACK_SHELLCHECK_SEVERITY` / `FEEDBACK_CONTRACT_BASE`)で、判定(`severity` / `fail_on` / `warn_on`)を環境変数で上書きする口は無い。
+**出力がどう変わるか**: `--list-checks` の出所が `env.FEEDBACK_CHECK_SKIP` のように `env.` 始まりになる。**環境変数で切り替えられるのはこの3項目**(`FEEDBACK_CHECK_SKIP` / `FEEDBACK_SHELLCHECK_SEVERITY` / `FEEDBACK_CONTRACT_BASE`)で、判定(`severity` / `fail_on` / `warn_on`)を環境変数で上書きする口は無い。
 
 ### 特定の検査だけ絶対にブロックしたい
 
@@ -153,7 +153,7 @@ checks:
     severity: fail
 ```
 
-**出力がどう変わるか**: `--list-checks` で `warn` → `fail`、出所は `config: checks.deptry`。指摘があると `check.sh` が exit 1 になり完了がブロックされる。
+**出力がどう変わるか**: `--list-checks` で `warn` → `fail`、出所は `checks.deptry`。指摘があると `check.sh` が exit 1 になり完了がブロックされる。
 
 ## 優先順位
 
@@ -191,7 +191,7 @@ checks:
 | 検査ID | 固有キー | 型 | 既定値 | 対応する環境変数 |
 |---|---|---|---|---|
 | `shellcheck` | `min_severity` | `style`\|`info`\|`warning`\|`error` | `warning` | `FEEDBACK_SHELLCHECK_SEVERITY` |
-| `vulture` | `min_confidence` | 整数 0-100 | `80` | — |
+| `vulture` | `min_confidence` | 整数(大きいほど検出が減る) | `80` | — |
 | `oasdiff` | `base` | 文字列 | `main` | `FEEDBACK_CONTRACT_BASE` |
 
 **その他のセクション**
@@ -229,8 +229,8 @@ bash scripts/check.sh --list-checks
 ```
 
 - 出所が `既定` のまま → config が読めていない。下記「壊れた config」を確認
-- 出所が `config:` だが期待するキーと違う(例: `check.python.warn_on` を書いたつもりが `check.warn_on` で効いている)→ 優先順位の誤り
-- 出所が `env: <変数名>` → 環境変数が export されたまま。config より優先されるため、`unset` するまで config は効かない
+- 出所が config 由来のパス(例: `check.python.warn_on`)だが期待するキーと違う(例: `check.python.warn_on` を書いたつもりが `check.warn_on` で効いている)→ 優先順位の誤り
+- 出所が `env.<変数名>` → 環境変数が export されたまま。config より優先されるため、`unset` するまで config は効かない
 
 ### 壊れた config は表の後に stderr へ出る(仕様)
 

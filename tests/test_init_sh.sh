@@ -43,11 +43,16 @@ assert_file_absent "$WORK/target/scripts/hooks" "hooks ラッパーをコピー�
 # 実行権限
 if [[ -x "$WORK/target/scripts/check.sh" ]]; then :; else fail "check.sh に実行権限がない"; fi
 
-# ベンダリングした check.sh が対象プロジェクトで動く
+# ベンダリングした check.sh が対象プロジェクトで exit 0 になる。
+# ルートに README.md を置く(一般的な導入先と同じ状態)。「0か1なら可」の緩い
+# 判定にしていた頃、配布物の相対リンク切れが md-links FAIL として見逃されて
+# いた — docs/ は配布対象外のため、scripts/README.md から docs/ への
+# リンクを足すと必ず壊れる(2026-08-18 のレビューで発見)
+printf '# Target README\n' > "$WORK/target/README.md"
 ( cd "$WORK/target" && bash scripts/check.sh >/dev/null 2>&1 )
 RC=$?
-if [[ $RC -ne 0 && $RC -ne 1 ]]; then
-  fail "ベンダリングした check.sh が異常終了した (exit=$RC)"
+if [[ "$RC" != "0" ]]; then
+  fail "ベンダリングした check.sh が exit 0 にならない (exit=$RC) — 配布物のリンク切れ等の可能性"
 fi
 
 # 冪等性: 2回目でポインタが重複しない
