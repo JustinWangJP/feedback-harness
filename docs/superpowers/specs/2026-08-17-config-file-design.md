@@ -184,6 +184,8 @@ feedback:
 
 なお `exclude` はスタック検出(`[[ -f pyproject.toml ]]` 等)には影響しない。スタックの有無はマニフェストの存在で決まる。
 
+glob の照合対象は**リポジトリ相対パス**(先頭に `./` も `/` も付かない)で統一する。ファイル列挙は git 環境では `git ls-files`、非git環境では `find .` が担うが、後者は `./foo.sh` 形式で返すため、そのまま照合すると同じパターンが git 管理下かどうかで効いたり効かなかったりする。利用者にはこの違いが見えないため、列挙側で先頭の `./` を落としてから `exclude` と照合する(`lib.sh` の `harness_is_jsonc` も同じ形式を前提にしている)。
+
 ## 4. 読み込みの実装
 
 ### 4.1 パーサは1つだけ置く
@@ -205,14 +207,12 @@ lib.sh: harness_load_config [root]   # 上記を eval する薄いラッパ
 3層を bash 側で解決させると解決規則が2箇所(Python と bash)に散る。**解決はローダー側で済ませ、bash には解決済みの値だけを渡す**:
 
 ```
-# 全体・スタック層は解決済みのステージ集合として出す
-HARNESS_SKIP_STAGES='contract'                 # 全体
-HARNESS_SKIP_STAGES_PYTHON='test'              # スタック単位(存在するスタックの分だけ)
-HARNESS_FAIL_ON_PYTHON=''
-HARNESS_WARN_ON_NODE='lint'
+# 壊れた config のエラー(None なら空文字)。check.sh はこれを見て FAIL を立てる
+HARNESS_CONFIG_ERROR=''
 
-# 検査層は「ID→判定」の解決済みマップ(空白区切りの id:severity)
-HARNESS_CHECK_SEVERITY='vulture:skip deptry:fail shellcheck:warn'
+# 判定は「ID:判定:出所」の解決済みマップ(空白区切り)。全体・スタック層の
+# ステージ集合もここへ展開済み — bash 側にステージの解決規則を置かないため
+HARNESS_CHECK_SEVERITY='vulture:skip:checks.vulture ruff:skip:env.FEEDBACK_CHECK_SKIP'
 
 # ツール固有パラメータと全体設定
 HARNESS_SHELLCHECK_MIN_SEVERITY='warning'
@@ -226,13 +226,13 @@ HARNESS_AUDIT_NPM_LEVEL='high'
 HARNESS_FEEDBACK_OPEN_THRESHOLD='3'
 ```
 
-`run_stage` は自分の `<id>` と `<stage>` を持っているので、`HARNESS_CHECK_SEVERITY` を引き、無ければスタック層・全体層のステージ集合を見る、という**参照だけ**を行う。優先順位の判断ロジックはローダーが持つ。
+`run_stage` は自分の `<id>` で `HARNESS_CHECK_SEVERITY` を引く(見つからなければ呼び出し側の既定)という**参照だけ**を行う。検査・スタック・全体の3層と環境変数の優先順位判断はすべてローダーが済ませて1つのマップへ折りたたむ — ステージ集合を bash 側で再解決させると規則が2箇所に散るため、設計段階で検討した「スタック別のステージ変数」は作らないことにした。
 
 出力される値は**必ず `shlex.quote` で括る**。config はリポジトリ内のファイルであり、その値が `eval` に渡る以上、引用を怠るとファイルの中身がシェルコードとして実行される。
 
 リスト値の区切りは2種類を使い分ける:
 
-- **ステージ名のリスト**(`skip` / `fail_on` / `warn_on`)は**空白区切り**。値は閉じた語彙でスキーマ検証済みのため空白を含みえず、既存の `skipped()`(部分文字列一致)がそのまま使える
+- **判定マップ**(`HARNESS_CHECK_SEVERITY`)は**空白区切り**。検査ID・severity・出所はいずれも閉じた語彙(スキーマ検証済み)で空白を含みえない
 - **`exclude`** は**改行区切り**。ユーザーが書く任意の glob には空白を含むパスがありえ、空白区切りだと `vendor dir/**` が2件に割れる。読む側は `while IFS= read -r` で回す
 
 `shlex.quote` は改行を含む値も安全に括るため、`eval` 経由でも壊れない。
@@ -244,8 +244,8 @@ HARNESS_FEEDBACK_OPEN_THRESHOLD='3'
 環境変数は config の3層すべてに優先する。ローダーが `os.environ` を最初に見て解決するため、bash 側は解決済みの値を使うだけでよい:
 
 ```bash
-SKIP="$HARNESS_SKIP_STAGES"                    # FEEDBACK_CHECK_SKIP は解決済み
-SHELLCHECK_SEVERITY="$HARNESS_SHELLCHECK_MIN_SEVERITY"
+SHELLCHECK_SEVERITY="$HARNESS_SHELLCHECK_MIN_SEVERITY"   # FEEDBACK_CHECK_SKIP は
+                                                          # ローダーが判定マップへ解決済み
 ```
 
 Python 側(`feedback_log.py`)も同じローダーを import するため、解決規則は1箇所にしか存在しない。
@@ -276,20 +276,26 @@ resolve(layers=[local_config, shared_config], env=…) # 個人レイヤ追加�
 ```
 $ bash scripts/check.sh --list-checks
 
-検査ID       ラベル               ステージ  判定   出所
-ruff         python: ruff         lint      fail   既定
-ruff-format  python: ruff format  format    warn   既定(宣言なし)
-pytest       python: pytest       test      warn   config: check.python.warn_on
-vulture      python: vulture      lint      skip   config: checks.vulture
-deptry       python: deptry       lint      fail   config: checks.deptry
-shellcheck   shell: shellcheck    lint      fail   既定
+検査ID       ラベル               ステージ  判定  出所
+ruff         python: ruff         lint      fail  既定
+ruff-format  python: ruff format  format    warn  既定
+pytest       python: pytest       test      warn  check.python.warn_on
+vulture      python: vulture      lint      skip  checks.vulture
+deptry       python: deptry       lint      fail  checks.deptry
+shellcheck   shell: shellcheck    lint      fail  既定
 ```
 
 - **左端の列がそのまま設定キー**になる(コピーして `checks:` の下に貼れる)
-- **`出所` 列**が3層のどこで決まったかを答える。`既定` / `config: <キーのパス>` / `env: <変数名>` の3種
+- **`出所` 列**が3層のどこで決まったかを答える。`既定` / `<キーのパス>`(例: `check.python.warn_on`) / `env.<変数名>` の3種。config 由来であることの接頭辞は付けない — 一覧自体が config の診断であるため
 - 設定を書いた後にもう一度叩けば、意図どおり効いたかが確認できる
 
-**列挙するのは、このプロジェクトで実際に対象になる検査だけ**とする(Python リポジトリで `cargo-fmt` を並べても読みにくくなるだけ)。スタック検出とツール存在確認は通常実行と同じ経路を通すため、ツール未導入は `skip(未インストール)` として現れる。検査コマンド自体は実行しない。
+**列挙するのは、このプロジェクトで実際に対象になる検査だけ**とする(Python リポジトリで `cargo-fmt` を並べても読みにくくなるだけ)。ツール存在確認は通常実行と同じ2段階(`command -v` で未インストール、`has` で起動不可)を通すため、どちらも `skip` として現れる。検査コマンド自体は実行しない。
+
+実装で確定した追加の挙動:
+
+- **壊れた config では表を出したうえで stderr にエラーを出し exit 1 する**。一覧が「すべて既定」で整っていると、打ち間違いを調べに来た利用者に最も知りたい情報が見えないままになるため
+- **`--json` 単独の指定は exit 2 で弾く**(`--list-checks --json` のみ有効)。診断系のつもりの引数が黙ってフル検査を起動するのを防ぐ
+- 既知の限界: 呼び出し側で `if has <tool>` の外側にゲートされた検査(vulture / deptry / prettier 等)は、ツール未導入だと**行自体が一覧へ出ない**。「プロジェクトに該当しない」のか「ツールが無いだけ」かの区別は今後の課題(設定ガイドの「効かないとき」に明記)
 
 **実装**: `run_stage` に「実行せず行を出力する」モードを設ける。行(ID・ラベル・ステージ)は `check.sh` が持ち、判定と出所は `harness_config.py` が解決する。整形も後者が行う — ラベルに日本語(`config: json 構文` 等)が含まれ、bash の `printf %-20s` はバイト数で数えるため桁がずれる。Python 側で `unicodedata.east_asian_width` を見て揃える。
 
