@@ -47,8 +47,8 @@ fi
 # <tool> にコマンド名を渡すと未インストール時に SKIP を記録する(失敗扱いにしない)。
 # ツール判定が不要なステージは "-" を渡す。
 run_stage() {
-  # shellcheck disable=SC2034  # stage は呼び出し側の可読性のために残す(判定は id で行う)
-  local stage="$1" id="$2" tool="$3" label="$4"; shift 4
+  shift  # $1 = stage — 判定は id で行うため本体では使わない(呼び出し側の可読性のために残す)
+  local id="$1" tool="$2" label="$3"; shift 3
   local sev src
   sev="$(harness_check_severity "$id" "$([[ "$SOFT_STAGE" == "1" ]] && echo warn || echo fail)")"
   if [[ "$sev" == "skip" ]]; then
