@@ -269,4 +269,31 @@ while IFS=$'\t' read -r kind name _ _; do
 done < <(python3 "$CFG" --keys)
 assert_eq "" "$MISSING" "全検査IDが設定ガイドに載っている"
 
+# check.sh の呼び出しID と CHECKS のドリフトも防ぐ(設計書 §8)。
+# 行頭アンカーの grep は "cmd && run_stage ..." 形式の行を拾えないため
+# 非アンカーで抽出する。ID の過不足と、ステージ引数の取り違えの両方を見る
+DRIFT="$(python3 - "$REPO/scripts/check.sh" "$CFG" <<'PY'
+import re, subprocess, sys
+src = open(sys.argv[1]).read()
+calls = re.findall(r'\brun_stage(?:_soft)?\s+([a-z]+)\s+"([a-z0-9-]+)"', src)
+keys = {}
+for line in subprocess.run(
+    [sys.executable, sys.argv[2], "--keys"], capture_output=True, text=True
+).stdout.splitlines():
+    if line.startswith("check\t"):
+        _, cid, _stack, stage = line.split("\t")
+        keys[cid] = stage
+issues = []
+for stage, cid in calls:
+    if cid not in keys:
+        issues.append(f"未登録ID: {cid}")
+    elif keys[cid] != stage:
+        issues.append(f"ステージ不一致: {cid} は {keys[cid]} だが {stage} で呼ばれている")
+missing = sorted(set(keys) - {cid for _s, cid in calls})
+issues += [f"CHECKSにあるが未使用: {cid}" for cid in missing]
+print("; ".join(issues))
+PY
+)"
+assert_eq "" "$DRIFT" "check.sh の呼び出し検査ID・ステージが CHECKS と一致する"
+
 assert_summary

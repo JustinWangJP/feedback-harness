@@ -66,6 +66,9 @@ LAST_RETRO = ROOT / ".feedback" / ".last-retro"
 LAST_AUDIT = ROOT / ".feedback" / ".last-audit"
 # 設定は harness_config が解決する(bash 側と同じ解決規則を使うため、
 # ここで環境変数や既定値を独自に読み直さない)
+# dont_write_bytecode: init.sh 配布先の scripts/ に __pycache__/ が生えて
+# Python プロジェクトでない導入先の untracked ノイズになるのを防ぐ
+sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 try:
     import harness_config as _hc

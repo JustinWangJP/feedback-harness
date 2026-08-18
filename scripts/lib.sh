@@ -24,11 +24,10 @@ has() {
 # style/info まで拾うと、導入初日のプロジェクトが既存コードのSC2086等で
 # 完了をブロックされ続けるため、既定では拾わない。
 #
-# check.sh 自身を config.yaml へ配線するのは別タスクの範囲であり、check.sh は
-# まだ harness_load_config を呼ばない。ここでのフォールバックを削ると
-# check.sh が `set -u` で SHELLCHECK_SEVERITY unbound variable のまま落ちるため、
-# 後方互換の既定値として残す。harness_load_config を呼ぶ側(check_file.sh /
-# audit.sh)では、この後 harness_load_config 内で config の値により上書きされる。
+# harness_load_config を呼ぶ全ての入口(check.sh / check_file.sh / audit.sh)は
+# ロード時に config 値でこの変数を上書きする。よってこの行は「lib.sh を読むが
+# harness_load_config を呼ばない」利用者(テストの一部など)向けの後方互換の
+# 既定値であり、config の実効値には影響しない。
 # shellcheck disable=SC2034  # 読み込み側(check.sh)で使う
 SHELLCHECK_SEVERITY="${FEEDBACK_SHELLCHECK_SEVERITY:-warning}"
 

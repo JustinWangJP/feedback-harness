@@ -87,7 +87,7 @@ bash scripts/check.sh --list-checks   # 検査ID・実効判定・「出所」�
 - **`--list-checks`**: 検査ID・ラベル・ステージ・実効判定・**出所**(どの層で判定が決まったか)を一覧する。検査コマンドは実行しない。左端の検査IDがそのまま `checks:` のキーになるため、コピーして config に貼れる。設定を書いた後にもう一度叩けば意図どおり効いたか確認できる。壊れた config では表を既定値で出した後に stderr へエラーを出し exit 1 する
 - **ステージスキップ**: `FEEDBACK_CHECK_SKIP` に指定できるステージ名は `lint` / `typecheck` / `test` / `build` / `format` / `security` / `docs` / `contract`。空白区切りで複数指定できる(config の `check.skip` と同じ語彙)
 - **make再帰ガード**: `make check` 実行時のみ `FEEDBACK_CHECK_RECURSION_GUARD` を子孫に伝え、その中で起動された check.sh は make フォールバックを `SKIP` する。フック実行時に `CLAUDE_PROJECT_DIR` が伝播し、テスト内の check.sh がルートを本リポジトリに解決し直して make check がテストを再実行する無限再帰(Stop フックの timeout を食い潰す)を断つためのもの。**通常の make 実行・直接ステージ(lint/test/build)には影響しない**
-- **SKIPの理由**: 出力に必ず理由が付く — `(<tool> 未インストール)` / `(<tool> 起動不可 — 環境を確認してください)` / `(実行不可)` / `(FEEDBACK_CHECK_SKIP)`、およびスタック単位でまとめた `(<stack>: 全ステージ …)`。**ツールが無い・壊れているだけの状態を `FAIL` にしない**(ユーザーのコードの問題ではないため)
+- **SKIPの理由**: 出力に必ず理由が付く — `(<tool> 未インストール)` / `(<tool> 起動不可 — 環境を確認してください)` / `(実行不可)` / 環境変数由来のスキップは `(env.FEEDBACK_CHECK_SKIP)`、config 由来は `(config: <キーのパス>)`、およびスタック単位でまとめた `(<stack>: 全ステージ …)`。**ツールが無い・壊れているだけの状態を `FAIL` にしない**(ユーザーのコードの問題ではないため)
 - **検査対象ファイル**: Gitリポジトリなら `git ls-files --cached --others --exclude-standard`。**未コミットの新規ファイルも検査し**、`.gitignore` 済みは除外する
 - **ネットワークを使わない**: Node の typecheck フォールバックは `npx --no-install tsc`。`typescript` が未導入なら取得を試みず `SKIP` にする
 - **shellcheck の重大度**: 既定は `warning`(`-S warning`)。`style`/`info` まで拾うと導入初日のプロジェクトが既存コードで詰まるため。`FEEDBACK_SHELLCHECK_SEVERITY=style` で引き上げられる
