@@ -210,4 +210,17 @@ assert_eq "fail" "$(harness_check_severity ruff fail)" "指定の無い検査は
 assert_eq "既定" "$(harness_check_source ruff)" "指定が無ければ出所は既定"
 rm -f "$WORK/proj/.feedback/config.yaml"
 
+# --- feedback_log.py が config に従う ---
+FB="$REPO/scripts/feedback_log.py"
+mkdir -p "$WORK/proj/.feedback/log"
+printf '2026-01-01\n' > "$WORK/proj/.feedback/.last-audit"
+
+OUT="$(CLAUDE_PROJECT_DIR="$WORK/proj" python3 "$FB" stats)"
+assert_contains "$OUT" "監査を推奨" "既定(7日)では推奨が出る"
+
+printf 'audit:\n  interval_days: 99999\n' > "$WORK/proj/.feedback/config.yaml"
+OUT="$(CLAUDE_PROJECT_DIR="$WORK/proj" python3 "$FB" stats)"
+assert_not_contains "$OUT" "監査を推奨" "config で間隔を延ばすと推奨が消える"
+rm -f "$WORK/proj/.feedback/config.yaml" "$WORK/proj/.feedback/.last-audit"
+
 assert_summary
