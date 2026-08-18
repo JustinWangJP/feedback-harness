@@ -492,6 +492,39 @@ def _cmd_shell(root, env):
     print("\n".join(out))
 
 
+def _display_width(s):
+    """端末上の表示幅。日本語ラベル(config: json 構文 等)は1文字2桁を占める。
+
+    bash の printf %-20s はバイト数で数えるため、日本語を含む列は必ずずれる。
+    整形を Python 側に置くのはこのため。
+    """
+    import unicodedata
+
+    return sum(2 if unicodedata.east_asian_width(ch) in "WF" else 1 for ch in s)
+
+
+def _cmd_format_table(stream):
+    """タブ区切りの行を読み、表示幅を揃えて出力する。"""
+    header = ["検査ID", "ラベル", "ステージ", "判定", "出所"]
+    rows = [line.rstrip("\n").split("\t") for line in stream if line.strip()]
+    rows = [r for r in rows if len(r) == len(header)]
+    widths = [
+        max(_display_width(cell) for cell in [header[i]] + [r[i] for r in rows])
+        for i in range(len(header))
+    ]
+
+    def fmt(cells):
+        out = []
+        for i, cell in enumerate(cells):
+            pad = widths[i] - _display_width(cell)
+            out.append(cell + " " * (pad + 2 if i < len(cells) - 1 else 0))
+        return "".join(out).rstrip()
+
+    print(fmt(header))
+    for row in rows:
+        print(fmt(row))
+
+
 def _cmd_keys():
     """検査IDと既定値を出力する。雛形・ガイド・check.sh とのドリフト検出に使う。"""
     for cid in sorted(CHECKS):
@@ -517,9 +550,15 @@ if __name__ == "__main__":
         rest = [a for a in args if not a.startswith("--")]
         _cmd_shell(rest[0] if rest else os.getcwd(), os.environ)
         sys.exit(0)
+    if "--format-table" in args:
+        _cmd_format_table(sys.stdin)
+        sys.exit(0)
     if "--json" in args:
         rest = [a for a in args if not a.startswith("--")]
         root = rest[0] if rest else os.getcwd()
         print(json.dumps(effective(root, os.environ), ensure_ascii=False, sort_keys=True))
         sys.exit(0)
-    sys.exit("usage: harness_config.py [--keys | --json [root] | --shell [root]]")
+    sys.exit(
+        "usage: harness_config.py "
+        "[--keys | --json [root] | --shell [root] | --format-table]"
+    )

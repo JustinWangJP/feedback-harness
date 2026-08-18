@@ -130,4 +130,37 @@ printf 'check:\n  exclude:\n    - "vendor dir/**"\n' > "$P7/.feedback/config.yam
 OUT="$(run_check "$P7")"; RC=$?
 assert_eq "0" "$RC" "非git環境でも git 環境と同じパターンで除外できる"
 
+# --- --list-checks ---
+P8="$(new_project listing)"
+printf '[project]\nname = "t"\n' > "$P8/pyproject.toml"
+make_fake ruff 0
+# vulture は "has vulture" で存在ゲートされているため(未導入環境では run_stage
+# 自体が呼ばれず一覧にも出ない)、他のツールと同じく偽バイナリを置いて確実に走らせる
+make_fake vulture 0
+printf 'checks:\n  vulture:\n    severity: skip\n' > "$P8/.feedback/config.yaml"
+
+OUT="$(PATH="$FAKEBIN:$PATH" bash "$CHECK" --list-checks "$P8" 2>&1)"; RC=$?
+assert_eq "0" "$RC" "--list-checks は exit 0"
+assert_contains "$OUT" "検査ID" "見出しが出る"
+assert_contains "$OUT" "ruff" "対象の検査が並ぶ"
+assert_contains "$OUT" "既定" "config が触っていない検査の出所は既定"
+assert_not_contains "$OUT" "cargo-fmt" "対象外スタックの検査は並ばない"
+
+# 検査コマンドを実行しない(一覧表示で pytest や mvn が走ると使い物にならない)
+mkdir -p "$P8/tests"; printf 'def test_x():\n    assert True\n' > "$P8/tests/test_x.py"
+: > "$WORK/pytest_ran.txt"
+{ echo '#!/usr/bin/env bash'
+  echo 'case "$*" in *--version*) exit 0 ;; esac'
+  echo "echo ran >> \"$WORK/pytest_ran.txt\""
+  echo 'exit 0'
+} > "$FAKEBIN/pytest"; chmod +x "$FAKEBIN/pytest"
+PATH="$FAKEBIN:$PATH" bash "$CHECK" --list-checks "$P8" >/dev/null 2>&1
+assert_eq "" "$(cat "$WORK/pytest_ran.txt")" "一覧表示で検査コマンドを実行しない"
+
+# JSON 形式で出所を確認する
+OUT="$(PATH="$FAKEBIN:$PATH" bash "$CHECK" --list-checks --json "$P8" 2>&1)"
+assert_contains "$OUT" '"id": "vulture"' "JSON に検査IDが出る"
+assert_contains "$OUT" '"source": "checks.vulture"' "JSON に出所が出る"
+rm -f "$FAKEBIN/ruff" "$FAKEBIN/pytest" "$FAKEBIN/vulture"
+
 assert_summary

@@ -16,6 +16,21 @@ LIBDIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib.sh
 . "$LIBDIR/lib.sh"
 
+# --list-checks: 検査を実行せず、実効設定(判定と出所)を一覧する。
+# 3層にした以上「なぜこの判定なのか」を見る手段が無いと調査不能になる。
+# 出力の左端がそのまま config のキーになる
+LIST_MODE=0
+LIST_JSON=0
+ARGS=()
+for arg in "$@"; do
+  case "$arg" in
+    --list-checks) LIST_MODE=1 ;;
+    --json) LIST_JSON=1 ;;
+    *) ARGS+=("$arg") ;;
+  esac
+done
+set -- "${ARGS[@]+"${ARGS[@]}"}"
+
 ROOT="$(harness_project_root "${1:-}")" \
   || { echo "ERROR: ディレクトリが見つかりません: ${1:-}"; exit 2; }
 cd "$ROOT" || { echo "ERROR: ディレクトリへ移動できません: $ROOT"; exit 2; }
@@ -29,6 +44,7 @@ STACK_FOUND=0   # マニフェストを検出したか。RESULTS の空判定と
                 # (全ステージがSKIPでも「スタック未検出」とは報告しないため)
 LOGDIR="$(mktemp -d)"
 trap 'rm -rf "$LOGDIR"' EXIT
+: > "$LOGDIR/list.txt"
 
 # 壊れた config は FAIL を立てるが、ここで止めない。設定が壊れているからと
 # 他の検査まで止めると、直すべき箇所が見えなくなる(既定値のまま続行する)
@@ -47,8 +63,19 @@ fi
 # <tool> にコマンド名を渡すと未インストール時に SKIP を記録する(失敗扱いにしない)。
 # ツール判定が不要なステージは "-" を渡す。
 run_stage() {
-  shift  # $1 = stage — 判定は id で行うため本体では使わない(呼び出し側の可読性のために残す)
-  local id="$1" tool="$2" label="$3"; shift 3
+  local stage="$1" id="$2" tool="$3" label="$4"; shift 4
+  if [[ "$LIST_MODE" == "1" ]]; then
+    # 検査コマンドは実行しない。ツール存在確認だけは通常経路と同じに保ち、
+    # 未導入が skip として現れるようにする
+    local lsev lsrc
+    lsev="$(harness_check_severity "$id" "$([[ "$SOFT_STAGE" == "1" ]] && echo warn || echo fail)")"
+    lsrc="$(harness_check_source "$id")"
+    if [[ "$tool" != "-" ]] && ! command -v "$tool" >/dev/null 2>&1; then
+      lsev="skip"; lsrc="$tool 未インストール"
+    fi
+    printf '%s\t%s\t%s\t%s\t%s\n' "$id" "$label" "$stage" "$lsev" "$lsrc" >> "$LOGDIR/list.txt"
+    return
+  fi
   local sev src
   sev="$(harness_check_severity "$id" "$([[ "$SOFT_STAGE" == "1" ]] && echo warn || echo fail)")"
   if [[ "$sev" == "skip" ]]; then
@@ -539,6 +566,23 @@ if [[ -f Makefile ]] && grep -qE "^check:" Makefile; then
     # 直接ステージの子孫(テスト内で別プロジェクトを検証する等)まで誤スキップする
     run_stage test "make-check" "make" "make check" env FEEDBACK_CHECK_RECURSION_GUARD=1 make check
   fi
+fi
+
+if [[ "$LIST_MODE" == "1" ]]; then
+  if [[ "$LIST_JSON" == "1" ]]; then
+    python3 -c '
+import json, sys
+rows = []
+for line in sys.stdin:
+    parts = line.rstrip("\n").split("\t")
+    if len(parts) == 5:
+        rows.append(dict(zip(["id", "label", "stage", "severity", "source"], parts)))
+print(json.dumps(rows, ensure_ascii=False, indent=2))
+' < "$LOGDIR/list.txt"
+  else
+    python3 "$LIBDIR/harness_config.py" --format-table < "$LOGDIR/list.txt"
+  fi
+  exit 0
 fi
 
 # ---------- 結果出力 ----------
