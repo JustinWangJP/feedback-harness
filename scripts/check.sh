@@ -110,21 +110,41 @@ npm_script_exists() { # package.json に scripts.<name> があるか
   node -e "process.exit(require('./package.json').scripts?.['$1'] ? 0 : 1)" 2>/dev/null
 }
 
+# harness_excluded <パス> — config の exclude に一致するか。
+# glob の照合は bash の == を使う(**/ を含むパターンも extglob 無しで
+# 前方一致的に効かせるため、* が / を跨ぐ bash の既定挙動をそのまま利用する)
+harness_excluded() {
+  local path="$1" pattern
+  [[ -n "${HARNESS_EXCLUDE:-}" ]] || return 1
+  while IFS= read -r pattern; do
+    [[ -n "$pattern" ]] || continue
+    # shellcheck disable=SC2053  # 右辺は glob として評価させたいので引用しない
+    [[ "$path" == $pattern ]] && return 0
+  done <<< "$HARNESS_EXCLUDE"
+  return 1
+}
+
 # 注意: git ls-files は「追跡済みだが作業ツリーから削除された」ファイルも列挙する。
 # それらを検査ツールに渡すと読み取りエラーで完了をブロックしてしまう(実測: リンク
 # 検査の [Errno 2]、bash -n の非ゼロ終了)。呼び出し側は必ず -f で実在を確認すること
 list_files() { # list_files <glob> — 検査対象のファイルを1行1件で出力
-  if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-    # --others を含めないと、まだコミットしていない新規ファイルが検査対象外になり、
-    # 壊れた新規ファイルがあっても ALL PASS になる。--exclude-standard で
-    # .gitignore 済み(ビルド成果物・依存ディレクトリ)は従来どおり除外する
-    # -c core.quotePath=false: 非ASCIIファイル名を8進エスケープ("\350\250...")で
-    # 出さず生のパスで出す。日本語ファイル名を持つプロジェクトで、受け取り側が
-    # ファイルを開けなくなる(実測: .feedback/log/*.md で FileNotFoundError)
-    git -c core.quotePath=false ls-files --cached --others --exclude-standard "$1"
-  else
-    find . -name "$1" -not -path './.git/*' -not -path './node_modules/*' -not -path './.venv/*'
-  fi
+  local f
+  while IFS= read -r f; do
+    [[ -n "$f" ]] || continue
+    harness_excluded "$f" || printf '%s\n' "$f"
+  done < <(
+    if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+      # --others を含めないと、まだコミットしていない新規ファイルが検査対象外になり、
+      # 壊れた新規ファイルがあっても ALL PASS になる。--exclude-standard で
+      # .gitignore 済み(ビルド成果物・依存ディレクトリ)は従来どおり除外する
+      # -c core.quotePath=false: 非ASCIIファイル名を8進エスケープ("\350\250...")で
+      # 出さず生のパスで出す。日本語ファイル名を持つプロジェクトで、受け取り側が
+      # ファイルを開けなくなる(実測: .feedback/log/*.md で FileNotFoundError)
+      git -c core.quotePath=false ls-files --cached --others --exclude-standard "$1"
+    else
+      find . -name "$1" -not -path './.git/*' -not -path './node_modules/*' -not -path './.venv/*'
+    fi
+  )
 }
 
 # ---------- Python ----------

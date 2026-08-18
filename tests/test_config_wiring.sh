@@ -98,4 +98,22 @@ assert_contains "$OUT" "FAIL  config: .feedback/config.yaml" "config 自体の F
 assert_contains "$OUT" "PASS  python: ruff" "他の検査は既定値で続行する"
 rm -f "$FAKEBIN/ruff"
 
+# --- exclude が検査対象を減らす ---
+# 効くのはハーネス自身がファイルを列挙する検査だけ(ruff や pytest のように
+# 自分でツリーを歩くツールは各自の無視設定に従う)。ここでは shell 検査で確認する
+P6="$(new_project excl)"
+mkdir -p "$P6/vendor dir"
+printf 'if [ ; then\n' > "$P6/vendor dir/broken.sh"    # 構文エラー
+# shebang を付ける: 実環境の shellcheck(SC2148)が「シェル種別不明」を
+# error 重大度で報告するため、無いと exclude と無関係な理由で FAIL してしまう
+printf '#!/usr/bin/env bash\necho ok\n' > "$P6/good.sh"
+OUT="$(run_check "$P6")"; RC=$?
+assert_eq "1" "$RC" "exclude 無しでは壊れた .sh で exit 1"
+
+# 空白を含むパスが割れないことも同時に確認する
+printf 'check:\n  exclude:\n    - "vendor dir/**"\n' > "$P6/.feedback/config.yaml"
+OUT="$(run_check "$P6")"; RC=$?
+assert_eq "0" "$RC" "exclude で対象から外れ exit 0"
+assert_contains "$OUT" "PASS  shell: bash -n" "残ったファイルは検査される"
+
 assert_summary
