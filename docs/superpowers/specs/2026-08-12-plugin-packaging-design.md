@@ -1,7 +1,9 @@
 # feedback-harness のパッケージ化設計
 
+> **履歴資料:** パッケージ化は実装済みです。その後、開発用 `.claude/settings.json` に Hooks を複製する方式から、同ファイルでプラグインを有効化する方式へ移行しました。現在の構成は[プロジェクト概要](../../../README.md)を参照してください。
+
 - 日付: 2026-08-12
-- 状態: 承認済み(実装計画待ち)
+- 状態: 実装済み（設計時点の記録として保存）
 
 ## 目的
 
@@ -76,13 +78,13 @@ feedback-harness/
   tests/                  # bash テスト。check.sh の make check フォールバック経由で自動実行される
   Makefile                # check: → tests/run_tests.sh
   .claude/
-    settings.json         # このリポジトリ自身の開発用 Hooks(自己ドッグフーディング用。配布対象外)
+    settings.json         # このリポジトリの開発用設定（現在はプラグインを有効化。配布対象外）
   .feedback/              # このリポジトリ自身の蓄積(配布対象外)
 ```
 
 実装で確定した点:
 
-1. `.claude/settings.json` は削除せず残した。プラグイン化後もこのリポジトリ自身の開発時 Hooks として使い続ける(自己ドッグフーディング)ため。配布用 `hooks/hooks.json` との内容の二重管理になるが、両者が同じイベント構造(スクリプト・matcher・timeout)を指すことを `tests/test_plugin_manifest.sh` でテスト固定し、ドリフトを検出可能にした。
+1. 実装当初は `.claude/settings.json` に開発用 Hooks を残し、配布用 `hooks/hooks.json` との一致をテストしていた。その後、Hooks の二重実行を避けるため、`.claude/settings.json` はプラグインの有効化だけを担い、Hooks はプラグイン側に一本化した。
 2. `tests/`(bash テスト)と `Makefile` を新設した。`Makefile` の `check:` ターゲットが `tests/run_tests.sh` を呼び、`scripts/check.sh` は Python/Node 等のスタックが検出できない場合に `make check` の存在をフォールバックとして検出して実行する。これにより `bash scripts/check.sh .` からハーネス自身のテストが自動実行される。
 3. `.claude-plugin/marketplace.json` の `plugins[0].source` は `"./"` で確定した(`claude plugin validate .` が受理する)。ただしローカルインストール時の CLI 引数としては `claude plugin marketplace add ./` の形が必要で、bare `.` は拒否される。
 4. `hooks/hooks.json` には最終的に `SessionStart` / `PostToolUse` / `Stop` の3つが登録されている。`.feedback/` の自動シード(項番7)を担う `SessionStart` は設計の初期段階では未反映だったが、実装時に追加された。

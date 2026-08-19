@@ -1,4 +1,4 @@
-# 設定ガイド(config.yaml)
+# 設定ガイド（config.yaml）
 
 ハーネスの挙動は `.feedback/config.yaml` で調整できる。このファイルは**リポジトリに入る**ため、チーム全員に同じ設定が届き、環境変数の「各自で export してください」という頼み事が不要になる。書かなかった項目はすべて既定値。全部書く必要はない。
 
@@ -11,7 +11,7 @@ cp .feedback/config.example.yaml .feedback/config.yaml
 ### 運用の流れ
 
 ```
-[導入]   check.sh を1回流す → 落ちるものを把握
+[導入]   check.sh を1回実行する → 現在の失敗項目を把握
    ↓
 [調整]   --list-checks で検査IDと現在の判定を見る
    ↓     config.example.yaml をコピーして .feedback/config.yaml へ
@@ -26,7 +26,7 @@ cp .feedback/config.example.yaml .feedback/config.yaml
 
 ## 3分で始める
 
-まず現状を見る。検査コマンドは実行されないので安全に叩ける:
+まず現在の設定を確認する。このコマンドは検査自体を実行しないため、安全に利用できる。
 
 ```bash
 bash scripts/check.sh --list-checks
@@ -54,7 +54,7 @@ checks:
     severity: fail
 ```
 
-もう一度 `--list-checks` を叩くと、判定と**出所**が変わる:
+もう一度 `--list-checks` を実行すると、判定と**出所**が変わる。
 
 ```
 ruff-format  python: ruff format  format    fail  checks.ruff-format
@@ -93,7 +93,7 @@ checks:
 
 **出力がどう変わるか**: `check.sh` の該当行が `SKIP  python: vulture (config: checks.vulture)` になる。理由に `config: …` と付くため、自分で止めたのか既定の挙動なのかが区別できる。
 
-ステージ単位で止すこともできる(`check.skip: [security]` 等、語彙は `lint` / `typecheck` / `test` / `build` / `format` / `security` / `docs` / `contract`)。ただし `lint` には18個の検査が同居しているため、構文エラー検出(`bash-syntax` / `json-syntax`)まで消えたくなければ検査IDで指定する。
+ステージ単位で停止することもできる（`check.skip: [security]` など。指定できる値は `lint` / `typecheck` / `test` / `build` / `format` / `security` / `docs` / `contract`）。ただし `lint` には18個の検査が含まれるため、構文エラー検出（`bash-syntax` / `json-syntax`）を残したい場合は、検査IDで個別に指定する。
 
 ### モノレポで言語ごとに事情が違う
 
@@ -161,7 +161,7 @@ checks:
 
 最も具体的な指定が勝つ。使い分けの指針: **commit したい設定は config、その場限りの一時上書きは環境変数**。CI の workflow に書く環境変数はむしろ commit されるが、それは「CI という環境の既定値」を表している。
 
-同じ層で `fail_on` と `warn_on` の両方に同じステージを書いた場合は `fail_on` が優先される(安全側)。
+同じ層で同じステージを複数のキーに指定した場合は、`fail_on` > `warn_on` > `skip` の順で優先される。検査を誤って無効化しないよう、より厳しい判定を優先するためである。
 
 ## 項目リファレンス
 
@@ -191,7 +191,7 @@ checks:
 | 検査ID | 固有キー | 型 | 既定値 | 対応する環境変数 |
 |---|---|---|---|---|
 | `shellcheck` | `min_severity` | `style`\|`info`\|`warning`\|`error` | `warning` | `FEEDBACK_SHELLCHECK_SEVERITY` |
-| `vulture` | `min_confidence` | 整数(大きいほど検出が減る) | `80` | — |
+| `vulture` | `min_confidence` | 0〜100 の整数（大きいほど検出が減る） | `80` | — |
 | `oasdiff` | `base` | 文字列 | `main` | `FEEDBACK_CONTRACT_BASE` |
 
 **その他のセクション**
@@ -253,7 +253,13 @@ ERROR: .feedback/config.yaml を読めませんでした。以下はすべて既
 
 ### `--list-checks` に載らない検査がある
 
-呼び出し側でツール存在や宣言がゲートされている検査(`vulture` / `deptry` / `prettier` / `knip` / `secretlint` / `gitleaks` / `actionlint` 等)は、ツールが未導入だと一覧に**行自体が出ない**。つまり「このプロジェクトに該当しない」のか「ツールが無いだけ」なのかを `--list-checks` だけで区別できない — これは現在の限界であり、将来の改善課題である。ツールを導入すれば行が現れる。
+`--list-checks` は、対象プロジェクトの構成から適用対象になった検査だけを表示する。適用対象になった検査でツールが未導入の場合は、行を省略せず `skip` と理由を表示する。一方、設定や対象ファイルが無く、検査の適用条件自体を満たさない場合は表示しない。たとえば import-linter の設定が無いプロジェクトでは `import-linter` は表示されないが、設定がありツールだけが無い場合は `skip` と表示される。
+
+機械処理で全行を取得したい場合は、次の JSON 出力を利用できる。
+
+```bash
+bash scripts/check.sh --list-checks --json
+```
 
 ### それでも分からなければ
 
@@ -277,5 +283,7 @@ config の YAML は PyYAML を要求せず自前のパーサで読む(任意依�
 - 複数行文字列(`|` / `>`)
 - リスト要素の入れ子(マップやリストを要素に持つリスト)
 - タブインデント
+
+また、クォート（`'` / `"`）やフロー形式のリスト（`[`）を閉じていない場合も、行番号付きのエラーになる。壊れた値を通常の文字列として受理し、後続の検査が意図せず無効になることを防ぐためである。
 
 書けない記法を黙って無視すると「書いたのに効かない」という最悪の状態になるため、いずれも FAIL にする。未知のキー(`shelcheck_severity` のような打ち間違い)も同じ理由でエラーになる。

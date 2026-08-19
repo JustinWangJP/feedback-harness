@@ -1,6 +1,6 @@
 # feedback-harness
 
-Claude Code / Codex 両対応のフィードバックハーネス。2つのループを提供する:
+Claude Code と Codex の両方で利用できるフィードバックハーネスです。次の2つのループを提供します。
 
 1. **自動フィードバックループ** — lint / typecheck / test / build の結果をエージェントに自動で返し、自己修正させる
 2. **人間フィードバックの蓄積** — レビュー指摘や有効だった進め方を記録・一般化し、次回以降のセッションに反映する
@@ -9,10 +9,10 @@ Claude Code / Codex 両対応のフィードバックハーネス。2つのル�
 
 | 環境 | 自動チェック | ルール反映 |
 |------|-------------|-----------|
-| Claude Code(プラグイン導入) | Hooks(プラグインの `hooks/hooks.json` が提供): 編集直後に `check_file.sh`、応答完了前に `check.sh`(前回の成功検査以降に変更があるときだけ)。失敗時はexit 2でエージェントに差し戻し。設定ファイル(JSON/YAML)の構文も横断的に検査し、宣言していない検査の指摘は WARN(非ブロッキング)として `events.jsonl` に記録される。秘密情報・内部リンク・依存整合性・CI設定も検査する(ツール未導入は SKIP。ハーネスがツールを勝手に導入することはない) | `apply-feedback` スキル + CLAUDE.md ポインタ(プラグインが提供) |
+| Claude Code（プラグイン導入） | プラグインの `hooks/hooks.json` が Hooks を提供する。編集直後に `check_file.sh`、応答完了前に `check.sh` を実行する（後者は、前回の成功検査以降に変更がある場合のみ）。失敗時は exit code 2 でエージェントに差し戻す。設定ファイル（JSON/YAML）の構文、秘密情報、内部リンク、依存関係、CI 設定も検査する。宣言していない検査の指摘は WARN（非ブロッキング）として `events.jsonl` に記録する。未導入のツールは SKIP とし、ハーネスが自動で導入することはない | `apply-feedback` スキル + CLAUDE.md ポインタ（プラグインが提供） |
 | Codex ほか(`scripts/init.sh` で導入) | AGENTS.md の規約: 変更ごとに `check_file.sh`、完了前に `check.sh` をエージェント自身が実行 | AGENTS.md の規約で `.feedback/rules.md` を必読化 |
 
-スクリプトとフィードバック蓄積(`.feedback/`)は両環境で完全共有。環境固有なのはエントリポイント(CLAUDE.md / AGENTS.md)と、Hooksの提供元(プラグイン、または `init.sh` 導入時はAGENTS.mdの手動規約)だけ。このリポジトリ自身の `.claude/settings.json` は開発用のHooks設定であり、導入先には配布されない(「構成」節を参照)。
+スクリプトとフィードバックの保存先（`.feedback/`）は両環境で共通です。環境ごとに異なるのは、エントリーポイント（CLAUDE.md / AGENTS.md）とチェックの起動方法だけです。Claude Code ではプラグインの Hooks が自動実行し、`init.sh` で導入した Codex などの環境では AGENTS.md の規約に従ってエージェントが実行します。このリポジトリの `.claude/settings.json` は、開発時にプラグインを有効化するための設定であり、導入先には配布されません。
 
 ## 機能一覧
 
@@ -97,10 +97,14 @@ docs/
   pointer_agents.md # 導入先の AGENTS.md へ追記する断片
   superpowers/      # 設計書 (specs/) と実装計画 (plans/)
 .claude/
-  settings.json     # このリポジトリ自身の開発用 Hooks (配布対象外)
+  settings.json     # このリポジトリでプラグインを有効化する開発用設定 (配布対象外)
 ```
 
 ハーネス自身も `check.sh` の検査対象になる(`*.sh` と `*.py` を検出)。
+
+### ドキュメントの位置づけ
+
+現在の利用方法は、この README、[設定ガイド](docs/configuration.md)、[スクリプト仕様](scripts/README.md)を参照してください。日付付きの `docs/proposals/` と `docs/superpowers/` は、提案時・設計時の判断を残す履歴資料です。現在の仕様と異なる場合は、前述の3文書と実装を優先します。文書の一覧は[ドキュメント案内](docs/README.md)にまとめています。
 
 ## 他プロジェクトへの導入
 
@@ -320,7 +324,8 @@ python3 scripts/feedback_log.py report --last --mark       # 振り返り後に�
 
 ```bash
 cp .feedback/config.example.yaml .feedback/config.yaml   # 雛形から始める
-bash scripts/check.sh --list-checks    # 検査ID・実効判定・「出所」を一覧(検査は実行しない)
+bash scripts/check.sh --list-checks           # 検査ID・実効判定・「出所」を一覧（検査は実行しない）
+bash scripts/check.sh --list-checks --json    # 同じ内容を機械可読な JSON で出力
 ```
 
 優先順位は 環境変数 > 検査単位 > スタック単位 > 全体 > 既定値。書き方と全項目は[設定ガイド](docs/configuration.md)を参照。
@@ -352,6 +357,6 @@ bash scripts/check.sh --list-checks    # 検査ID・実効判定・「出所」�
 
 記録は promote を待たずにその時点から次の作業に効く。「溜めてから一括で昇華する」設計にすると、昇華までの間に同じ指摘が再発する。
 
-測定は Flywheel の「衡量变化」に相当する。ダッシュボードは作らない — `stats` は要求時のテキスト出力で、数字は `report` の「数字」セクションにだけ現れる。`events.jsonl`(フック合否)と `.last-retro`(振り返り基点)はマシンローカルの状態であり、git で共有しない。
+測定は Feedback Flywheel における「変化の測定」に相当する。ダッシュボードは作らない — `stats` は要求時にテキストを出力し、数値は `report` の「数字」セクションにだけ表示する。`events.jsonl`（フックの成否）と `.last-retro`（振り返りの基点）は端末内だけで使う状態ファイルであり、Git では共有しない。
 
-昇華先を rules.md に一本化しないのは、信号の種類ごとに直すべき制品が違うため — 知識の欠落はプライミング文書(CLAUDE.md)で埋め、機械的に検出できる失敗は散文のルールより lint・テストにした方が強い護欄になる(参考: [Feedback Flywheel](docs/references/fowler-feedback-flywheel-translation.md))。
+反映先を rules.md に一本化しないのは、シグナルの種類によって改善すべき共有成果物が異なるためです。知識の不足は前提情報を与える文書（CLAUDE.md）で補い、機械的に検出できる失敗は lint やテストへ組み込む方が、文章だけのルールより確実な再発防止策になります（参考: [Feedback Flywheel](docs/references/fowler-feedback-flywheel-translation.md)）。
