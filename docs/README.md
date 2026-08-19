@@ -9,7 +9,7 @@
 | [プロジェクト概要](../README.md) | 機能、導入方法、日常の利用方法 |
 | [設定ガイド](configuration.md) | `.feedback/config.yaml` の設定方法とトラブルシューティング |
 | [スクリプト仕様](../scripts/README.md) | 各スクリプトの役割、実行内容、終了コード |
-| [Codex / 汎用エージェント向け規約](pointer_agents.md) | 導入先の AGENTS.md に追記する規約 |
+| [Codex / 汎用エージェント向け規約](pointer_agents.md) | Codex Plugin Hooks と手動フォールバックを両立する、導入先 AGENTS.md 用の規約 |
 | [Claude Code 向け規約](pointer_claude.md) | 導入先の CLAUDE.md に追記する規約 |
 
 ## 履歴資料を確認する

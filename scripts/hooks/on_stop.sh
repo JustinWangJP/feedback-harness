@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# on_stop.sh — Claude Code Stop フック。
+# on_stop.sh — Claude Code / Codex Stop フック。
 # 応答完了前にフルチェック(check.sh)を実行し、失敗があれば exit 2 で
 # 完了をブロックし、失敗内容をエージェントに返して修正を続行させる。
 #

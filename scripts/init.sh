@@ -4,8 +4,8 @@
 # 使い方: bash scripts/init.sh <対象プロジェクトパス>
 #
 # Claude Code の skills / agents / hooks はプラグインが提供するので、ここでは
-# 扱わない。このスクリプトが用意するのは、プラグインを持たない環境(Codex 等)が
-# 必要とする実ファイルと、両環境で共有する状態だけである。
+# 扱わない。このスクリプトが用意するのは、Codex IDE 拡張や汎用エージェントなど
+# プラグインを利用できない環境が必要とする実ファイルと、各環境で共有する状態だけである。
 #
 # 動作:
 # - scripts/(check.sh / check_file.sh / lib.sh / audit.sh / harness_config.py /
@@ -13,7 +13,7 @@
 # - .feedback/ のシードを作成(rules.md は既存なら触らない。config.example.yaml
 #   は毎回上書き — 雛形は本体側の更新を常に受け取るため。手元の config.yaml
 #   は別ファイルなので上書きされない)
-# - CLAUDE.md / AGENTS.md へ docs/pointer_*.md の断片を追記(なければ新規作成)
+# - CLAUDE.md / AGENTS.md へ docs/pointer_*.md の管理ブロックを追加・更新
 # - .gitignore へ _workspace/ を追記
 set -euo pipefail
 
@@ -78,31 +78,92 @@ cp "$SRC/.feedback/rules.template.md" "$DEST/.feedback/rules.template.md"
 cp "$SRC/.feedback/config.example.yaml" "$DEST/.feedback/config.example.yaml"
 echo "  .feedback/ ... OK"
 
-# CLAUDE.md / AGENTS.md — ポインタの追記
+# CLAUDE.md / AGENTS.md — 管理マーカー付きポインタの追加・更新
 # 導入元の CLAUDE.md / AGENTS.md 全文ではなく docs/pointer_*.md の断片を使う。
 # 全文だと導入元のH1(プロジェクト名)と変更履歴が導入先に紛れ込む。
+# 管理マーカー内だけを置換するため、利用者が前後に書いた内容は保持する。
+# 旧版(マーカーなし)は、既知の見出しから既知の末尾行までを一度だけ移行する。
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
-append_pointer() { # append_pointer <file> <marker> <fragment>
-  local file="$1" marker="$2" frag="$3"
-  local rendered
-  rendered="$WORK/$(basename "$frag")"
-  sed "s/{{INSTALL_DATE}}/$(date +%Y-%m-%d)/" "$SRC/$frag" > "$rendered"
+update_pointer() { # update_pointer <file> <heading> <fragment> <legacy-end-regex>
+  local file="$1" heading="$2" frag="$3" legacy_end="$4"
+  local rendered_fragment rendered_block install_date existing_date action
+  rendered_fragment="$WORK/$(basename "$frag").rendered"
+  rendered_block="$WORK/$(basename "$frag").managed"
+  install_date="$(date +%Y-%m-%d)"
   if [[ -f "$DEST/$file" ]]; then
-    if grep -q "$marker" "$DEST/$file"; then
-      echo "  $file ... ポインタ既存のためスキップ"
-    else
-      { echo; echo "---"; echo; cat "$rendered"; } >> "$DEST/$file"
-      echo "  $file ... 既存ファイルに追記"
-    fi
+    existing_date="$(sed -nE 's/^\| ([0-9]{4}-[0-9]{2}-[0-9]{2}) \| フィードバックハーネス導入.*/\1/p' "$DEST/$file" | head -n1)"
+    [[ -n "$existing_date" ]] && install_date="$existing_date"
+  fi
+  sed "s/{{INSTALL_DATE}}/$install_date/" "$SRC/$frag" > "$rendered_fragment"
+  {
+    echo '<!-- feedback-harness:pointer:start -->'
+    cat "$rendered_fragment"
+    echo '<!-- feedback-harness:pointer:end -->'
+  } > "$rendered_block"
+
+  if [[ -f "$DEST/$file" ]]; then
+    action="$(python3 - "$DEST/$file" "$rendered_block" "$heading" "$legacy_end" <<'PY'
+import re
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+block = Path(sys.argv[2]).read_text(encoding="utf-8")
+heading = sys.argv[3]
+legacy_end = sys.argv[4]
+start_marker = "<!-- feedback-harness:pointer:start -->"
+end_marker = "<!-- feedback-harness:pointer:end -->"
+content = path.read_text(encoding="utf-8")
+
+start_count = content.count(start_marker)
+end_count = content.count(end_marker)
+if start_count or end_count:
+    if start_count != 1 or end_count != 1:
+        print("ERROR: 管理マーカーが不整合です。該当ブロックを確認して再実行してください", file=sys.stderr)
+        raise SystemExit(3)
+    start = content.index(start_marker)
+    end = content.index(end_marker, start) + len(end_marker)
+    if end < len(content) and content[end] == "\n":
+        end += 1
+    content = content[:start] + block + content[end:]
+    action = "管理ブロックを更新"
+elif heading in content:
+    start = content.index(heading)
+    start = content.rfind("\n", 0, start) + 1
+    match = re.search(legacy_end, content[start:], re.MULTILINE)
+    if match is None:
+        print(
+            "ERROR: 旧ポインタの末尾を特定できません。既存ポインタを手動で削除して再実行してください",
+            file=sys.stderr,
+        )
+        raise SystemExit(3)
+    end = start + match.end()
+    if end < len(content) and content[end] == "\n":
+        end += 1
+    content = content[:start] + block + content[end:]
+    action = "旧ポインタを管理ブロックへ移行"
+else:
+    separator = "" if content.endswith("\n\n") else "\n" if content.endswith("\n") else "\n\n"
+    content += separator + "---\n\n" + block
+    action = "既存ファイルに管理ブロックを追記"
+
+path.write_text(content, encoding="utf-8")
+print(action)
+PY
+)"
+    echo "  $file ... $action"
   else
-    { echo "# $(basename "$DEST")"; echo; cat "$rendered"; } > "$DEST/$file"
-    echo "  $file ... 新規作成"
+    { echo "# $(basename "$DEST")"; echo; cat "$rendered_block"; } > "$DEST/$file"
+    echo "  $file ... 管理ブロック付きで新規作成"
   fi
 }
-append_pointer "CLAUDE.md" "ハーネス: フィードバックループ" "docs/pointer_claude.md"
-append_pointer "AGENTS.md" "フィードバックハーネス" "docs/pointer_agents.md"
+update_pointer "CLAUDE.md" "## ハーネス: フィードバックループ" \
+  "docs/pointer_claude.md" '^\*\*ハーネス本体の更新:\*\*.*$'
+update_pointer "AGENTS.md" \
+  "## フィードバックハーネス — エージェント作業規約（Codex / 汎用エージェント向け）" \
+  "docs/pointer_agents.md" '^今回の明示的な指示を優先し、矛盾があったことをユーザーに一言伝える。$'
 
 # .gitignore — 中間生成物とローカル状態は追跡しない。
 # .feedback/.last-check は Stop フックの検査スタンプ(mtime比較用)。共有すると

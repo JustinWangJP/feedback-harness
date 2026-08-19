@@ -1,6 +1,6 @@
 # feedback-harness — エージェント作業規約（Codex / 汎用エージェント向け）
 
-このプロジェクトにはフィードバックハーネスが導入されている。Hooks を持たない環境（Codex など）では、以下の規約が自動フィードバックループの代わりとなる。**必ず従うこと。**
+このプロジェクトにはフィードバックハーネスが導入されている。Codex Plugin の Hooks が有効かつ信頼済みなら、以下の変更時チェックと完了前チェックは自動実行される。Codex IDE 拡張・汎用エージェント、または Hooks が無効・未信頼の場合は、この規約が自動フィードバックループの代わりとなる。**いずれの場合も完了条件として必ず従うこと。**
 
 ## 1. セッション開始時
 
@@ -15,7 +15,7 @@ python3 scripts/feedback_log.py list --status open
 
 ## 2. コード変更のたび
 
-編集したファイルを即時チェックする。
+Hooks が有効なら `PostToolUse` が編集したファイルを即時チェックする。Hooks が無効なら次を手動実行する。
 
 ```bash
 bash scripts/check_file.sh <編集したファイル>
@@ -25,7 +25,7 @@ bash scripts/check_file.sh <編集したファイル>
 
 ## 3. 作業完了の前
 
-必ずフルチェックを実行し、**exit code 0** を確認してから完了とする。
+Hooks が有効なら `Stop` がフルチェックを実行する。Hooks が無効なら次を手動実行する。どちらの場合も **exit code 0** を確認してから完了とする。
 
 ```bash
 bash scripts/check.sh; echo "exit=$?"
