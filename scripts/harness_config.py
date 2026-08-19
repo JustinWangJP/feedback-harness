@@ -88,7 +88,11 @@ def _split_flow_list(inner):
 def _scalar(s, path, lineno):
     if s == "":
         return None
-    if s.startswith("[") and s.endswith("]"):
+    if s[0] == "[":
+        # 閉じ括弧が無いまま裸文字列として通すと「書いたのに効かない」の
+        # 典型(クォート未対応と同じ壊れ方)になるため、行番号付きで落とす
+        if s[-1] != "]":
+            _die(path, lineno, f"フローリストが閉じていません( ] がありません): {s}")
         inner = s[1:-1].strip()
         if not inner:
             return []
@@ -96,7 +100,12 @@ def _scalar(s, path, lineno):
         for x in items:
             _reject_map_item(x, path, lineno)
         return [_scalar(x, path, lineno) for x in items]
-    if len(s) >= 2 and s[0] == s[-1] and s[0] in "\"'":
+    if s[0] in "\"'":
+        # 先頭だけクォートで終端が対応していない値("main など)は、そのまま
+        # 「クォート込みの裸文字列」として通ってしまうと git merge-base 等の
+        # 下流処理が静かに壊れる(実例: checks.oasdiff.base: "main)
+        if len(s) < 2 or s[-1] != s[0]:
+            _die(path, lineno, f"クォートが閉じていません: {s}")
         return s[1:-1]
     low = s.lower()
     if low in ("true", "false"):
@@ -261,7 +270,7 @@ CHECK_PARAMS = {
     "shellcheck": {
         "min_severity": ("enum", "warning", ["style", "info", "warning", "error"])
     },
-    "vulture": {"min_confidence": ("int", 80, None)},
+    "vulture": {"min_confidence": ("int", 80, (0, 100))},
     "oasdiff": {"base": ("str", "main", None)},
 }
 
@@ -289,6 +298,13 @@ def _check_type(kind, value, allowed, where, path):
     if kind == "int":
         if not isinstance(value, int) or isinstance(value, bool):
             raise ConfigError(f"{path}: {where} は整数で指定してください(実際: {value!r})")
+        # int の allowed は (最小, 最大) の範囲(閉区間)。範囲制約が無いキーは None のまま
+        if allowed is not None:
+            lo, hi = allowed
+            if not (lo <= value <= hi):
+                raise ConfigError(
+                    f"{path}: {where} は {lo}〜{hi} の範囲で指定してください(実際: {value!r})"
+                )
     elif kind == "str":
         if not isinstance(value, str):
             raise ConfigError(f"{path}: {where} は文字列で指定してください(実際: {value!r})")

@@ -14,6 +14,16 @@ LIBDIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # 実測 約26ms で、このスクリプトが起動する ruff / eslint(数百ms)に対して誤差
 harness_load_config
 
+# 設定エラー(壊れた .feedback/config.yaml)は check.sh では FAIL 行として
+# 見えるが、check_file.sh は黙って exit 0 で通していた。AGENTS.md §2 により
+# check_file.sh は編集直後の必須ゲートのため、ここでも表示して非0にする
+# (壊れた設定を書いたまま気づかず作業を続けさせない)。
+if [[ -n "${HARNESS_CONFIG_ERROR:-}" ]]; then
+  echo "check_file: .feedback/config.yaml の設定エラーです:"
+  echo "$HARNESS_CONFIG_ERROR"
+  exit 1
+fi
+
 FILE="${1:-}"
 [[ -z "$FILE" || ! -f "$FILE" ]] && exit 0
 
@@ -27,55 +37,87 @@ fi
 
 # has() / SHELLCHECK_SEVERITY は lib.sh で定義(check.sh と共有)
 
+# emit <検査ID既定severity取得済みの値> <出力> — severity: warn は指摘を
+# 表示するだけで非ブロッキング(WARN_OUT)、それ以外(既定 fail を含む)は
+# ブロッキング(OUT)に振り分ける。skip の呼び出し元では呼ばない。
 OUT=""
+WARN_OUT=""
+emit() {
+  local sev="$1" text="$2"
+  [[ -z "$text" ]] && return
+  if [[ "$sev" == "warn" ]]; then
+    WARN_OUT="${WARN_OUT:+$WARN_OUT$'\n'}$text"
+  else
+    OUT="${OUT:+$OUT$'\n'}$text"
+  fi
+}
+
 case "$FILE" in
   *.py)
-    if harness_check_skip ruff; then
-      :
-    elif has ruff; then
-      # exit code で判定する(ruffは成功時も "All checks passed!" を出力するため)
-      OUT="$(ruff check --output-format=concise "$FILE" 2>&1)" && OUT=""
-    elif has python3; then
-      OUT="$(python3 -m py_compile "$FILE" 2>&1)" && OUT=""
+    sev="$(harness_check_severity ruff fail)"
+    if [[ "$sev" != "skip" ]]; then
+      cur=""
+      if has ruff; then
+        # exit code で判定する(ruffは成功時も "All checks passed!" を出力するため)
+        cur="$(ruff check --output-format=concise "$FILE" 2>&1)" && cur=""
+      elif has python3; then
+        cur="$(python3 -m py_compile "$FILE" 2>&1)" && cur=""
+      fi
+      emit "$sev" "$cur"
     fi
     ;;
   *.ts|*.tsx|*.js|*.jsx|*.mjs|*.cjs)
-    if has npx && [[ -f .eslintrc.json || -f .eslintrc.js || -f eslint.config.js || -f eslint.config.mjs ]]; then
-      OUT="$(npx --no-install eslint --format unix "$FILE" 2>&1)" && OUT=""
-    elif has node && [[ "$FILE" == *.js || "$FILE" == *.mjs || "$FILE" == *.cjs ]]; then
-      OUT="$(node --check "$FILE" 2>&1)" && OUT=""
+    sev="$(harness_check_severity node-lint fail)"
+    if [[ "$sev" != "skip" ]]; then
+      cur=""
+      if has npx && [[ -f .eslintrc.json || -f .eslintrc.js || -f eslint.config.js || -f eslint.config.mjs ]]; then
+        cur="$(npx --no-install eslint --format unix "$FILE" 2>&1)" && cur=""
+      elif has node && [[ "$FILE" == *.js || "$FILE" == *.mjs || "$FILE" == *.cjs ]]; then
+        cur="$(node --check "$FILE" 2>&1)" && cur=""
+      fi
+      emit "$sev" "$cur"
     fi
     ;;
   *.go)
-    if ! harness_check_skip gofmt && has gofmt; then
+    sev="$(harness_check_severity gofmt fail)"
+    if [[ "$sev" != "skip" ]] && has gofmt; then
       UNFMT="$(gofmt -l "$FILE" 2>&1)"
-      [[ -n "$UNFMT" ]] && OUT="gofmt: 未フォーマット: $UNFMT (gofmt -w を実行せよ)"
+      [[ -n "$UNFMT" ]] && emit "$sev" "gofmt: 未フォーマット: $UNFMT (gofmt -w を実行せよ)"
     fi
     ;;
   *.rs)
-    if ! harness_check_skip cargo-fmt; then
-      has rustfmt && { rustfmt --check "$FILE" >/dev/null 2>&1 || OUT="rustfmt: 未フォーマット: $FILE"; }
+    sev="$(harness_check_severity cargo-fmt fail)"
+    if [[ "$sev" != "skip" ]] && has rustfmt; then
+      rustfmt --check "$FILE" >/dev/null 2>&1 || emit "$sev" "rustfmt: 未フォーマット: $FILE"
     fi
     ;;
   *.sh)
-    OUT="$(bash -n "$FILE" 2>&1)" || true
-    if ! harness_check_skip shellcheck && has shellcheck; then
+    bsev="$(harness_check_severity bash-syntax fail)"
+    if [[ "$bsev" != "skip" ]]; then
+      cur="$(bash -n "$FILE" 2>&1)" || true
+      emit "$bsev" "$cur"
+    fi
+    scsev="$(harness_check_severity shellcheck fail)"
+    if [[ "$scsev" != "skip" ]] && has shellcheck; then
       # -S: style/info まで拾うと導入初日のプロジェクトが既存コードで詰まる
       # -x: source 先を追う(追えないだけの SC1091 を問題として報告しない)
       SC="$(shellcheck -x -S "$SHELLCHECK_SEVERITY" -f gcc "$FILE" 2>&1)" || true
-      # bash -n が無出力のときに先頭空行を出さないよう、区切り改行は連結時だけ入れる
-      [[ -n "$SC" ]] && OUT="${OUT:+$OUT$'\n'}$SC"
+      emit "$scsev" "$SC"
     fi
     ;;
   *.json)
     # 検証ロジックは lib.sh に集約(check.sh と同じ判定を保つため)
-    if ! harness_check_skip json-syntax; then
-      OUT="$(harness_validate_json "$FILE" 2>&1)" && OUT=""
+    sev="$(harness_check_severity json-syntax fail)"
+    if [[ "$sev" != "skip" ]]; then
+      cur="$(harness_validate_json "$FILE" 2>&1)" && cur=""
+      emit "$sev" "$cur"
     fi
     ;;
   *.yaml|*.yml)
-    if ! harness_check_skip yaml-syntax; then
-      OUT="$(harness_validate_yaml "$FILE" 2>&1)" && OUT=""
+    sev="$(harness_check_severity yaml-syntax fail)"
+    if [[ "$sev" != "skip" ]]; then
+      cur="$(harness_validate_yaml "$FILE" 2>&1)" && cur=""
+      emit "$sev" "$cur"
     fi
     ;;
 esac
@@ -83,6 +125,15 @@ esac
 if [[ -n "${OUT// /}" ]]; then
   echo "check_file: $FILE に問題があります:"
   echo "$OUT"
+  if [[ -n "${WARN_OUT// /}" ]]; then
+    echo
+    echo "--- 以下は非ブロッキング(WARN) ---"
+    echo "$WARN_OUT"
+  fi
   exit 1
+fi
+if [[ -n "${WARN_OUT// /}" ]]; then
+  echo "check_file: $FILE に注意点があります(非ブロッキング):"
+  echo "$WARN_OUT"
 fi
 exit 0

@@ -113,13 +113,6 @@ harness_check_source() {
   printf '%s\n' "既定"
 }
 
-# harness_check_skip <検査ID> — config でその検査が skip 判定になっているか。
-# check.sh は harness_check_severity を直接見るが、check_file.sh(単発ツール
-# 呼び出しで stage/soft の区別が無い)はここだけ見れば済むようにする。
-harness_check_skip() {
-  [[ "$(harness_check_severity "$1" fail)" == "skip" ]]
-}
-
 # harness_excluded <パス> — config の exclude に一致するか。
 # glob の照合は bash の == を使う(**/ を含むパターンも extglob 無しで
 # 前方一致的に効かせるため、* が / を跨ぐ bash の既定挙動をそのまま利用する)

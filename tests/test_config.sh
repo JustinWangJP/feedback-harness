@@ -75,6 +75,14 @@ assert_contains "$OUT" "マップ" "フローリストでもマップ形式を�
 # クォートされたコロン入り文字列はマップではないため素通しする
 assert_eq '{"a": ["x: y"]}' "$(parse 'a: ["x: y"]')" "クォート済みのコロン入り文字列は通る"
 
+# 閉じていないクォート・フローリストは裸文字列として通さず行番号付きで落ちる
+# ("main のようなクォート開始のみの値が git merge-base 等を静かに壊す実例あり)
+OUT="$(parse 'a: "main')"
+assert_contains "$OUT" "クォート" "閉じていないクォートを拒否する"
+OUT="$(parse 'a: [x, y')"
+assert_contains "$OUT" "フローリスト" "閉じていないフローリストを拒否する"
+assert_eq '{"a": "main"}' "$(parse 'a: "main"')" "正しく閉じたクォートは通る"
+
 # --- スキーマ検証 ---
 # 検証は parse の後段。打ち間違いを黙って無視しない契約を固定する
 val() { printf '%s' "$1" > "$WORK/v.yaml"; python3 -c '
@@ -107,6 +115,15 @@ assert_contains "$OUT" "hard" "未知の severity を拒否する"
 OUT="$(val 'audit:
   interval_days: seven')"
 assert_contains "$OUT" "整数" "型不一致を拒否する"
+
+# 検査固有パラメータの範囲制約(雛形が 0-100 と明記する vulture.min_confidence)
+OUT="$(val 'checks:
+  vulture:
+    min_confidence: 101')"
+assert_contains "$OUT" "0〜100" "範囲外の整数を拒否する"
+assert_eq "0" "$(val 'checks:
+  vulture:
+    min_confidence: 100' >/dev/null 2>&1; echo $?)" "範囲の上限は許可する"
 
 OUT="$(val 'version: 2')"
 assert_contains "$OUT" "version" "対応外のスキーマ版を拒否する"
