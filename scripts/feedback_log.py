@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# ruff: noqa -- ハーネス配布ファイル(導入元で管理・検査済み。導入先の ruff 設定の対象外)
+# fmt: off
 """feedback_log.py — 人間のレビュー・修正指摘を記録・検索・ルール化するCLI。
 
 エントリは .feedback/log/ に frontmatter 付き Markdown で保存され、
@@ -804,3 +806,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+# fmt: on
