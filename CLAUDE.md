@@ -15,6 +15,7 @@
 
 **スクリプト設計メモ:**
 - フック実行時に export された環境変数(CLAUDE_PROJECT_DIR 等)は make・テスト経由の子孫プロセスすべてに伝播する。スクリプトが環境変数でルート解決する場合、ネスト呼び出しでの再帰を前提にガードを入れること(FEEDBACK_CHECK_RECURSION_GUARD が参考実装 — 2026-08-16 の無限再帰修正由来)。
+- テストの実行は run_tests.sh の契約に乗せる:ランナーはフック由来の CLAUDE_PROJECT_DIR 等を掃落としてから各テストを起動し、テストは必要な変数を自分で設定する(2026-08-19 に2件発生した「本リポジトリの .feedback/ を隔離プロジェクトの代わりに読み書きする」事故の対策)。FEEDBACK_CHECK_RECURSION_GUARD だけは意図的な伝播(再帰切断)なので掃落とさない。
 
 **変更履歴:**
 | 日付 | 変更内容 | 対象 | 理由 |
@@ -36,3 +37,4 @@
 | 2026-08-17 | 適用範囲拡張 P3(重い検査群) | audit.sh / check.sh / feedback_log.py / tests | カバレッジ計装の相乗り、API契約差分(contract)、オンデマンド脆弱性監査と最終監査日の可視化。M2遅延実行は廃止し監査は Stop フックの外へ |
 | 2026-08-18 | プロジェクト設定ファイル(config.yaml) | harness_config.py / check.sh / lib.sh / docs | 環境変数3つしか可変点が無くチームで共有できない問題。3層(全体・スタック・検査)+ 環境変数の優先順位、--list-checks で実効値と出所を可視化 |
 | 2026-08-19 | レビュー指摘への対応と文書同期 | check.sh / check_file.sh / harness_config.py / init.sh / docs | SKIP項目の一覧漏れ、単一ファイル検査の判定不一致、設定エラーの見逃し、Rust契約検査の外部参照、設定の優先順位を修正し、現行仕様を文書へ反映 |
+| 2026-08-19 | テストランナーでフック由来環境変数を一括リセット | tests/run_tests.sh / test_check_file_severity.sh / test_events_log.sh / CLAUDE.md | CLAUDE_PROJECT_DIR が伝播し隔離プロジェクトでなく本リポジトリの .feedback/ を読み書きする事故が同日2件。run_tests.sh で一括掃落とし「テストは必要な変数を自分で設定する」契約へ(FEEDBACK_CHECK_RECURSION_GUARD は再帰切断のため意図的に残す) |

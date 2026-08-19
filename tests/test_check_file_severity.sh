@@ -33,12 +33,10 @@ new_project() { # new_project <名前>
   printf '%s\n' "$d"
 }
 
-# check_file.sh はファイルパスしか受け取らずルート引数を持たないため、常に
-# harness_project_root() の CLAUDE_PROJECT_DIR 優先解決に頼る。Stop フック経由の
-# make check ではこの変数が本リポジトリのルートを指したまま子孫プロセス(この
-# テスト)へ伝播し、隔離した $P1 等ではなく本リポジトリの .feedback/config.yaml を
-# 読んでしまう(CLAUDE.md のスクリプト設計メモに書かれている既知の伝播経路)。
-# 空文字で上書きして git 由来の解決(隔離プロジェクトの git init)へ強制的に戻す
+# check_file.sh はファイルパスしか受け取らずルートを引数で渡せないため、
+# harness_project_root() の解決(git 由来)に rely する。フック由来の
+# CLAUDE_PROJECT_DIR 伝播は run_tests.sh が一括して掃落とすが、単体実行でも
+# 冪等に保つ保険としてここでも空にする(隔離プロジェクトの git init で解決)
 run_cf() { CLAUDE_PROJECT_DIR="" PATH="$FAKEBIN:$PATH" bash "$CF" "$1" 2>&1; } # run_cf <ファイル>
 
 # --- severity: skip は実行そのものをしない ---

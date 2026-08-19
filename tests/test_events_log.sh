@@ -55,9 +55,8 @@ run_post_edit 1
 assert_contains "$(tail -n 1 "$EVENTS")" '"result":"fail"' "失敗も記録される"
 
 # Codex の apply_patch は file_path ではなくパッチ本文を tool_input.command に渡す。
-# CLAUDE_PROJECT_DIR を隔離プロジェクトへ向ける — Stop フック経由の make check では
-# この変数が本リポジトリのルートを指したまま伝播し、相対パス解決と events.jsonl の
-# 書き込み先が本リポジトリ側へ寄ってしまう(他の呼び出しと同じ汚染対策)
+# 実フックと同じく CLAUDE_PROJECT_DIR を設定して駆動する(他の呼び出しと同様。
+# フック由来の変数の汚染は run_tests.sh が一括して掃落とす契約)
 fake_exit 0
 printf '%s' '{"tool_name":"apply_patch","tool_input":{"command":"*** Begin Patch\n*** Update File: sub/code.py\n@@\n-old\n+new\n*** End Patch"}}' \
   | (cd "$WORK/proj" && CLAUDE_PROJECT_DIR="$WORK/proj" bash "$WORK/fake/hooks/post_edit.sh") >/dev/null 2>&1
