@@ -17,10 +17,11 @@ Claude Code と Codex の両方で使えるフィードバックハーネスで�
 | 環境 | 自動チェック | ルール反映 |
 |------|-------------|-----------|
 | Claude Code（プラグイン導入） | プラグインの `hooks/hooks.json` が Hooks を提供する。ファイルを編集した直後に `check_file.sh`、応答を終える前に `check.sh` を実行する（`check.sh` は、前回の検査成功後に変更がある場合のみ実行）。失敗時は exit code 2 で結果をエージェントへ返す。設定ファイル（JSON/YAML）の構文、秘密情報、内部リンク、依存関係、CI 設定も検査する。設定で明示していない検査の指摘は WARN（処理を止めない警告）として `events.jsonl` に記録する。必要なツールが入っていない場合は SKIP とし、ハーネスが自動でインストールすることはない | `apply-feedback` スキルが `.feedback/rules.md` と未整理の指摘を読む |
+| Claude Code（`init.sh` のみ） | CLAUDE.md の規約に従い、変更ごとに `check_file.sh`、完了前に `check.sh` をエージェント自身が実行する | CLAUDE.md の規約により、作業前に `.feedback/rules.md` と未整理の指摘を読む |
 | Codex（プラグイン導入） | 同じ `hooks/hooks.json` を Codex Hooks として読み込む。`apply_patch` のパッチ内容から対象ファイルを見つけてすぐに検査し、Stop の前に全体を検査する | `apply-feedback` スキルが `.feedback/rules.md` と未整理の指摘を読む |
 | Codex IDE 拡張・汎用エージェント（`scripts/init.sh` で導入） | AGENTS.md の規約に従い、変更ごとに `check_file.sh`、完了前に `check.sh` をエージェント自身が実行する | AGENTS.md の規約により、作業前に `.feedback/rules.md` を必ず読む |
 
-フィードバックは、どの環境でも各プロジェクトの `.feedback/` に保存します。Claude Code、ChatGPT デスクトップアプリの Codex、Codex CLI では、プラグインの Hooks が検査を自動実行します。Codex IDE 拡張や汎用エージェントでは、`init.sh` が追加する AGENTS.md の規約に従い、エージェント自身が検査を実行します。Codex では、初回に `/hooks` を開いて内容を確認し、信頼済みとして有効にする必要があります。このリポジトリの `.claude/settings.json` は Claude Code で開発するための設定であり、導入先には配布されません。
+フィードバックは、どの環境でも各プロジェクトの `.feedback/` に保存します。Claude Code、ChatGPT デスクトップアプリの Codex、Codex CLI では、プラグインの Hooks が検査を自動実行します。`init.sh` だけで導入する場合は、Claude Code では CLAUDE.md、Codex IDE 拡張や汎用エージェントでは AGENTS.md の規約に従い、エージェント自身が検査を実行します。Codex では、初回に `/hooks` を開いて内容を確認し、信頼済みとして有効にする必要があります。このリポジトリの `.claude/settings.json` は Claude Code で開発するための設定であり、導入先には配布されません。
 
 ## 機能一覧
 
@@ -157,15 +158,15 @@ codex plugin marketplace add JustinWangJP/feedback-harness
 
 インストール後は新しいセッションを開始します。Codex で `/hooks` を開き、`SessionStart` / `PostToolUse` / `Stop` の各 Hook の内容を確認して、信頼済みとして有効にしてください。Codex IDE 拡張はプラグインに対応していないため、次の `init.sh` を使います。
 
-### Codex IDE 拡張や他の汎用エージェントで使う場合
+### `init.sh` で手動運用する場合（Claude Code / Codex IDE 拡張 / 汎用エージェント）
 
-Claude Code から:
+Claude Code プラグインから `init.sh` を併用する場合:
 
 ```
 /feedback-harness:init
 ```
 
-Claude Code を使わない場合は直接:
+プラグインを使わない場合、または Claude Code 以外から導入する場合は直接:
 
 ```bash
 git clone https://github.com/JustinWangJP/feedback-harness
@@ -180,8 +181,8 @@ cd /path/to/your-project && bash scripts/check.sh   # スタック検出の確�
 | 資産 | プラグイン | `init.sh` |
 |---|---|---|
 | `scripts/check.sh` `check_file.sh` `audit.sh` `lib.sh` `harness_config.py` `feedback_log.py` `README.md` | プラグイン側に置かれる。Codex は `PLUGIN_ROOT`（Hooks では互換用の変数 `CLAUDE_PLUGIN_ROOT` も設定）、Claude Code は `CLAUDE_PLUGIN_ROOT` を使って実行する | 導入先の `scripts/` にファイルをコピー |
-| Hooks(`hooks.json`) | ○ 自動起動 | ✗(AGENTS.md の規約が代替) |
-| skills | ○（Claude Code / Codex） | ✗（AGENTS.md の規約が代替） |
+| Hooks(`hooks.json`) | ○（有効化後に自動起動） | ✗（CLAUDE.md / AGENTS.md の規約が代替） |
+| skills | ○（Claude Code / Codex） | ✗（CLAUDE.md / AGENTS.md の規約が代替） |
 | agents / commands | Claude Code のみ | ✗ |
 | `scripts/hooks/*`・`init.sh` 自身 | ○ | ✗ |
 | `.feedback/`（蓄積データ） | SessionStart フックが初回に作成 | `init.sh` が初回に作成 |
@@ -197,7 +198,7 @@ cd /path/to/your-project && bash scripts/check.sh   # スタック検出の確�
 
 ## Skills / Agents / Commands の使い方（プラグイン導入時）
 
-マーケットプレイスから導入すると、Claude Code と Codex の両方で **3つの Skill** を使えます。**2つの Agent と1つの Command は Claude Code 専用**です。Codex の `feedback-loop` スキルは、Codex のサブエージェント機能を使います。`init.sh` で導入する場合はこれらを含めず、AGENTS.md の規約で同じ運用を行います。
+マーケットプレイスから導入すると、Claude Code と Codex の両方で **3つの Skill** を使えます。**2つの Agent と1つの Command は Claude Code 専用**です。Codex の `feedback-loop` スキルは、Codex のサブエージェント機能を使います。`init.sh` で導入する場合はこれらを含めず、CLAUDE.md / AGENTS.md に追加される規約と、コピーされたスクリプトで同じ運用を行います。
 
 ### 呼び出され方の違い
 
@@ -207,7 +208,7 @@ cd /path/to/your-project && bash scripts/check.sh   # スタック検出の確�
 | **Agent** | `feedback-loop` スキルが環境のサブエージェント機能で起動する（Claude Code の配布 Agent 定義も利用） | スキル(**直接呼ぶ必要はない**) |
 | **Command** | `/feedback-harness:init` と入力する | ユーザー |
 
-**普段は特別な操作をする必要はありません。** 各 Skill は依頼の内容に応じて自動で起動します。`init.sh` 方式では、CLAUDE.md / AGENTS.md に追加される案内文も「実装前は apply-feedback」「指摘を受けたら capture-feedback」と促します。以下は、明示的に動かしたい場合の手順です。
+**プラグイン方式では、普段は特別な操作をする必要はありません。** 各 Skill は依頼の内容に応じて自動で起動します。`init.sh` 方式では Skill をコピーしないため、CLAUDE.md / AGENTS.md に追加される規約に従って、対応するスクリプトを直接実行します。以下は、プラグインの Skill を明示的に動かしたい場合の手順です。
 
 ### Skill 1: `apply-feedback` — 作業前に過去のルールを反映する
 
@@ -232,15 +233,27 @@ cd /path/to/your-project && bash scripts/check.sh   # スタック検出の確�
 **何をするか**:
 
 1. 指摘を1文の要約に整理する
-2. 失敗に関する指摘なら、根本原因を1行で分類する（`文脈欠落` / `指示欠陥` / `モデル限界`）。この分類を基に反映先を決める
-3. signal（指摘の種類）を決める（省略した場合は CLI が自動で判断する）
+2. 失敗に関する指摘なら、根因を1行で分類する（`文脈欠落` / `指示欠陥` / `実行誤り` / `モデル限界` / `未判定`）
+3. signal（起きた出来事の種類）を決める。誤った出力や行動への指摘は、根因にかかわらず `failure` とする（省略した場合は CLI が自動で判断する）
 4. カテゴリを選び `feedback_log.py add` で記録する
 5. open が3件以上になったら、共通ルールへの整理（`feedback-loop`）を提案する
 
 ```
 あなた: エラーメッセージは日本語で書いて。次からもそうして
-  → capture-feedback が自動起動し、根本原因も付けて記録する
+  → capture-feedback が自動起動し、根因も付けて記録する
 ```
+
+根因は、次の基準で判断します。
+
+| 根因 | 判断基準 |
+|---|---|
+| `文脈欠落` | 判断時に必要な事実・ルール・バージョン情報が、読み込まれた文脈に存在しなかった。参照できた情報を見落とした場合は含めない |
+| `指示欠陥` | 期待結果・制約・受け入れ条件・手順が不足、曖昧、または矛盾しており、通常の品質基準だけでは一意に判断できなかった。個別の禁止事項がなかっただけの通常の不具合は含めない |
+| `実行誤り` | 必要な文脈と十分明確な指示はあったが、見落とし、違反、推論ミス、実装ミスが起きた。単発の失敗では最初に検討する |
+| `モデル限界` | 文脈・指示・利用可能なツール・妥当な再試行をそろえても、同種の失敗を安定して避けられない。単発の見落としだけでは判定しない |
+| `未判定` | 証拠が不足している、または複数の原因を分離できない。無理に決めず、追加情報を待つ |
+
+`根因:` 行は1件だけ記録します。未定義の分類は CLI が拒否し、上の5分類から選び直すよう案内します。
 
 ### Skill 3: `feedback-loop` — 全体の処理を振り分ける
 
@@ -312,7 +325,8 @@ bash scripts/audit.sh                    # 脆弱性監査(ネットワークを
 ```bash
 # 人間から指摘を受けたとき（失敗に関する指摘には根本原因を1行添える）
 python3 scripts/feedback_log.py add --category style --source human \
-  --summary "エラーメッセージは日本語で書く" --detail "根因: 指示欠陥"
+  --summary "エラーメッセージは日本語で書く" \
+  --detail "日本語で統一する要件が指示になかった。根因: 指示欠陥"
 
 # うまくいった進め方や指示の言い回しを残すとき（signal は省略時に自動で判断される）
 python3 scripts/feedback_log.py add --category workflow --source agent \
@@ -367,15 +381,20 @@ bash scripts/check.sh --list-checks --json    # 同じ内容を機械可読な J
 ```
 [記録]  人間からの指摘・修正 / 有効だった進め方 / 繰り返す check 失敗 / 完了前の振り返り
           → feedback_log.py add   (capture-feedback スキル / AGENTS.md の規約)
-             失敗に関する指摘は根本原因を --detail に1行: 文脈欠落 | 指示欠陥 | モデル限界
-             signal(--signal)も添える: 省略時は根本原因と category から自動で判断する
+             失敗に関する指摘は根因を --detail に1行:
+               文脈欠落 | 指示欠陥 | 実行誤り | モデル限界 | 未判定
+             signal(--signal)は出来事の種類:
+               誤った出力・行動は根因にかかわらず failure。省略時は CLI が自動判断する
                 ↓
 [open]  ├─ ルール化を待たず、次の作業を始めるときに参照する (apply-feedback スキル)
         └─ feedback-curator が根本原因を見て反映先を選ぶ (feedback-loop スキル)
-             promote → .feedback/rules.md へ新規ルール      (指示欠陥・モデル限界)
+             promote → .feedback/rules.md へ新規ルール      (主に指示欠陥)
              merge   → 既存ルールへ統合。再発なら文言を強化
              close   → 共通ルールにできない一回限りの指摘を処理済みにする
-             提案    → CLAUDE.md 追記案 (文脈欠落) / lint・テスト追加案
+             提案    → 文脈欠落: CLAUDE.md などへの前提情報追加案
+                       実行誤り: lint・テスト・チェックリスト追加案
+                       モデル限界: 人間確認・決定的ツールへの切り替え案（再現証拠が必要）
+                       未判定: open のまま追加情報を待つ
                        ※ rules.md 以外は提案止まり、反映は人間が承認する
                 ↓
 [反映]  .feedback/rules.md → 次セッションの作業開始前に適用
