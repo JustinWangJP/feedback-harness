@@ -58,6 +58,33 @@ def _reject_unsupported(body, path, lineno):
             _die(path, lineno, f"未対応の記法です({reason})")
 
 
+def _split_flow_list(inner):
+    """フローリストの内側を , で分割する。クォート内の , では割らない。
+
+    素朴な str.split(",") は "vendor dir, extra/**" のようなクォート付き
+    要素の中のカンマまで区切ってしまい、要素が静かに壊れる(_strip_comment と
+    同じクォート追跡ロジックをここでも使う)。
+    """
+    items = []
+    cur = []
+    quote = None
+    for ch in inner:
+        if quote:
+            cur.append(ch)
+            if ch == quote:
+                quote = None
+        elif ch in "\"'":
+            quote = ch
+            cur.append(ch)
+        elif ch == ",":
+            items.append("".join(cur).strip())
+            cur = []
+        else:
+            cur.append(ch)
+    items.append("".join(cur).strip())
+    return items
+
+
 def _scalar(s, path, lineno):
     if s == "":
         return None
@@ -65,7 +92,7 @@ def _scalar(s, path, lineno):
         inner = s[1:-1].strip()
         if not inner:
             return []
-        items = [x.strip() for x in inner.split(",")]
+        items = _split_flow_list(inner)
         for x in items:
             _reject_map_item(x, path, lineno)
         return [_scalar(x, path, lineno) for x in items]
@@ -398,9 +425,13 @@ def load(root):
 def _stage_verdicts(scope, body, prefix, out, only_stack=None):
     """skip/fail_on/warn_on のステージ集合を、検査ID単位の判定へ展開する。
 
-    fail_on と warn_on の両方に同じステージがある場合は fail_on を優先する(安全側)。
+    同じステージが複数のキーに書かれた場合は fail_on > warn_on > skip の順で
+    強い判定が勝つ(安全側)。後段の代入が前段を上書きするので、最も安全側
+    (fail)にしたいキーを最後に処理する — skip を最後に処理すると、
+    fail_on と skip の両方に同じステージがあるとき skip が黙って勝ってしまう
+    (「書いたのに効かない」の中でも最悪の、判定そのものが消える壊れ方)。
     """
-    for key, sev in (("warn_on", "warn"), ("fail_on", "fail"), ("skip", "skip")):
+    for key, sev in (("skip", "skip"), ("warn_on", "warn"), ("fail_on", "fail")):
         for stage in body.get(key) or []:
             for cid, (stack, cstage) in CHECKS.items():
                 if cstage != stage:

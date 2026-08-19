@@ -586,7 +586,8 @@ def cmd_stats(args):
     sig = {s: 0 for s in SIGNALS}
     sig["unknown"] = 0
     for e in es:
-        sig[e.get("signal") or "unknown"] += 1
+        k = e.get("signal") or "unknown"
+        sig[k] = sig.get(k, 0) + 1
     print("signal: " + " / ".join(f"{k} {v}" for k, v in sig.items()))
     cats, causes, srcs, st = {}, {}, {}, {}
     for e in es:

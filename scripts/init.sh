@@ -38,6 +38,26 @@ cp "$SRC/scripts/check.sh" "$SRC/scripts/check_file.sh" "$SRC/scripts/lib.sh" \
    "$SRC/scripts/audit.sh" "$SRC/scripts/harness_config.py" \
    "$SRC/scripts/feedback_log.py" "$SRC/scripts/README.md" \
    "$DEST/scripts/"
+
+# harness_config.py / feedback_log.py は導入元で管理・検査済みのベンダー
+# ファイルで、導入先の pyproject.toml [tool.ruff] の対象ではない。導入先の
+# 設定ファイルを書き換える(=ユーザーの設定に手を出す)代わりに、ruff 自身が
+# 読む file-level ディレクティブをファイルへ埋め込む(`ruff: noqa` は lint、
+# `fmt: off`/`fmt: on` は format を丸ごと無効化する)。導入元(このリポジトリ)
+# の同名ファイルには入れない — 自己ドッグフーディングの検査対象から外れるため、
+# コピー後の $DEST 側だけに後挿入する
+for f in harness_config.py feedback_log.py; do
+  tmp="$(mktemp)"
+  {
+    head -n1 "$DEST/scripts/$f"
+    echo "# ruff: noqa -- ハーネス配布ファイル(導入元で管理・検査済み。導入先の ruff 設定の対象外)"
+    echo "# fmt: off"
+    tail -n +2 "$DEST/scripts/$f"
+    echo "# fmt: on"
+  } > "$tmp"
+  mv "$tmp" "$DEST/scripts/$f"
+done
+
 # 755(+x ではなく明示指定)。シェルスクリプトの実行には読み取り権限が必要で、
 # 導入元が 711 の場合に +x だと所有者以外が実行できない権限のまま複製される
 chmod 755 "$DEST/scripts/"*.sh "$DEST/scripts/feedback_log.py"

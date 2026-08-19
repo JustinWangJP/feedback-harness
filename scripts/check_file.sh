@@ -17,12 +17,22 @@ harness_load_config
 FILE="${1:-}"
 [[ -z "$FILE" || ! -f "$FILE" ]] && exit 0
 
+# HARNESS_CHECK_SEVERITY / HARNESS_EXCLUDE は config 由来。check.sh の全件走査
+# だけでなく単発ファイル検査でも同じ判定(severity: skip / exclude)に従う
+# (従わないと Stop フックでは SKIP と出るのに PostToolUse は差し戻す食い違いになる)。
+ROOT="$(harness_project_root)"
+if harness_excluded "$(harness_relpath "$FILE" "$ROOT")"; then
+  exit 0
+fi
+
 # has() / SHELLCHECK_SEVERITY は lib.sh で定義(check.sh と共有)
 
 OUT=""
 case "$FILE" in
   *.py)
-    if has ruff; then
+    if harness_check_skip ruff; then
+      :
+    elif has ruff; then
       # exit code で判定する(ruffは成功時も "All checks passed!" を出力するため)
       OUT="$(ruff check --output-format=concise "$FILE" 2>&1)" && OUT=""
     elif has python3; then
@@ -37,17 +47,19 @@ case "$FILE" in
     fi
     ;;
   *.go)
-    if has gofmt; then
+    if ! harness_check_skip gofmt && has gofmt; then
       UNFMT="$(gofmt -l "$FILE" 2>&1)"
       [[ -n "$UNFMT" ]] && OUT="gofmt: 未フォーマット: $UNFMT (gofmt -w を実行せよ)"
     fi
     ;;
   *.rs)
-    has rustfmt && { rustfmt --check "$FILE" >/dev/null 2>&1 || OUT="rustfmt: 未フォーマット: $FILE"; }
+    if ! harness_check_skip cargo-fmt; then
+      has rustfmt && { rustfmt --check "$FILE" >/dev/null 2>&1 || OUT="rustfmt: 未フォーマット: $FILE"; }
+    fi
     ;;
   *.sh)
     OUT="$(bash -n "$FILE" 2>&1)" || true
-    if has shellcheck; then
+    if ! harness_check_skip shellcheck && has shellcheck; then
       # -S: style/info まで拾うと導入初日のプロジェクトが既存コードで詰まる
       # -x: source 先を追う(追えないだけの SC1091 を問題として報告しない)
       SC="$(shellcheck -x -S "$SHELLCHECK_SEVERITY" -f gcc "$FILE" 2>&1)" || true
@@ -57,10 +69,14 @@ case "$FILE" in
     ;;
   *.json)
     # 検証ロジックは lib.sh に集約(check.sh と同じ判定を保つため)
-    OUT="$(harness_validate_json "$FILE" 2>&1)" && OUT=""
+    if ! harness_check_skip json-syntax; then
+      OUT="$(harness_validate_json "$FILE" 2>&1)" && OUT=""
+    fi
     ;;
   *.yaml|*.yml)
-    OUT="$(harness_validate_yaml "$FILE" 2>&1)" && OUT=""
+    if ! harness_check_skip yaml-syntax; then
+      OUT="$(harness_validate_yaml "$FILE" 2>&1)" && OUT=""
+    fi
     ;;
 esac
 

@@ -145,23 +145,25 @@ run_stage_soft() {
   SOFT_STAGE=0
 }
 
+# record_skip <id> <stage> <label> <理由> — run_stage を経由しない SKIP を記録する。
+# ツール未インストール・宣言なし等、コマンドを起動する前に判定できる SKIP は
+# run_stage を呼ばずに直接記録してきたが、--list-checks は run_stage が書く
+# list.txt だけを見るため、その経路が丸ごと一覧から消えていた(実際に起きた欠陥)。
+# run_stage と同じ出口(list.txt / RESULTS)を通すことで一覧・通常実行の両方に載せる。
+record_skip() {
+  local id="$1" stage="$2" label="$3" reason="$4"
+  if [[ "$LIST_MODE" == "1" ]]; then
+    printf '%s\t%s\t%s\t%s\t%s\n' "$id" "$label" "$stage" "skip" "$reason" >> "$LOGDIR/list.txt"
+  else
+    RESULTS+=("SKIP  $label${reason:+ ($reason)}")
+  fi
+}
+
 npm_script_exists() { # package.json に scripts.<name> があるか
   node -e "process.exit(require('./package.json').scripts?.['$1'] ? 0 : 1)" 2>/dev/null
 }
 
-# harness_excluded <パス> — config の exclude に一致するか。
-# glob の照合は bash の == を使う(**/ を含むパターンも extglob 無しで
-# 前方一致的に効かせるため、* が / を跨ぐ bash の既定挙動をそのまま利用する)
-harness_excluded() {
-  local path="$1" pattern
-  [[ -n "${HARNESS_EXCLUDE:-}" ]] || return 1
-  while IFS= read -r pattern; do
-    [[ -n "$pattern" ]] || continue
-    # shellcheck disable=SC2053  # 右辺は glob として評価させたいので引用しない
-    [[ "$path" == $pattern ]] && return 0
-  done <<< "$HARNESS_EXCLUDE"
-  return 1
-}
+# harness_excluded は lib.sh で定義(check_file.sh と共有)。
 
 # 注意: git ls-files は「追跡済みだが作業ツリーから削除された」ファイルも列挙する。
 # それらを検査ツールに渡すと読み取りエラーで完了をブロックしてしまう(実測: リンク
@@ -246,7 +248,7 @@ if [[ -f pyproject.toml || -f setup.py || -f requirements.txt ]]; then
     if has lint-imports; then
       run_stage lint "import-linter" "-" "python: import-linter" lint-imports
     else
-      RESULTS+=("SKIP  python: import-linter (import-linter 未インストール)")
+      record_skip "import-linter" lint "python: import-linter" "import-linter 未インストール"
     fi
   fi
 else
@@ -268,8 +270,17 @@ if [[ -f package.json ]]; then
   STACK_FOUND=1
   PM="npm"; [[ -f pnpm-lock.yaml ]] && PM="pnpm"; [[ -f yarn.lock ]] && PM="yarn"
   if ! has node; then
-    # npm_script_exists が node に依存するため、node 不在では全ステージを判定できない
-    RESULTS+=("SKIP  node: 全ステージ (node 未インストール)")
+    # npm_script_exists が node に依存するため、node 不在では全ステージを判定できない。
+    # --list-checks では対象IDごとに記録する(通常実行は1行にまとめたまま)
+    if [[ "$LIST_MODE" == "1" ]]; then
+      for _id_stage in node-lint:lint node-typecheck:typecheck tsc:typecheck \
+                       node-test-coverage:test node-test:test node-build:build \
+                       npm-ls:lint prettier:format knip:lint; do
+        record_skip "${_id_stage%%:*}" "${_id_stage##*:}" "node: 全ステージ" "node 未インストール"
+      done
+    else
+      RESULTS+=("SKIP  node: 全ステージ (node 未インストール)")
+    fi
   else
     npm_script_exists lint && run_stage lint "node-lint" "$PM" "node: $PM run lint" "$PM" run lint
     npm_script_exists typecheck && run_stage typecheck "node-typecheck" "$PM" "node: $PM run typecheck" "$PM" run typecheck
@@ -282,7 +293,7 @@ if [[ -f package.json ]]; then
          || npx --no-install tsc --version >/dev/null 2>&1; then
         run_stage typecheck "tsc" "-" "node: tsc --noEmit" npx --no-install tsc --noEmit
       else
-        RESULTS+=("SKIP  node: tsc --noEmit (typescript 未インストール)")
+        record_skip "tsc" typecheck "node: tsc --noEmit" "typescript 未インストール"
       fi
     fi
     # カバレッジ相乗り(M3): test:coverage スクリプトを書いた=計装を宣言した。
@@ -302,9 +313,9 @@ if [[ -f package.json ]]; then
     # ls 自体が無い。他PMで走らせると健全なプロジェクトが usage error で FAIL する
     # ため、npm のときだけ実行する
     if [[ ! -d node_modules ]]; then
-      RESULTS+=("SKIP  node: npm ls (node_modules 未インストール)")
+      record_skip "npm-ls" lint "node: npm ls" "node_modules 未インストール"
     elif [[ "$PM" != "npm" ]]; then
-      RESULTS+=("SKIP  node: npm ls ($PM は ls --all 非対応)")
+      record_skip "npm-ls" lint "node: npm ls" "$PM は ls --all 非対応"
     else
       run_stage lint "npm-ls" "npm" "node: npm ls" npm ls --all
     fi
@@ -319,7 +330,7 @@ if [[ -f package.json ]]; then
       if npx --no-install prettier --version >/dev/null 2>&1; then
         run_stage format "prettier" "-" "node: prettier" npx --no-install prettier --check .
       else
-        RESULTS+=("SKIP  node: prettier (prettier 未インストール)")
+        record_skip "prettier" format "node: prettier" "prettier 未インストール"
       fi
     fi
 
@@ -332,7 +343,7 @@ if [[ -f package.json ]]; then
       if npx --no-install knip --version >/dev/null 2>&1; then
         run_stage lint "knip" "-" "node: knip" npx --no-install knip
       else
-        RESULTS+=("SKIP  node: knip (knip 未インストール)")
+        record_skip "knip" lint "node: knip" "knip 未インストール"
       fi
     fi
   fi
@@ -369,7 +380,15 @@ fi
 if [[ -f Cargo.toml ]]; then
   STACK_FOUND=1
   if ! has cargo; then
-    RESULTS+=("SKIP  rust: 全ステージ (cargo 未インストール)")
+    # --list-checks では対象IDごとに記録する(通常実行は1行にまとめたまま)
+    if [[ "$LIST_MODE" == "1" ]]; then
+      for _id_stage in clippy:lint cargo-check:build cargo-test:test \
+                       cargo-metadata:lint cargo-fmt:format cargo-semver-checks:contract; do
+        record_skip "${_id_stage%%:*}" "${_id_stage##*:}" "rust: 全ステージ" "cargo 未インストール"
+      done
+    else
+      RESULTS+=("SKIP  rust: 全ステージ (cargo 未インストール)")
+    fi
   else
     if cargo clippy --version >/dev/null 2>&1; then
       run_stage lint "clippy" "-" "rust: clippy" cargo clippy --quiet -- -D warnings
@@ -445,7 +464,7 @@ if [[ ${#YAML_FILES[@]} -gt 0 ]]; then
   if harness_has_pyyaml; then
     run_stage lint "yaml-syntax" "-" "config: yaml 構文" harness_validate_yaml "${YAML_FILES[@]}"
   else
-    RESULTS+=("SKIP  config: yaml 構文 (PyYAML 未インストール)")
+    record_skip "yaml-syntax" lint "config: yaml 構文" "PyYAML 未インストール"
   fi
 fi
 
@@ -474,10 +493,10 @@ if ls .secretlintrc.* >/dev/null 2>&1; then
   if has npx && npx --no-install secretlint --version >/dev/null 2>&1; then
     run_stage security "secretlint" "-" "security: secretlint" npx --no-install secretlint "**/*"
   else
-    RESULTS+=("SKIP  security: secretlint (secretlint 未インストール)")
+    record_skip "secretlint" security "security: secretlint" "secretlint 未インストール"
   fi
 elif anything_detected; then
-  RESULTS+=("SKIP  security: secretlint (.secretlintrc.* が無い — 設定すると検査が有効になります)")
+  record_skip "secretlint" security "security: secretlint" ".secretlintrc.* が無い — 設定すると検査が有効になります"
 fi
 
 # gitleaks があれば併用する(OS固有バイナリのため任意扱い)。バージョン差が
@@ -490,7 +509,7 @@ if anything_detected && has gitleaks; then
     run_stage security "gitleaks" "-" "security: gitleaks" \
       gitleaks detect --no-git --redact --no-banner -s .
   else
-    RESULTS+=("SKIP  security: gitleaks (この版は detect --no-git/--redact に非対応)")
+    record_skip "gitleaks" security "security: gitleaks" "この版は detect --no-git/--redact に非対応"
   fi
 fi
 
@@ -501,7 +520,7 @@ if compgen -G ".github/workflows/*.y*ml" >/dev/null 2>&1; then
   if has actionlint; then
     run_stage lint "actionlint" "-" "ci: actionlint" actionlint
   else
-    RESULTS+=("SKIP  ci: actionlint (actionlint 未インストール)")
+    record_skip "actionlint" lint "ci: actionlint" "actionlint 未インストール"
   fi
 fi
 
@@ -526,7 +545,12 @@ if [[ ${#DOCKER_FILES[@]} -gt 0 ]]; then
   elif has hadolint; then
     run_stage lint "hadolint" "-" "docker: hadolint" hadolint "${DOCKER_FILES[@]}"
   else
-    RESULTS+=("SKIP  docker: lint (dockerfilelint / hadolint 未インストール)")
+    if [[ "$LIST_MODE" == "1" ]]; then
+      record_skip "dockerfilelint" lint "docker: lint" "dockerfilelint / hadolint 未インストール"
+      record_skip "hadolint" lint "docker: lint" "dockerfilelint / hadolint 未インストール"
+    else
+      RESULTS+=("SKIP  docker: lint (dockerfilelint / hadolint 未インストール)")
+    fi
   fi
 fi
 
@@ -548,19 +572,31 @@ if [[ -n "$OPENAPI_SPEC" ]] && has oasdiff; then
   if [[ -n "$BASE_SHA" ]] && git show "$BASE_SHA:$OPENAPI_SPEC" > "$TMP_BASE" 2>/dev/null; then
     run_stage contract "oasdiff" "-" "contract: oasdiff" oasdiff breaking "$TMP_BASE" "$OPENAPI_SPEC"
   else
-    RESULTS+=("SKIP  contract: oasdiff (ベースライン取得不能 — $OPENAPI_SPEC がベースラインに無い)")
+    record_skip "oasdiff" contract "contract: oasdiff" "ベースライン取得不能 — $OPENAPI_SPEC がベースラインに無い"
   fi
   rm -f "$TMP_BASE"
 elif [[ -n "$OPENAPI_SPEC" ]]; then
-  RESULTS+=("SKIP  contract: oasdiff (oasdiff 未インストール)")
+  record_skip "oasdiff" contract "contract: oasdiff" "oasdiff 未インストール"
 fi
 
 # Rust ライブラリの破壊的変更。cargo-semver-checks の導入自体が宣言
-# (ビルドを伴い重いため、入れたプロジェクトだけがコストを払う)
+# (ビルドを伴い重いため、入れたプロジェクトだけがコストを払う)。
+# --baseline-rev を指定しない既定動作は crates.io レジストリから公開済みの
+# ベースラインを取得しにいく — check.sh の「ネットワーク不使用」原則(oasdiff
+# 等で繰り返し明記)に反するため、oasdiff と同じく git 由来のベースラインへ
+# 差し替える(merge-base が解決できなければベースライン無しとして SKIP)
 if [[ -f Cargo.toml ]] && has cargo \
    && cargo semver-checks --version >/dev/null 2>&1 \
    && grep -q "^\[lib\]" Cargo.toml; then
-  run_stage contract "cargo-semver-checks" "-" "contract: cargo semver-checks" cargo semver-checks check-release
+  RUST_BASE_SHA="$(git merge-base HEAD "$HARNESS_OASDIFF_BASE" 2>/dev/null \
+    || git rev-parse HEAD 2>/dev/null)"
+  if [[ -n "$RUST_BASE_SHA" ]]; then
+    run_stage contract "cargo-semver-checks" "-" "contract: cargo semver-checks" \
+      cargo semver-checks check-release --baseline-rev "$RUST_BASE_SHA"
+  else
+    record_skip "cargo-semver-checks" contract "contract: cargo semver-checks" \
+      "ベースライン取得不能(git merge-base 解決不可)"
+  fi
 fi
 
 # ---------- 汎用フォールバック ----------
@@ -572,7 +608,7 @@ fi
 if [[ -f Makefile ]] && grep -qE "^check:" Makefile; then
   STACK_FOUND=1
   if [[ -n "${FEEDBACK_CHECK_RECURSION_GUARD:-}" ]]; then
-    RESULTS+=("SKIP  make check (再帰ガード — check.sh 起因のmake実行内のため)")
+    record_skip "make-check" test "make check" "再帰ガード — check.sh 起因のmake実行内のため"
   else
     # env 経由で make とその子孫にだけ伝える。check.sh 全体へ export すると
     # 直接ステージの子孫(テスト内で別プロジェクトを検証する等)まで誤スキップする
