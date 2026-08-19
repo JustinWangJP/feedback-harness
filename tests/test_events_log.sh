@@ -54,12 +54,23 @@ assert_contains "$(cat "$EVENTS")" '"file":"sub/code.py"' "file はルート相�
 run_post_edit 1
 assert_contains "$(tail -n 1 "$EVENTS")" '"result":"fail"' "失敗も記録される"
 
+# Codex の apply_patch は file_path ではなくパッチ本文を tool_input.command に渡す。
+# 実フックと同じく CLAUDE_PROJECT_DIR を設定して駆動する(他の呼び出しと同様。
+# フック由来の変数の汚染は run_tests.sh が一括して掃落とす契約)
+fake_exit 0
+printf '%s' '{"tool_name":"apply_patch","tool_input":{"command":"*** Begin Patch\n*** Update File: sub/code.py\n@@\n-old\n+new\n*** End Patch"}}' \
+  | (cd "$WORK/proj" && CLAUDE_PROJECT_DIR="$WORK/proj" bash "$WORK/fake/hooks/post_edit.sh") >/dev/null 2>&1
+assert_contains "$(tail -n 1 "$EVENTS")" '"file":"sub/code.py"' \
+  "Codex apply_patch の対象ファイルが記録される"
+assert_contains "$(tail -n 1 "$EVENTS")" '"result":"pass"' \
+  "Codex apply_patch でも即時チェックが実行される"
+
 # file が解決できない入力は記録しない
 BEFORE="$(wc -l <"$EVENTS" | tr -d ' ')"
 printf '{"tool_input": {}}' \
   | CLAUDE_PROJECT_DIR="$WORK/proj" bash "$WORK/fake/hooks/post_edit.sh" >/dev/null 2>&1
 AFTER="$(wc -l <"$EVENTS" | tr -d ' ')"
-assert_eq "$BEFORE" "$AFTER" "file_path が無いときは記録しない"
+assert_eq "$BEFORE" "$AFTER" "file_path とパッチ本文が無いときは記録しない"
 
 # --- on_stop: check.sh を実行したときだけ記録される ---
 run_stop 0

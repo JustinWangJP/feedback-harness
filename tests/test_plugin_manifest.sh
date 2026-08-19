@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
 # test_plugin_manifest.sh — プラグインのマニフェストと構成を検証する。
 #
-# claude CLI が無い環境でも動くよう、JSON の妥当性と参照先の実在は
-# python3 で自前に確認する(claude plugin validate は Step 6 で別途実行する)。
+# Claude / Codex の検証 CLI が無い環境でも動くよう、JSON の妥当性と
+# 参照先の実在は python3 で自前に確認する。
 set -u
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$HERE/assert.sh"
 REPO="$(cd "$HERE/.." && pwd)"
 
 # 1: JSON として妥当
-for f in .claude-plugin/plugin.json .claude-plugin/marketplace.json hooks/hooks.json; do
+for f in .claude-plugin/plugin.json .codex-plugin/plugin.json .claude-plugin/marketplace.json hooks/hooks.json; do
   if python3 -c "import json,sys; json.load(open(sys.argv[1]))" "$REPO/$f" 2>/dev/null; then
     :
   else
@@ -17,18 +17,43 @@ for f in .claude-plugin/plugin.json .claude-plugin/marketplace.json hooks/hooks.
   fi
 done
 
-# 2: プラグイン名とマーケットプレイス名
+# 2: Claude / Codex のプラグイン名・バージョンとマーケットプレイス名
 assert_eq "feedback-harness" \
   "$(python3 -c "import json;print(json.load(open('$REPO/.claude-plugin/plugin.json'))['name'])")" \
-  "プラグイン名"
+  "Claude プラグイン名"
+assert_eq "feedback-harness" \
+  "$(python3 -c "import json;print(json.load(open('$REPO/.codex-plugin/plugin.json'))['name'])")" \
+  "Codex プラグイン名"
 assert_eq "feedback-harness" \
   "$(python3 -c "import json;print(json.load(open('$REPO/.claude-plugin/marketplace.json'))['name'])")" \
   "マーケットプレイス名"
+assert_eq \
+  "$(python3 -c "import json;print(json.load(open('$REPO/.claude-plugin/plugin.json'))['version'])")" \
+  "$(python3 -c "import json;print(json.load(open('$REPO/.codex-plugin/plugin.json'))['version'])")" \
+  "Claude / Codex のプラグインバージョンが一致する"
+
+CODEX_MANIFEST_ERROR="$(python3 - "$REPO/.codex-plugin/plugin.json" <<'PY'
+import json
+import sys
+
+manifest = json.load(open(sys.argv[1]))
+errors = []
+if manifest.get("skills") != "./skills/":
+    errors.append("skills must point to ./skills/")
+interface = manifest.get("interface", {})
+for key in ("displayName", "shortDescription", "longDescription", "developerName", "category"):
+    if not interface.get(key):
+        errors.append(f"interface.{key} is required")
+print("; ".join(errors))
+PY
+)"
+assert_eq "" "$CODEX_MANIFEST_ERROR" "Codex マニフェストの必須フィールド"
 
 # 3: コンポーネントが規定の場所にある
 assert_file_exists "$REPO/skills/apply-feedback/SKILL.md" "apply-feedback"
 assert_file_exists "$REPO/skills/capture-feedback/SKILL.md" "capture-feedback"
 assert_file_exists "$REPO/skills/feedback-loop/SKILL.md" "feedback-loop"
+assert_file_exists "$REPO/.codex-plugin/plugin.json" "Codex plugin manifest"
 assert_file_exists "$REPO/agents/feedback-curator.md" "feedback-curator"
 assert_file_exists "$REPO/agents/harness-qa.md" "harness-qa"
 assert_file_absent "$REPO/.claude/skills" "旧 .claude/skills が残っていない"
@@ -106,6 +131,14 @@ def normalize(path):
 print(json.dumps(normalize(sys.argv[1]), sort_keys=True))
 PY
 )"
-assert_eq "$NORM_A" "$NORM_B" "開発用と配布用のフック定義が同じイベント構造(スクリプト・matcher・timeout)を指す"
+# 開発用 settings.json に hooks が無いのは、このリポジトリ自身がプラグイン導入へ
+# 移行した状態(enabledPlugins で自己ドッグフーディングする)。両方に定義を置くと
+# Stop のたびに check.sh が二重に走るため、移行後は dev 側を空にするのが正しい。
+# 比較対象が存在しない状態を「ドリフト」と呼ぶことはできないので、その場合は検証を飛ばす。
+if [[ "$NORM_A" == "{}" ]]; then
+  echo "    SKIP: 開発用フック定義なし(プラグイン導入で自己ドッグフーディング中)" >&2
+else
+  assert_eq "$NORM_A" "$NORM_B" "開発用と配布用のフック定義が同じイベント構造(スクリプト・matcher・timeout)を指す"
+fi
 
 assert_summary

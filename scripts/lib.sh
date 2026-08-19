@@ -23,7 +23,12 @@ has() {
 # 重大度しきい値(shellcheck の -S に渡す)。既定は warning。
 # style/info まで拾うと、導入初日のプロジェクトが既存コードのSC2086等で
 # 完了をブロックされ続けるため、既定では拾わない。
-# shellcheck disable=SC2034  # 読み込み側(check.sh / check_file.sh)で使う
+#
+# harness_load_config を呼ぶ全ての入口(check.sh / check_file.sh / audit.sh)は
+# ロード時に config 値でこの変数を上書きする。よってこの行は「lib.sh を読むが
+# harness_load_config を呼ばない」利用者(テストの一部など)向けの後方互換の
+# 既定値であり、config の実効値には影響しない。
+# shellcheck disable=SC2034  # 読み込み側(check.sh)で使う
 SHELLCHECK_SEVERITY="${FEEDBACK_SHELLCHECK_SEVERITY:-warning}"
 
 # harness_project_root [明示パス] — 検査対象・状態保存先のプロジェクトルートを解決する。
@@ -49,6 +54,97 @@ harness_project_root() {
     return 0
   fi
   pwd
+}
+
+# harness_load_config [ルート] — .feedback/config.yaml を読み、解決済みの値を
+# 環境へ載せる。優先順位(環境変数 > 検査 > スタック > 全体 > 既定値)の判断は
+# すべて harness_config.py が行い、ここは受け取るだけ。bash 側に既定値を
+# 置くと2箇所管理になりドリフトするため、既定値もローダーの出力に含まれる。
+# shellcheck disable=SC2034  # 読み込み側(check.sh / check_file.sh / audit.sh)で使う
+harness_load_config() {
+  local root="${1:-}"
+  [[ -n "$root" ]] || root="$(harness_project_root)"
+  local libdir="${BASH_SOURCE[0]%/*}"
+  local shell_out
+  if ! shell_out="$(python3 "$libdir/harness_config.py" --shell "$root" 2>/dev/null)"; then
+    # ローダー自体が起動できない(python3 不在等)。既定値で続行するが、
+    # FEEDBACK_CHECK_SKIP 等の環境変数による上書きは失われるため、
+    # 黙って挙動を変えず HARNESS_CONFIG_ERROR で可視化する(既存の
+    # 「config壊れているがFAILを立てて続行する」経路に乗せる)
+    HARNESS_CONFIG_ERROR="設定ローダー(harness_config.py)を起動できませんでした(python3 を確認してください)。既定値で続行します — FEEDBACK_CHECK_SKIP 等の環境変数による上書きは適用されません。"
+    HARNESS_CHECK_SEVERITY=""
+    HARNESS_EXCLUDE=""
+    HARNESS_LOG_TAIL_LINES=40
+    HARNESS_SHELLCHECK_MIN_SEVERITY=warning
+    HARNESS_VULTURE_MIN_CONFIDENCE=80
+    HARNESS_OASDIFF_BASE=main
+    HARNESS_AUDIT_INTERVAL_DAYS=7
+    HARNESS_AUDIT_NPM_LEVEL=high
+    HARNESS_FEEDBACK_OPEN_THRESHOLD=3
+  else
+    eval "$shell_out"
+  fi
+  SHELLCHECK_SEVERITY="$HARNESS_SHELLCHECK_MIN_SEVERITY"
+}
+
+# harness_check_severity <検査ID> <呼び出し側の既定> — 実効判定(fail/warn/skip)。
+# config が触っていない検査は、呼び出し側が宣言ゲートで決めた既定をそのまま返す。
+harness_check_severity() {
+  local id="$1" default="$2" entry
+  for entry in ${HARNESS_CHECK_SEVERITY:-}; do
+    if [[ "${entry%%:*}" == "$id" ]]; then
+      entry="${entry#*:}"
+      printf '%s\n' "${entry%%:*}"
+      return
+    fi
+  done
+  printf '%s\n' "$default"
+}
+
+# harness_check_source <検査ID> — 判定がどこで決まったか(--list-checks 用)。
+harness_check_source() {
+  local id="$1" entry
+  for entry in ${HARNESS_CHECK_SEVERITY:-}; do
+    if [[ "${entry%%:*}" == "$id" ]]; then
+      printf '%s\n' "${entry##*:}"
+      return
+    fi
+  done
+  printf '%s\n' "既定"
+}
+
+# harness_excluded <パス> — config の exclude に一致するか。
+# glob の照合は bash の == を使う(**/ を含むパターンも extglob 無しで
+# 前方一致的に効かせるため、* が / を跨ぐ bash の既定挙動をそのまま利用する)
+#
+# check.sh(全件走査)と check_file.sh(単発ファイル)の両方が同じ exclude
+# 判定を必要とするため、ここに集約する(片方だけ直して他方が古いまま残る
+# ドリフトを避ける — ファイル冒頭のコメント参照)。
+harness_excluded() {
+  local path="$1" pattern
+  [[ -n "${HARNESS_EXCLUDE:-}" ]] || return 1
+  while IFS= read -r pattern; do
+    [[ -n "$pattern" ]] || continue
+    # shellcheck disable=SC2053  # 右辺は glob として評価させたいので引用しない
+    [[ "$path" == $pattern ]] && return 0
+  done <<< "$HARNESS_EXCLUDE"
+  return 1
+}
+
+# harness_relpath <パス> <ルート> — ルート相対パスへ正規化(先頭の ./ や / を除く)。
+# check.sh の list_files は git ls-files / find 由来で自然にこの形になるが、
+# check_file.sh が受け取るのは Hooks からの絶対パスなので、harness_excluded に
+# 渡す前に同じ形へ揃える必要がある。
+harness_relpath() {
+  local path="$1" root="$2" abs
+  case "$path" in
+    /*) abs="$path" ;;
+    *) abs="$PWD/$path" ;;
+  esac
+  case "$abs" in
+    "$root"/*) printf '%s\n' "${abs#"$root"/}" ;;
+    *) printf '%s\n' "${path#./}" ;;
+  esac
 }
 
 # harness_tree_changed <ルート> <スタンプファイル> — 前回の成功検査以降に
@@ -82,6 +178,20 @@ harness_tree_changed() {
   [[ -n "$found" ]]
 }
 
+# harness_json_escape <文字列> — JSON文字列リテラルの中身として安全な形にする。
+# バックスラッシュ・二重引用符・改行/タブだけを潰す最小実装(events.jsonl に
+# 載る値はファイルパスと固定ラベルのみのため、この範囲で足りる)。
+# エスケープを怠ると、該当行を load_events() が JSON として読めず黙って
+# 捨てる(パスに引用符やバックスラッシュを含むだけで計測から消える)。
+harness_json_escape() {
+  local s="$1"
+  s="${s//\\/\\\\}"
+  s="${s//\"/\\\"}"
+  s="${s//$'\n'/\\n}"
+  s="${s//$'\t'/\\t}"
+  printf '%s' "$s"
+}
+
 # harness_log_event <ルート> <hook> <result> [ファイル] — フック合否を
 # .feedback/events.jsonl に1行追記する(stats/report の原料。ローカル状態で共有しない)。
 #
@@ -99,7 +209,7 @@ harness_log_event() {
   if [[ -n "$file" ]]; then
     rel="${file#"$root"/}"
     printf '{"ts":"%s","hook":"%s","file":"%s","result":"%s"}\n' \
-      "$ts" "$hook" "$rel" "$result" >>"$ev" 2>/dev/null || return 0
+      "$ts" "$hook" "$(harness_json_escape "$rel")" "$result" >>"$ev" 2>/dev/null || return 0
   else
     printf '{"ts":"%s","hook":"%s","result":"%s"}\n' \
       "$ts" "$hook" "$result" >>"$ev" 2>/dev/null || return 0
@@ -126,7 +236,7 @@ harness_log_warn() {
   local ts
   ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)" || return 0
   printf '{"ts":"%s","hook":"stop","result":"warn","check":"%s"}\n' \
-    "$ts" "$label" >>"$ev" 2>/dev/null || return 0
+    "$ts" "$(harness_json_escape "$label")" >>"$ev" 2>/dev/null || return 0
   return 0
 }
 

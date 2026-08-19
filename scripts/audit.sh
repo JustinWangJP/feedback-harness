@@ -19,6 +19,7 @@ LIBDIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(harness_project_root "${1:-}")" \
   || { echo "ERROR: ディレクトリが見つかりません: ${1:-}"; exit 2; }
 cd "$ROOT" || { echo "ERROR: ディレクトリへ移動できません: $ROOT"; exit 2; }
+harness_load_config "$ROOT"
 
 RESULTS=()
 FAILED=0
@@ -60,7 +61,7 @@ fi
 # 脆弱性ゼロのプロジェクトが「脆弱性あり」と誤報告されるため、npm 以外の
 # lockfile は理由付き SKIP に留める(check.sh の npm ls を npm 限定にしたのと同じ判断)
 if [[ -f package-lock.json ]]; then
-  run_audit "npm" "node: npm audit" npm audit --audit-level=high
+  run_audit "npm" "node: npm audit" npm audit "--audit-level=$HARNESS_AUDIT_NPM_LEVEL"
 elif [[ -f pnpm-lock.yaml || -f yarn.lock ]]; then
   RESULTS+=("SKIP  node: npm audit (npm 以外の lockfile — pnpm audit / yarn npm audit を直接実行してください)")
 fi

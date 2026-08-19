@@ -1,0 +1,37 @@
+{
+  "name": "feedback-harness",
+  "version": "0.5.0",
+  "description": "Run project checks through Codex lifecycle hooks and carry human feedback into future sessions.",
+  "author": {
+    "name": "JustinWangJP",
+    "url": "https://github.com/JustinWangJP"
+  },
+  "homepage": "https://github.com/JustinWangJP/feedback-harness",
+  "repository": "https://github.com/JustinWangJP/feedback-harness",
+  "keywords": [
+    "feedback",
+    "hooks",
+    "lint",
+    "testing",
+    "code-review"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Feedback Harness",
+    "shortDescription": "Checks edits and preserves review feedback.",
+    "longDescription": "Runs focused checks after edits, runs the full project check before a turn completes, and provides skills for applying and recording human feedback.",
+    "developerName": "JustinWangJP",
+    "category": "Developer Tools",
+    "capabilities": [
+      "Read",
+      "Write"
+    ],
+    "websiteURL": "https://github.com/JustinWangJP/feedback-harness",
+    "defaultPrompt": [
+      "Apply past feedback before editing this project.",
+      "Run the feedback loop and summarize open items.",
+      "Check this project with Feedback Harness."
+    ],
+    "brandColor": "#2563EB"
+  }
+}

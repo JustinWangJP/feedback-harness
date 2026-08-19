@@ -24,9 +24,23 @@ assert_file_exists "$WORK/target/scripts/feedback_log.py" "feedback_log.py"
 # stats/report が「bash scripts/audit.sh の実行を推奨」と案内するため、
 # 配り漏れると案内先が存在しないコマンドになる
 assert_file_exists "$WORK/target/scripts/audit.sh" "audit.sh"
+# harness_config.py は全スクリプトが config(.feedback/config.yaml)を読むための
+# 唯一のパーサ。欠けると config が効かないまま導入先が動く
+assert_file_exists "$WORK/target/scripts/harness_config.py" "harness_config.py"
 assert_file_exists "$WORK/target/AGENTS.md" "AGENTS.md"
 assert_file_exists "$WORK/target/CLAUDE.md" "CLAUDE.md"
 assert_file_exists "$WORK/target/.feedback/rules.md" "rules.md"
+# config の雛形。config.yaml 自体は自動生成しない(置いただけで「設定した」ように
+# 見えないため)ため、利用者はこの雛形から始める
+assert_file_exists "$WORK/target/.feedback/config.example.yaml" "config.example.yaml"
+assert_eq "1" "$(grep -c '<!-- feedback-harness:pointer:start -->' "$WORK/target/CLAUDE.md")" \
+  "CLAUDE.md に管理開始マーカーが1つある"
+assert_eq "1" "$(grep -c '<!-- feedback-harness:pointer:end -->' "$WORK/target/CLAUDE.md")" \
+  "CLAUDE.md に管理終了マーカーが1つある"
+assert_eq "1" "$(grep -c '<!-- feedback-harness:pointer:start -->' "$WORK/target/AGENTS.md")" \
+  "AGENTS.md に管理開始マーカーが1つある"
+assert_eq "1" "$(grep -c '<!-- feedback-harness:pointer:end -->' "$WORK/target/AGENTS.md")" \
+  "AGENTS.md に管理終了マーカーが1つある"
 
 # プラグインが担う領域はコピーしない
 assert_file_absent "$WORK/target/.claude/skills" ".claude/skills をコピーしない"
@@ -37,19 +51,98 @@ assert_file_absent "$WORK/target/scripts/hooks" "hooks ラッパーをコピー�
 # 実行権限
 if [[ -x "$WORK/target/scripts/check.sh" ]]; then :; else fail "check.sh に実行権限がない"; fi
 
-# ベンダリングした check.sh が対象プロジェクトで動く
+# ベンダリングした check.sh が対象プロジェクトで exit 0 になる。
+# ルートに README.md を置く(一般的な導入先と同じ状態)。「0か1なら可」の緩い
+# 判定にしていた頃、配布物の相対リンク切れが md-links FAIL として見逃されて
+# いた — docs/ は配布対象外のため、scripts/README.md から docs/ への
+# リンクを足すと必ず壊れる(2026-08-18 のレビューで発見)
+printf '# Target README\n' > "$WORK/target/README.md"
 ( cd "$WORK/target" && bash scripts/check.sh >/dev/null 2>&1 )
 RC=$?
-if [[ $RC -ne 0 && $RC -ne 1 ]]; then
-  fail "ベンダリングした check.sh が異常終了した (exit=$RC)"
+if [[ "$RC" != "0" ]]; then
+  fail "ベンダリングした check.sh が exit 0 にならない (exit=$RC) — 配布物のリンク切れ等の可能性"
 fi
 
-# 冪等性: 2回目でポインタが重複しない
+# 冪等性と更新: 2回目で管理ブロックを置換し、利用者の記述を保持する
 BEFORE_C="$(grep -c 'ハーネス: フィードバックループ' "$WORK/target/CLAUDE.md")"
 BEFORE_A="$(grep -c 'フィードバックハーネス' "$WORK/target/AGENTS.md")"
+printf '\n## USER CLAUDE CONTENT\nkeep me\n' >> "$WORK/target/CLAUDE.md"
+printf '\n## USER AGENTS CONTENT\nkeep me\n' >> "$WORK/target/AGENTS.md"
+python3 - "$WORK/target/CLAUDE.md" "$WORK/target/AGENTS.md" <<'PY'
+import sys
+from pathlib import Path
+
+claude = Path(sys.argv[1])
+agents = Path(sys.argv[2])
+claude.write_text(
+    claude.read_text(encoding="utf-8").replace(
+        "第三者マーケットプレイスは自動更新が既定で無効",
+        "OLD CLAUDE POINTER",
+    ),
+    encoding="utf-8",
+)
+agents.write_text(
+    agents.read_text(encoding="utf-8").replace(
+        "Codex Plugin の Hooks が有効かつ信頼済みなら",
+        "OLD AGENTS POINTER",
+    ),
+    encoding="utf-8",
+)
+PY
 bash "$REPO/scripts/init.sh" "$WORK/target" >/dev/null 2>&1
 assert_eq "$BEFORE_C" "$(grep -c 'ハーネス: フィードバックループ' "$WORK/target/CLAUDE.md")" "CLAUDE.md のポインタが重複しない"
 assert_eq "$BEFORE_A" "$(grep -c 'フィードバックハーネス' "$WORK/target/AGENTS.md")" "AGENTS.md のポインタが重複しない"
+assert_eq "0" "$(grep -c 'OLD CLAUDE POINTER' "$WORK/target/CLAUDE.md")" "CLAUDE.md の旧管理内容を更新する"
+assert_eq "0" "$(grep -c 'OLD AGENTS POINTER' "$WORK/target/AGENTS.md")" "AGENTS.md の旧管理内容を更新する"
+assert_contains "$(cat "$WORK/target/CLAUDE.md")" "第三者マーケットプレイスは自動更新が既定で無効" \
+  "CLAUDE.md に最新ポインタを反映する"
+assert_contains "$(cat "$WORK/target/AGENTS.md")" "Codex Plugin の Hooks が有効かつ信頼済みなら" \
+  "AGENTS.md に最新ポインタを反映する"
+assert_contains "$(cat "$WORK/target/CLAUDE.md")" "USER CLAUDE CONTENT" "CLAUDE.md の利用者記述を保持する"
+assert_contains "$(cat "$WORK/target/AGENTS.md")" "USER AGENTS CONTENT" "AGENTS.md の利用者記述を保持する"
+
+# マーカー導入前の旧ポインタも、既知の末尾までに限定して安全に移行する
+mkdir -p "$WORK/legacy"
+( cd "$WORK/legacy" && git init -q . )
+cat > "$WORK/legacy/CLAUDE.md" <<'EOF'
+# Existing Claude Instructions
+
+## ハーネス: フィードバックループ
+
+OLD LEGACY CLAUDE POINTER
+
+**ハーネス本体の更新:** 古い説明
+
+## USER SECTION AFTER CLAUDE POINTER
+
+keep claude tail
+EOF
+cat > "$WORK/legacy/AGENTS.md" <<'EOF'
+# Existing Agent Instructions
+
+## フィードバックハーネス — エージェント作業規約（Codex / 汎用エージェント向け）
+
+OLD LEGACY AGENTS POINTER
+
+今回の明示的な指示を優先し、矛盾があったことをユーザーに一言伝える。
+
+## USER SECTION AFTER AGENTS POINTER
+
+keep agents tail
+EOF
+bash "$REPO/scripts/init.sh" "$WORK/legacy" >/dev/null 2>&1
+assert_eq "0" "$(grep -c 'OLD LEGACY CLAUDE POINTER' "$WORK/legacy/CLAUDE.md")" \
+  "CLAUDE.md の旧ポインタを移行する"
+assert_eq "0" "$(grep -c 'OLD LEGACY AGENTS POINTER' "$WORK/legacy/AGENTS.md")" \
+  "AGENTS.md の旧ポインタを移行する"
+assert_contains "$(cat "$WORK/legacy/CLAUDE.md")" "USER SECTION AFTER CLAUDE POINTER" \
+  "CLAUDE.md 旧ポインタ後の利用者記述を保持する"
+assert_contains "$(cat "$WORK/legacy/AGENTS.md")" "USER SECTION AFTER AGENTS POINTER" \
+  "AGENTS.md 旧ポインタ後の利用者記述を保持する"
+assert_eq "1" "$(grep -c '<!-- feedback-harness:pointer:start -->' "$WORK/legacy/CLAUDE.md")" \
+  "CLAUDE.md の旧ポインタを管理ブロック化する"
+assert_eq "1" "$(grep -c '<!-- feedback-harness:pointer:start -->' "$WORK/legacy/AGENTS.md")" \
+  "AGENTS.md の旧ポインタを管理ブロック化する"
 
 # 既存 rules.md を上書きしない
 printf 'MY OWN RULES\n' > "$WORK/target/.feedback/rules.md"

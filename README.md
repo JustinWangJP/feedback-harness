@@ -1,6 +1,6 @@
 # feedback-harness
 
-Claude Code / Codex 両対応のフィードバックハーネス。2つのループを提供する:
+Claude Code と Codex の両方で利用できるフィードバックハーネスです。次の2つのループを提供します。
 
 1. **自動フィードバックループ** — lint / typecheck / test / build の結果をエージェントに自動で返し、自己修正させる
 2. **人間フィードバックの蓄積** — レビュー指摘や有効だった進め方を記録・一般化し、次回以降のセッションに反映する
@@ -9,10 +9,11 @@ Claude Code / Codex 両対応のフィードバックハーネス。2つのル�
 
 | 環境 | 自動チェック | ルール反映 |
 |------|-------------|-----------|
-| Claude Code(プラグイン導入) | Hooks(プラグインの `hooks/hooks.json` が提供): 編集直後に `check_file.sh`、応答完了前に `check.sh`(前回の成功検査以降に変更があるときだけ)。失敗時はexit 2でエージェントに差し戻し。設定ファイル(JSON/YAML)の構文も横断的に検査し、宣言していない検査の指摘は WARN(非ブロッキング)として `events.jsonl` に記録される。秘密情報・内部リンク・依存整合性・CI設定も検査する(ツール未導入は SKIP。ハーネスがツールを勝手に導入することはない) | `apply-feedback` スキル + CLAUDE.md ポインタ(プラグインが提供) |
-| Codex ほか(`scripts/init.sh` で導入) | AGENTS.md の規約: 変更ごとに `check_file.sh`、完了前に `check.sh` をエージェント自身が実行 | AGENTS.md の規約で `.feedback/rules.md` を必読化 |
+| Claude Code（プラグイン導入） | プラグインの `hooks/hooks.json` が Hooks を提供する。編集直後に `check_file.sh`、応答完了前に `check.sh` を実行する（後者は、前回の成功検査以降に変更がある場合のみ）。失敗時は exit code 2 でエージェントに差し戻す。設定ファイル（JSON/YAML）の構文、秘密情報、内部リンク、依存関係、CI 設定も検査する。宣言していない検査の指摘は WARN（非ブロッキング）として `events.jsonl` に記録する。未導入のツールは SKIP とし、ハーネスが自動で導入することはない | `apply-feedback` スキル + CLAUDE.md ポインタ（プラグインが提供） |
+| Codex（プラグイン導入） | 同じ `hooks/hooks.json` を Codex Hooks として読み込む。`apply_patch` のパッチ本文から対象ファイルを抽出して即時チェックし、Stop 前にフルチェックする | `apply-feedback` スキル + AGENTS.md の規約 |
+| Codex IDE 拡張・汎用エージェント（`scripts/init.sh` で導入） | AGENTS.md の規約: 変更ごとに `check_file.sh`、完了前に `check.sh` をエージェント自身が実行 | AGENTS.md の規約で `.feedback/rules.md` を必読化 |
 
-スクリプトとフィードバック蓄積(`.feedback/`)は両環境で完全共有。環境固有なのはエントリポイント(CLAUDE.md / AGENTS.md)と、Hooksの提供元(プラグイン、または `init.sh` 導入時はAGENTS.mdの手動規約)だけ。このリポジトリ自身の `.claude/settings.json` は開発用のHooks設定であり、導入先には配布されない(「構成」節を参照)。
+スクリプトとフィードバックの保存先（`.feedback/`）は各環境で共通です。Claude Code と Codex app / CLI はプラグインの Hooks を自動実行し、Codex IDE 拡張や汎用エージェントでは `init.sh` が展開する AGENTS.md の規約に従ってエージェントが実行します。Codex では初回に `/hooks` で内容を確認して信頼する必要があります。このリポジトリの `.claude/settings.json` は開発時の Claude Code 用設定であり、導入先には配布されません。
 
 ## 機能一覧
 
@@ -62,14 +63,16 @@ Claude Code / Codex 両対応のフィードバックハーネス。2つのル�
 
 ```
 .claude-plugin/
-  plugin.json       # プラグイン定義
-  marketplace.json  # カタログ(このリポジトリ自身を配布する)
+  plugin.json       # Claude Code プラグイン定義
+  marketplace.json  # Claude Code / Codex が読めるレガシーカタログ
+.codex-plugin/
+  plugin.json       # Codex プラグイン定義
 skills/             # feedback-loop (オーケストレーター) / capture-feedback / apply-feedback
 agents/             # feedback-curator (ルール昇華) / harness-qa (整合性検証)
 commands/
-  init.md           # /feedback-harness:init — Codex 向け資産の展開
+  init.md           # /feedback-harness:init — Hooks 非対応環境向け資産の展開
 hooks/
-  hooks.json        # 配布用 Hooks 定義 (${CLAUDE_PLUGIN_ROOT} 基準)
+  hooks.json        # Claude Code / Codex 共通の配布用 Hooks 定義
 scripts/
   check.sh          # スタック自動検出 (Python/Node/Go/Rust/Java/Shell/Make) → 8ステージ + 横断チェック
   check_file.sh     # 単一ファイルの高速チェック (拡張子ベース)
@@ -78,11 +81,13 @@ scripts/
                     #   harness_validate_json|yaml / harness_check_md_links / harness_log_event|warn)
   feedback_log.py   # フィードバック記録CLI (add / list / search / promote / merge / close /
                     #   retire / rules / stats / report)
-  init.sh           # 導入スクリプト (Codex 向け資産の展開)
-  hooks/            # Claude Code Hooks ラッパー (SessionStart / PostToolUse / Stop)
+  init.sh           # 導入スクリプト (Hooks 非対応環境向け資産の展開)
+  hooks/            # Claude Code / Codex Hooks ラッパー (SessionStart / PostToolUse / Stop)
 .feedback/
   rules.md          # 一般化された恒久ルール (エージェント必読・失敗由来/成功由来の2セクション)
   rules.template.md # rules.md のシード (導入時・再生成時に使う雛形)
+  config.yaml       # プロジェクト設定 (任意・commitして共有。config.example.yaml から始める)
+  config.example.yaml # config.yaml の雛形 (全項目をコメント付きで並べたもの)
   log/              # 生のフィードバックエントリ (frontmatter付きMarkdown)
   .last-check       # Stopフックの検査スタンプ (mtime比較用のローカル状態・gitignore対象)
   .last-retro       # 振り返りの基点 (report --mark が更新・gitignore対象)
@@ -91,14 +96,18 @@ scripts/
 package.json        # 検査ツール(secretlint 等)を npx --no-install で解決するためだけの宣言
 tests/              # bash テスト (make check → check.sh から自動実行される)
 docs/
-  pointer_claude.md # 導入先の CLAUDE.md へ追記する断片
-  pointer_agents.md # 導入先の AGENTS.md へ追記する断片
+  pointer_claude.md # 導入先の CLAUDE.md で管理するポインタ断片
+  pointer_agents.md # 導入先の AGENTS.md で管理するポインタ断片
   superpowers/      # 設計書 (specs/) と実装計画 (plans/)
 .claude/
-  settings.json     # このリポジトリ自身の開発用 Hooks (配布対象外)
+  settings.json     # このリポジトリでプラグインを有効化する開発用設定 (配布対象外)
 ```
 
 ハーネス自身も `check.sh` の検査対象になる(`*.sh` と `*.py` を検出)。
+
+### ドキュメントの位置づけ
+
+現在の利用方法は、この README、[設定ガイド](docs/configuration.md)、[スクリプト仕様](scripts/README.md)を参照してください。日付付きの `docs/proposals/` と `docs/superpowers/` は、提案時・設計時の判断を残す履歴資料です。現在の仕様と異なる場合は、前述の3文書と実装を優先します。文書の一覧は[ドキュメント案内](docs/README.md)にまとめています。
 
 ## 他プロジェクトへの導入
 
@@ -109,7 +118,7 @@ docs/
 /plugin install feedback-harness@feedback-harness
 ```
 
-導入先に置かれるのは `.feedback/`(蓄積データ)だけ。スクリプト・スキル・エージェント・Hooks はプラグイン側にあり、マーケットプレイスの自動更新で追従する。
+導入先に置かれるのは `.feedback/`(蓄積データ)だけ。スクリプト・スキル・エージェント・Hooks はプラグイン側にある。第三者マーケットプレイスの自動更新は既定で無効のため、利用者が有効化した場合にのみ起動時の更新へ追従する。
 
 チーム全員に配りたい場合は、導入先の `.claude/settings.json` に次を書いておくと、フォルダを信頼した時点でインストールを促される:
 
@@ -117,13 +126,22 @@ docs/
 {
   "extraKnownMarketplaces": {
     "feedback-harness": {
-      "source": { "source": "github", "repo": "JustinWangJP/feedback-harness" }
+      "source": { "source": "github", "repo": "JustinWangJP/feedback-harness" },
+      "autoUpdate": true
     }
   }
 }
 ```
 
-### Codex や他の汎用エージェントも使う場合
+### Codex app / CLI で使う場合
+
+```bash
+codex plugin marketplace add JustinWangJP/feedback-harness
+```
+
+Codex を起動して `/plugins` を開き、`feedback-harness` をインストールして有効化する。新しいセッションで `/hooks` を開き、`SessionStart` / `PostToolUse` / `Stop` の各 Hook を確認して信頼する。Codex IDE 拡張はプラグイン非対応のため、次の `init.sh` 方式を使う。
+
+### Codex IDE 拡張や他の汎用エージェントで使う場合
 
 Claude Code から:
 
@@ -139,36 +157,38 @@ bash feedback-harness/scripts/init.sh /path/to/your-project
 cd /path/to/your-project && bash scripts/check.sh   # スタック検出の確認
 ```
 
-`scripts/` と `AGENTS.md` が導入先に展開される。`CLAUDE.md` / `AGENTS.md` が既存なら `docs/pointer_*.md` の断片を追記する(重複追記はしない)。`.feedback/rules.md` は空のテンプレートから始まる。
+`scripts/` と `AGENTS.md` が導入先に展開される。`CLAUDE.md` / `AGENTS.md` のポインタは管理マーカー付きで追加され、再実行時は管理マーカー内だけを最新版へ置換する。マーカー外の利用者記述は保持する。`.feedback/rules.md` は空のテンプレートから始まる。
 
 ### 導入形態ごとの配布物
 
 | 資産 | プラグイン | `init.sh` |
 |---|---|---|
-| `scripts/check.sh` `check_file.sh` `audit.sh` `lib.sh` `feedback_log.py` | プラグイン側に置かれ `${CLAUDE_PLUGIN_ROOT}` 経由で実行 | 導入先の `scripts/` に実体をコピー |
+| `scripts/check.sh` `check_file.sh` `audit.sh` `lib.sh` `feedback_log.py` | プラグイン側に置かれ、Codex は `PLUGIN_ROOT`（Hooks では互換変数 `CLAUDE_PLUGIN_ROOT` も設定）、Claude Code は `CLAUDE_PLUGIN_ROOT` 経由で実行 | 導入先の `scripts/` に実体をコピー |
 | Hooks(`hooks.json`) | ○ 自動起動 | ✗(AGENTS.md の規約が代替) |
-| skills / agents / commands | ○ | ✗(Claude Code 専用のため) |
+| skills | ○（Claude Code / Codex） | ✗（AGENTS.md の規約が代替） |
+| agents / commands | Claude Code のみ | ✗ |
 | `scripts/hooks/*`・`init.sh` 自身 | ○ | ✗ |
 | `.feedback/`(蓄積データ) | SessionStart フックが初回シード | `init.sh` がシード |
-| `CLAUDE.md` / `AGENTS.md` ポインタ | CLAUDE.md ポインタのみ | 両方(既存なら追記・重複しない) |
+| `CLAUDE.md` / `AGENTS.md` ポインタ | CLAUDE.md ポインタのみ | 両方（管理マーカー内を再実行時に更新・マーカー外は保持） |
 
 ### 更新
 
 | 導入形態 | 更新方法 |
 |---------|---------|
-| プラグイン | 自動(Claude Code がマーケットプレイスを `git pull` する) |
-| `init.sh` でベンダリングした `scripts/` | `init.sh` を再実行する(冪等)。**新しいスクリプトが増えた場合も再実行で追従する** |
+| Claude Code プラグイン | 第三者マーケットプレイスは自動更新が既定で無効。`/plugin` → `Marketplaces` で `Enable auto-update` を選ぶか、`/plugin marketplace update feedback-harness` と `/plugin update feedback-harness@feedback-harness` を実行する |
+| Codex プラグイン | `/plugins` のプラグイン管理から更新する |
+| `init.sh` でベンダリングした `scripts/` | `init.sh` を再実行する(冪等)。スクリプトに加え、CLAUDE.md / AGENTS.md の管理マーカー内も置換更新する。マーカー外の利用者記述は保持する |
 
-## Skills / Agents / Commands の使い方(プラグイン導入時)
+## Skills / Agents / Commands の使い方（プラグイン導入時）
 
-マーケットプレイスから導入すると、スクリプトに加えて **3つの Skill・2つの Agent・1つの Command** が使えるようになる。これらは Claude Code 専用で、`init.sh` 導入(Codex 等)には含まれない — その環境では `AGENTS.md` の規約が代替になる。
+マーケットプレイスから導入すると、Claude Code と Codex の両方で **3つの Skill** が使える。**2つの Agent と1つの Command は Claude Code 専用**で、Codex の `feedback-loop` スキルは Codex のサブエージェント機能を使う。`init.sh` 導入にはこれらを含めず、AGENTS.md の規約が代替になる。
 
 ### 呼び出され方の違い
 
 | 種別 | 起動のしかた | 誰が起動するか |
 |---|---|---|
-| **Skill** | 依頼の文面に反応して**自動起動**する。明示したいときは名前を出して頼む(例: 「apply-feedback スキルでルールを反映して」) | Claude 自身 |
-| **Agent** | `feedback-loop` スキルが内部で `Agent` ツール経由で起動する | スキル(**直接呼ぶ必要はない**) |
+| **Skill** | 依頼の文面に反応して**自動起動**する。明示したいときは名前を出して頼む(例: 「apply-feedback スキルでルールを反映して」) | Claude / Codex 自身 |
+| **Agent** | `feedback-loop` スキルが環境のサブエージェント機能で起動する（Claude Code の配布 Agent 定義も利用） | スキル(**直接呼ぶ必要はない**) |
 | **Command** | `/feedback-harness:init` と入力する | ユーザー |
 
 **普段は何も意識しなくてよい。** 導入先の `CLAUDE.md` に置かれるポインタが「実装前は apply-feedback」「指摘を受けたら capture-feedback」と促すため、通常の会話の中で自動的に起動する。以下は「意図して動かしたいとき」の手順。
@@ -227,9 +247,9 @@ cd /path/to/your-project && bash scripts/check.sh   # スタック検出の確�
   → 昇華結果と rules.md の差分が提示される(採否はあなたが決める)
 ```
 
-### Agents(スキル経由で起動される)
+### Agents（スキル経由で起動される）
 
-直接呼ぶ必要はないが、何が動いているかを知っておくと結果を読みやすい。
+直接呼ぶ必要はないが、何が動いているかを知っておくと結果を読みやすい。Codex では同名の Markdown を作業原則として読み、Codex のサブエージェントへ渡す。
 
 | Agent | 起動元 | 役割 | 出力 |
 |---|---|---|---|
@@ -256,7 +276,7 @@ Codex や他の汎用エージェントと**併用する**とき、現在のプ�
 
 ## 使い方
 
-### 日常の開発(Claude Code)
+### 日常の開発（Claude Code / Codex Plugin）
 
 自動で走るため、通常は**何も実行しなくてよい**。ファイルを編集すれば `check_file.sh` が、応答を終えようとすれば `check.sh` が動く。失敗は自動でエージェントに差し戻される。
 
@@ -281,7 +301,7 @@ python3 scripts/feedback_log.py add --category workflow --source agent \
   --summary "設計を固めてから実装すると手戻りが無い"
 ```
 
-Claude Code では `capture-feedback` スキルが同じことを行うため、コマンドを直接叩く必要はない。
+Claude Code / Codex Plugin では `capture-feedback` スキルが同じことを行うため、コマンドを直接叩く必要はない。
 
 ### 溜まった指摘を整理する
 
@@ -303,12 +323,26 @@ python3 scripts/feedback_log.py report --last --mark       # 振り返り後に�
 
 ### 環境変数
 
+環境変数は**config より優先される**一時上書き(CI や調査中のその場限りの調整用)。commit してチームで共有する設定は設定ファイルに書く。
+
 | 変数 | 既定 | 効果 |
 |---|---|---|
 | `FEEDBACK_CHECK_SKIP` | (空) | 空白区切りでステージを除外(`lint typecheck test build format security docs contract`) |
 | `FEEDBACK_SHELLCHECK_SEVERITY` | `warning` | shellcheck の重大度しきい値。`style` で厳しくする |
 | `FEEDBACK_CONTRACT_BASE` | `main` | API 契約差分のベースラインブランチ |
-| `CLAUDE_PROJECT_DIR` | (自動) | 検査対象・状態保存先のルート。フックが設定する |
+| `CLAUDE_PROJECT_DIR` | (自動) | Claude Code が設定する検査対象ルート。Codex では Hook 実行時のカレントディレクトリから解決する |
+
+### 設定ファイル
+
+`.feedback/config.yaml` にプロジェクトの設定を書ける(commit して共有)。ステージの skip / FAIL・WARN の切替、検査対象の除外(`exclude`)、ログ行数、ツールの閾値、監査間隔等を環境変数なしで調整できる。書かなかった項目はすべて既定値。
+
+```bash
+cp .feedback/config.example.yaml .feedback/config.yaml   # 雛形から始める
+bash scripts/check.sh --list-checks           # 検査ID・実効判定・「出所」を一覧（検査は実行しない）
+bash scripts/check.sh --list-checks --json    # 同じ内容を機械可読な JSON で出力
+```
+
+優先順位は 環境変数 > 検査単位 > スタック単位 > 全体 > 既定値。書き方と全項目は[設定ガイド](docs/configuration.md)を参照。
 
 ## フィードバック運用フロー
 
@@ -337,6 +371,6 @@ python3 scripts/feedback_log.py report --last --mark       # 振り返り後に�
 
 記録は promote を待たずにその時点から次の作業に効く。「溜めてから一括で昇華する」設計にすると、昇華までの間に同じ指摘が再発する。
 
-測定は Flywheel の「衡量变化」に相当する。ダッシュボードは作らない — `stats` は要求時のテキスト出力で、数字は `report` の「数字」セクションにだけ現れる。`events.jsonl`(フック合否)と `.last-retro`(振り返り基点)はマシンローカルの状態であり、git で共有しない。
+測定は Feedback Flywheel における「変化の測定」に相当する。ダッシュボードは作らない — `stats` は要求時にテキストを出力し、数値は `report` の「数字」セクションにだけ表示する。`events.jsonl`（フックの成否）と `.last-retro`（振り返りの基点）は端末内だけで使う状態ファイルであり、Git では共有しない。
 
-昇華先を rules.md に一本化しないのは、信号の種類ごとに直すべき制品が違うため — 知識の欠落はプライミング文書(CLAUDE.md)で埋め、機械的に検出できる失敗は散文のルールより lint・テストにした方が強い護欄になる(参考: [Feedback Flywheel](docs/references/fowler-feedback-flywheel-translation.md))。
+反映先を rules.md に一本化しないのは、シグナルの種類によって改善すべき共有成果物が異なるためです。知識の不足は前提情報を与える文書（CLAUDE.md）で補い、機械的に検出できる失敗は lint やテストへ組み込む方が、文章だけのルールより確実な再発防止策になります（参考: [Feedback Flywheel](docs/references/fowler-feedback-flywheel-translation.md)）。

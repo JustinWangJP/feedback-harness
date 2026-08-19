@@ -16,11 +16,32 @@ LIBDIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib.sh
 . "$LIBDIR/lib.sh"
 
+# --list-checks: 検査を実行せず、実効設定(判定と出所)を一覧する。
+# 3層にした以上「なぜこの判定なのか」を見る手段が無いと調査不能になる。
+# 出力の左端がそのまま config のキーになる
+LIST_MODE=0
+LIST_JSON=0
+ARGS=()
+for arg in "$@"; do
+  case "$arg" in
+    --list-checks) LIST_MODE=1 ;;
+    --json) LIST_JSON=1 ;;
+    *) ARGS+=("$arg") ;;
+  esac
+done
+set -- "${ARGS[@]+"${ARGS[@]}"}"
+# --json 単独は黙って無視してフル検査を走らせない。診断系のつもりで叩いた
+# 引数がそのまま重い検査を起動するのは、--list-checks が避けた失敗の裏口になる
+if [[ "$LIST_JSON" == "1" && "$LIST_MODE" == "0" ]]; then
+  echo "ERROR: --json は --list-checks と組み合わせて使います" >&2
+  exit 2
+fi
+
 ROOT="$(harness_project_root "${1:-}")" \
   || { echo "ERROR: ディレクトリが見つかりません: ${1:-}"; exit 2; }
 cd "$ROOT" || { echo "ERROR: ディレクトリへ移動できません: $ROOT"; exit 2; }
+harness_load_config "$ROOT"
 
-SKIP="${FEEDBACK_CHECK_SKIP:-}"
 RESULTS=()
 FAILED=0
 WARNED=0
@@ -29,15 +50,57 @@ STACK_FOUND=0   # マニフェストを検出したか。RESULTS の空判定と
                 # (全ステージがSKIPでも「スタック未検出」とは報告しないため)
 LOGDIR="$(mktemp -d)"
 trap 'rm -rf "$LOGDIR"' EXIT
+: > "$LOGDIR/list.txt"
 
-skipped() { [[ " $SKIP " == *" $1 "* ]]; }
+# 壊れた config は FAIL を立てるが、ここで止めない。設定が壊れているからと
+# 他の検査まで止めると、直すべき箇所が見えなくなる(既定値のまま続行する)
+if [[ -n "${HARNESS_CONFIG_ERROR:-}" ]]; then
+  FAILED=1
+  RESULTS+=("FAIL  config: .feedback/config.yaml")
+  {
+    echo "----- FAIL: config: .feedback/config.yaml -----"
+    echo "$HARNESS_CONFIG_ERROR"
+  } >> "$LOGDIR/failures.txt"
+fi
 
-# run_stage <stage> <tool> <label> <cmd...>
+# run_stage <stage> <id> <tool> <label> <cmd...>
+# <id> は config が参照する安定した検査ID(harness_config.py の CHECKS と一致させる)。
+# 表示ラベルは Node で $PM により変動するため ID には使えない。
 # <tool> にコマンド名を渡すと未インストール時に SKIP を記録する(失敗扱いにしない)。
 # ツール判定が不要なステージは "-" を渡す。
 run_stage() {
-  local stage="$1" tool="$2" label="$3"; shift 3
-  skipped "$stage" && { RESULTS+=("SKIP  $label (FEEDBACK_CHECK_SKIP)"); return; }
+  local stage="$1" id="$2" tool="$3" label="$4"; shift 4
+  if [[ "$LIST_MODE" == "1" ]]; then
+    # 検査コマンドは実行しない。ツール存在確認だけは通常経路と同じに保ち、
+    # 未導入・起動不能が skip として現れるようにする。command -v だけでは
+    # PATH 上にあるが起動できない(shebang切れのvenv等)ツールを見逃し、
+    # 「環境が壊れた」まさにその場面で --list-checks を叩く利用者に誤答する
+    local lsev lsrc
+    lsev="$(harness_check_severity "$id" "$([[ "$SOFT_STAGE" == "1" ]] && echo warn || echo fail)")"
+    lsrc="$(harness_check_source "$id")"
+    if [[ "$tool" != "-" ]]; then
+      if ! command -v "$tool" >/dev/null 2>&1; then
+        lsev="skip"; lsrc="$tool 未インストール"
+      elif ! has "$tool"; then
+        lsev="skip"; lsrc="$tool 起動不可 — 環境を確認してください"
+      fi
+    fi
+    printf '%s\t%s\t%s\t%s\t%s\n' "$id" "$label" "$stage" "$lsev" "$lsrc" >> "$LOGDIR/list.txt"
+    return
+  fi
+  local sev src
+  sev="$(harness_check_severity "$id" "$([[ "$SOFT_STAGE" == "1" ]] && echo warn || echo fail)")"
+  if [[ "$sev" == "skip" ]]; then
+    src="$(harness_check_source "$id")"
+    if [[ "$src" == "既定" ]]; then
+      RESULTS+=("SKIP  $label")
+    elif [[ "$src" == env.* ]]; then
+      RESULTS+=("SKIP  $label (${src})")
+    else
+      RESULTS+=("SKIP  $label (config: $src)")
+    fi
+    return
+  fi
   if [[ "$tool" != "-" ]]; then
     if ! command -v "$tool" >/dev/null 2>&1; then
       RESULTS+=("SKIP  $label ($tool 未インストール)")
@@ -57,23 +120,20 @@ run_stage() {
   elif [[ $rc -eq 126 || $rc -eq 127 ]]; then
     # 起動そのものに失敗(実行不可・未検出)。ユーザーのコードの問題ではない
     RESULTS+=("SKIP  $label (実行不可)")
+  elif [[ "$sev" == "warn" ]]; then
+    WARNED=1
+    RESULTS+=("WARN  $label")
+    {
+      echo "----- WARN: $label ($*) — 末尾${HARNESS_LOG_TAIL_LINES}行 -----"
+      tail -n "$HARNESS_LOG_TAIL_LINES" "$log"
+    } >> "$LOGDIR/warnings.txt"
   else
-    if [[ "$SOFT_STAGE" == "1" ]]; then
-      # 宣言していない検査の失敗は報告に留める。完了はブロックしない
-      WARNED=1
-      RESULTS+=("WARN  $label")
-      {
-        echo "----- WARN: $label ($*) — 末尾40行 -----"
-        tail -n 40 "$log"
-      } >> "$LOGDIR/warnings.txt"
-    else
-      FAILED=1
-      RESULTS+=("FAIL  $label")
-      {
-        echo "----- FAIL: $label ($*) — 末尾40行 -----"
-        tail -n 40 "$log"
-      } >> "$LOGDIR/failures.txt"
-    fi
+    FAILED=1
+    RESULTS+=("FAIL  $label")
+    {
+      echo "----- FAIL: $label ($*) — 末尾${HARNESS_LOG_TAIL_LINES}行 -----"
+      tail -n "$HARNESS_LOG_TAIL_LINES" "$log"
+    } >> "$LOGDIR/failures.txt"
   fi
 }
 
@@ -85,40 +145,67 @@ run_stage_soft() {
   SOFT_STAGE=0
 }
 
+# record_skip <id> <stage> <label> <理由> — run_stage を経由しない SKIP を記録する。
+# ツール未インストール・宣言なし等、コマンドを起動する前に判定できる SKIP は
+# run_stage を呼ばずに直接記録してきたが、--list-checks は run_stage が書く
+# list.txt だけを見るため、その経路が丸ごと一覧から消えていた(実際に起きた欠陥)。
+# run_stage と同じ出口(list.txt / RESULTS)を通すことで一覧・通常実行の両方に載せる。
+record_skip() {
+  local id="$1" stage="$2" label="$3" reason="$4"
+  if [[ "$LIST_MODE" == "1" ]]; then
+    printf '%s\t%s\t%s\t%s\t%s\n' "$id" "$label" "$stage" "skip" "$reason" >> "$LOGDIR/list.txt"
+  else
+    RESULTS+=("SKIP  $label${reason:+ ($reason)}")
+  fi
+}
+
 npm_script_exists() { # package.json に scripts.<name> があるか
   node -e "process.exit(require('./package.json').scripts?.['$1'] ? 0 : 1)" 2>/dev/null
 }
+
+# harness_excluded は lib.sh で定義(check_file.sh と共有)。
 
 # 注意: git ls-files は「追跡済みだが作業ツリーから削除された」ファイルも列挙する。
 # それらを検査ツールに渡すと読み取りエラーで完了をブロックしてしまう(実測: リンク
 # 検査の [Errno 2]、bash -n の非ゼロ終了)。呼び出し側は必ず -f で実在を確認すること
 list_files() { # list_files <glob> — 検査対象のファイルを1行1件で出力
-  if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-    # --others を含めないと、まだコミットしていない新規ファイルが検査対象外になり、
-    # 壊れた新規ファイルがあっても ALL PASS になる。--exclude-standard で
-    # .gitignore 済み(ビルド成果物・依存ディレクトリ)は従来どおり除外する
-    # -c core.quotePath=false: 非ASCIIファイル名を8進エスケープ("\350\250...")で
-    # 出さず生のパスで出す。日本語ファイル名を持つプロジェクトで、受け取り側が
-    # ファイルを開けなくなる(実測: .feedback/log/*.md で FileNotFoundError)
-    git -c core.quotePath=false ls-files --cached --others --exclude-standard "$1"
-  else
-    find . -name "$1" -not -path './.git/*' -not -path './node_modules/*' -not -path './.venv/*'
-  fi
+  local f
+  while IFS= read -r f; do
+    [[ -n "$f" ]] || continue
+    # find 側は "./foo.sh" 形式で返すため先頭の ./ を落とし、git ls-files 由来の
+    # リポジトリ相対パスへ揃える。揃えないと同じ exclude パターンが git 管理下か
+    # 否かで効いたり効かなかったりする(利用者には見分けが付かない)。
+    # lib.sh の harness_is_jsonc も「先頭に ./ も / も付かない」形を前提にしている
+    f="${f#./}"
+    harness_excluded "$f" || printf '%s\n' "$f"
+  done < <(
+    if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+      # --others を含めないと、まだコミットしていない新規ファイルが検査対象外になり、
+      # 壊れた新規ファイルがあっても ALL PASS になる。--exclude-standard で
+      # .gitignore 済み(ビルド成果物・依存ディレクトリ)は従来どおり除外する
+      # -c core.quotePath=false: 非ASCIIファイル名を8進エスケープ("\350\250...")で
+      # 出さず生のパスで出す。日本語ファイル名を持つプロジェクトで、受け取り側が
+      # ファイルを開けなくなる(実測: .feedback/log/*.md で FileNotFoundError)
+      git -c core.quotePath=false ls-files --cached --others --exclude-standard "$1"
+    else
+      find . -name "$1" -not -path './.git/*' -not -path './node_modules/*' -not -path './.venv/*'
+    fi
+  )
 }
 
 # ---------- Python ----------
 if [[ -f pyproject.toml || -f setup.py || -f requirements.txt ]]; then
   STACK_FOUND=1
-  run_stage lint "ruff" "python: ruff" ruff check .
+  run_stage lint "ruff" "ruff" "python: ruff" ruff check .
   # 宣言(pyproject.toml の [tool.ruff] 系)があれば FAIL、無ければ WARN。
   # 既存プロジェクトがフォーマッタ未使用の場合に完了不能にしないため
   if grep -q "^\[tool\.ruff" pyproject.toml 2>/dev/null; then
-    run_stage format "ruff" "python: ruff format" ruff format --check .
+    run_stage format "ruff-format" "ruff" "python: ruff format" ruff format --check .
   else
-    run_stage_soft format "ruff" "python: ruff format" ruff format --check .
+    run_stage_soft format "ruff-format" "ruff" "python: ruff format" ruff format --check .
   fi
   if [[ -f pyproject.toml ]] && grep -q "\[tool.mypy\]" pyproject.toml 2>/dev/null; then
-    run_stage typecheck "mypy" "python: mypy" mypy .
+    run_stage typecheck "mypy" "mypy" "python: mypy" mypy .
   fi
   # カバレッジ相乗り(M3): テストを2回走らせず、計装フラグを足すだけ。
   # pytest-cov は設定の --cov-fail-under を exit code で強制するため、
@@ -129,15 +216,15 @@ if [[ -f pyproject.toml || -f setup.py || -f requirements.txt ]]; then
   fi
   if [[ -d tests ]] || compgen -G "test_*.py" >/dev/null 2>&1 \
      || compgen -G "*_test.py" >/dev/null 2>&1; then
-    run_stage test "pytest" "python: pytest" pytest "${PYTEST_ARGS[@]}"
+    run_stage test "pytest" "pytest" "python: pytest" pytest "${PYTEST_ARGS[@]}"
   fi
   # 宣言に無い import・未使用依存の検出(ネットワーク不使用)。
   # 誤検出の可能性があるため、設定の宣言があるときだけ FAIL にする
   if has deptry; then
     if grep -q "^\[tool\.deptry" pyproject.toml 2>/dev/null; then
-      run_stage lint "deptry" "python: deptry" deptry .
+      run_stage lint "deptry" "deptry" "python: deptry" deptry .
     else
-      run_stage_soft lint "deptry" "python: deptry" deptry .
+      run_stage_soft lint "deptry" "deptry" "python: deptry" deptry .
     fi
   fi
 
@@ -145,9 +232,11 @@ if [[ -f pyproject.toml || -f setup.py || -f requirements.txt ]]; then
   # 確信度80%以上に絞り、宣言があるときだけ FAIL にする
   if has vulture; then
     if [[ -f .vulture ]] || grep -q "^\[tool\.vulture" pyproject.toml 2>/dev/null; then
-      run_stage lint "vulture" "python: vulture" vulture . --min-confidence 80
+      run_stage lint "vulture" "vulture" "python: vulture" \
+        vulture . --min-confidence "$HARNESS_VULTURE_MIN_CONFIDENCE"
     else
-      run_stage_soft lint "vulture" "python: vulture" vulture . --min-confidence 80
+      run_stage_soft lint "vulture" "vulture" "python: vulture" \
+        vulture . --min-confidence "$HARNESS_VULTURE_MIN_CONFIDENCE"
     fi
   fi
 
@@ -157,9 +246,9 @@ if [[ -f pyproject.toml || -f setup.py || -f requirements.txt ]]; then
      || grep -q "^\[importlinter\]" setup.cfg 2>/dev/null \
      || grep -q "^\[tool\.importlinter" pyproject.toml 2>/dev/null; then
     if has lint-imports; then
-      run_stage lint "-" "python: import-linter" lint-imports
+      run_stage lint "import-linter" "-" "python: import-linter" lint-imports
     else
-      RESULTS+=("SKIP  python: import-linter (import-linter 未インストール)")
+      record_skip "import-linter" lint "python: import-linter" "import-linter 未インストール"
     fi
   fi
 else
@@ -170,9 +259,9 @@ else
   done < <(list_files '*.py')
   if [[ ${#PY_FILES[@]} -gt 0 ]]; then
     STACK_FOUND=1
-    run_stage lint "ruff" "python: ruff" ruff check "${PY_FILES[@]}"
+    run_stage lint "ruff" "ruff" "python: ruff" ruff check "${PY_FILES[@]}"
     # マニフェストが無い=宣言も無いので WARN 固定
-    run_stage_soft format "ruff" "python: ruff format" ruff format --check "${PY_FILES[@]}"
+    run_stage_soft format "ruff-format" "ruff" "python: ruff format" ruff format --check "${PY_FILES[@]}"
   fi
 fi
 
@@ -181,19 +270,30 @@ if [[ -f package.json ]]; then
   STACK_FOUND=1
   PM="npm"; [[ -f pnpm-lock.yaml ]] && PM="pnpm"; [[ -f yarn.lock ]] && PM="yarn"
   if ! has node; then
-    # npm_script_exists が node に依存するため、node 不在では全ステージを判定できない
-    RESULTS+=("SKIP  node: 全ステージ (node 未インストール)")
+    # npm_script_exists が node に依存するため、node 不在では全ステージを判定できない。
+    # --list-checks では対象IDごとに記録する(通常実行は1行にまとめたまま)
+    if [[ "$LIST_MODE" == "1" ]]; then
+      for _id_stage in node-lint:lint node-typecheck:typecheck tsc:typecheck \
+                       node-test-coverage:test node-test:test node-build:build \
+                       npm-ls:lint prettier:format knip:lint; do
+        record_skip "${_id_stage%%:*}" "${_id_stage##*:}" "node: 全ステージ" "node 未インストール"
+      done
+    else
+      RESULTS+=("SKIP  node: 全ステージ (node 未インストール)")
+    fi
   else
-    npm_script_exists lint      && run_stage lint      "$PM" "node: $PM run lint"      "$PM" run lint
-    npm_script_exists typecheck && run_stage typecheck "$PM" "node: $PM run typecheck" "$PM" run typecheck
+    npm_script_exists lint && run_stage lint "node-lint" "$PM" "node: $PM run lint" "$PM" run lint
+    npm_script_exists typecheck && run_stage typecheck "node-typecheck" "$PM" "node: $PM run typecheck" "$PM" run typecheck
     if ! npm_script_exists typecheck && [[ -f tsconfig.json ]]; then
       # typescript 未導入で npx tsc を走らせると、ユーザーのコードと無関係な失敗が
       # FAIL になる(--no-install でも exit 1 のため run_stage の 126/127 判定では拾えない)。
       # --no-install を明示し、チェックが勝手にネットワークから取得しないようにする
-      if skipped typecheck || npx --no-install tsc --version >/dev/null 2>&1; then
-        run_stage typecheck "-" "node: tsc --noEmit" npx --no-install tsc --noEmit
+      # typecheck が既に skip なら、未導入プローブに時間をかけない
+      if [[ "$(harness_check_severity tsc fail)" == "skip" ]] \
+         || npx --no-install tsc --version >/dev/null 2>&1; then
+        run_stage typecheck "tsc" "-" "node: tsc --noEmit" npx --no-install tsc --noEmit
       else
-        RESULTS+=("SKIP  node: tsc --noEmit (typescript 未インストール)")
+        record_skip "tsc" typecheck "node: tsc --noEmit" "typescript 未インストール"
       fi
     fi
     # カバレッジ相乗り(M3): test:coverage スクリプトを書いた=計装を宣言した。
@@ -201,11 +301,11 @@ if [[ -f package.json ]]; then
     # 測るためだけにテストスイートが2回実行される(M3 が禁じているもの)。
     # Python の --cov / Go の -cover が既存コマンドに計装を足すのと同じ扱いに揃える
     if npm_script_exists test:coverage; then
-      run_stage test "$PM" "node: $PM run test:coverage" "$PM" run test:coverage
+      run_stage test "node-test-coverage" "$PM" "node: $PM run test:coverage" "$PM" run test:coverage
     elif npm_script_exists test; then
-      run_stage test "$PM" "node: $PM test" "$PM" test
+      run_stage test "node-test" "$PM" "node: $PM test" "$PM" test
     fi
-    npm_script_exists build && run_stage build "$PM" "node: $PM run build" "$PM" run build
+    npm_script_exists build && run_stage build "node-build" "$PM" "node: $PM run build" "$PM" run build
     # 依存の実在性・整合性(ネットワーク不使用)。宣言と実体のずれ・欠損を
     # 検出する — AIが存在しないパッケージ名を書く欠陥はここで捕まる。
     # node_modules が無いのは「未インストール」であって欠陥ではないので SKIP。
@@ -213,11 +313,11 @@ if [[ -f package.json ]]; then
     # ls 自体が無い。他PMで走らせると健全なプロジェクトが usage error で FAIL する
     # ため、npm のときだけ実行する
     if [[ ! -d node_modules ]]; then
-      RESULTS+=("SKIP  node: npm ls (node_modules 未インストール)")
+      record_skip "npm-ls" lint "node: npm ls" "node_modules 未インストール"
     elif [[ "$PM" != "npm" ]]; then
-      RESULTS+=("SKIP  node: npm ls ($PM は ls --all 非対応)")
+      record_skip "npm-ls" lint "node: npm ls" "$PM は ls --all 非対応"
     else
-      run_stage lint "npm" "node: npm ls" npm ls --all
+      run_stage lint "npm-ls" "npm" "node: npm ls" npm ls --all
     fi
 
     # フォーマット。設定が無い prettier は既定スタイルの押し付けになるため
@@ -228,9 +328,9 @@ if [[ -f package.json ]]; then
        || compgen -G "prettier.config.*" >/dev/null 2>&1 \
        || node -e "process.exit(require('./package.json').prettier ? 0 : 1)" 2>/dev/null; then
       if npx --no-install prettier --version >/dev/null 2>&1; then
-        run_stage format "-" "node: prettier" npx --no-install prettier --check .
+        run_stage format "prettier" "-" "node: prettier" npx --no-install prettier --check .
       else
-        RESULTS+=("SKIP  node: prettier (prettier 未インストール)")
+        record_skip "prettier" format "node: prettier" "prettier 未インストール"
       fi
     fi
 
@@ -241,9 +341,9 @@ if [[ -f package.json ]]; then
     if [[ -f knip.json || -f knip.jsonc ]] || compgen -G "knip.config.*" >/dev/null 2>&1 \
        || node -e "process.exit(require('./package.json').knip ? 0 : 1)" 2>/dev/null; then
       if npx --no-install knip --version >/dev/null 2>&1; then
-        run_stage lint "-" "node: knip" npx --no-install knip
+        run_stage lint "knip" "-" "node: knip" npx --no-install knip
       else
-        RESULTS+=("SKIP  node: knip (knip 未インストール)")
+        record_skip "knip" lint "node: knip" "knip 未インストール"
       fi
     fi
   fi
@@ -252,14 +352,14 @@ fi
 # ---------- Go ----------
 if [[ -f go.mod ]]; then
   STACK_FOUND=1
-  run_stage lint  "go" "go: vet"   go vet ./...
-  run_stage build "go" "go: build" go build ./...
+  run_stage lint "go-vet" "go" "go: vet" go vet ./...
+  run_stage build "go-build" "go" "go: build" go build ./...
   # -cover は標準機能で計装のみ(追加プロセス無し)。coverage の数値は
   # ステージログに現れる。閾値ゲートは持たない(go test のexitはテスト合否のみ)
-  run_stage test  "go" "go: test"  go test -cover ./...
+  run_stage test "go-test" "go" "go: test" go test -cover ./...
   # go.sum のチェックサム検証(ネットワーク不使用)。依存の改竄・欠損を検出する
   if [[ -f go.sum ]]; then
-    run_stage lint "go" "go: mod verify" go mod verify
+    run_stage lint "go-mod-verify" "go" "go: mod verify" go mod verify
   fi
 
   # gofmt は言語標準であり「宣言しないと従わない」性質のものではないため、
@@ -271,7 +371,7 @@ if [[ -f go.mod ]]; then
   if [[ ${#GO_FILES[@]} -gt 0 ]] && has gofmt; then
     # gofmt -l は未整形ファイル名を「出力する」形式で、終了コードは 0 のまま。
     # 出力があれば未整形なので、非0に変換して run_stage に伝える
-    run_stage format "-" "go: gofmt" \
+    run_stage format "gofmt" "-" "go: gofmt" \
       bash -c 'out="$(gofmt -l "$@")"; [[ -z "$out" ]] || { echo "未フォーマット:"; echo "$out"; exit 1; }' _ "${GO_FILES[@]}"
   fi
 fi
@@ -280,25 +380,33 @@ fi
 if [[ -f Cargo.toml ]]; then
   STACK_FOUND=1
   if ! has cargo; then
-    RESULTS+=("SKIP  rust: 全ステージ (cargo 未インストール)")
+    # --list-checks では対象IDごとに記録する(通常実行は1行にまとめたまま)
+    if [[ "$LIST_MODE" == "1" ]]; then
+      for _id_stage in clippy:lint cargo-check:build cargo-test:test \
+                       cargo-metadata:lint cargo-fmt:format cargo-semver-checks:contract; do
+        record_skip "${_id_stage%%:*}" "${_id_stage##*:}" "rust: 全ステージ" "cargo 未インストール"
+      done
+    else
+      RESULTS+=("SKIP  rust: 全ステージ (cargo 未インストール)")
+    fi
   else
     if cargo clippy --version >/dev/null 2>&1; then
-      run_stage lint "-" "rust: clippy" cargo clippy --quiet -- -D warnings
+      run_stage lint "clippy" "-" "rust: clippy" cargo clippy --quiet -- -D warnings
     else
-      run_stage build "-" "rust: check" cargo check --quiet
+      run_stage build "cargo-check" "-" "rust: check" cargo check --quiet
     fi
-    run_stage test "-" "rust: test" cargo test --quiet
+    run_stage test "cargo-test" "-" "rust: test" cargo test --quiet
     # Cargo.lock と実体の整合(--offline でネットワークを使わない)
     if [[ -f Cargo.lock ]]; then
-      run_stage lint "-" "rust: metadata" \
+      run_stage lint "cargo-metadata" "-" "rust: metadata" \
         cargo metadata --offline --format-version 1
     fi
 
     # rustfmt.toml があれば FAIL、無ければ WARN(既定スタイルの押し付けを避ける)
     if [[ -f rustfmt.toml || -f .rustfmt.toml ]]; then
-      run_stage format "-" "rust: cargo fmt" cargo fmt --check
+      run_stage format "cargo-fmt" "-" "rust: cargo fmt" cargo fmt --check
     else
-      run_stage_soft format "-" "rust: cargo fmt" cargo fmt --check
+      run_stage_soft format "cargo-fmt" "-" "rust: cargo fmt" cargo fmt --check
     fi
   fi
 fi
@@ -306,13 +414,13 @@ fi
 # ---------- Java ----------
 if [[ -f pom.xml ]]; then
   STACK_FOUND=1
-  run_stage test "mvn" "java: mvn verify" mvn -q verify
+  run_stage test "mvn" "mvn" "java: mvn verify" mvn -q verify
 elif [[ -f build.gradle || -f build.gradle.kts ]]; then
   STACK_FOUND=1
   if [[ -x ./gradlew ]]; then
-    run_stage test "-" "java: gradlew check" ./gradlew -q check
+    run_stage test "gradle" "-" "java: gradlew check" ./gradlew -q check
   else
-    run_stage test "gradle" "java: gradle check" gradle -q check
+    run_stage test "gradle" "gradle" "java: gradle check" gradle -q check
   fi
 fi
 
@@ -326,9 +434,9 @@ done < <(list_files '*.sh')
 if [[ ${#SH_FILES[@]} -gt 0 ]]; then
   STACK_FOUND=1
   # shellcheck disable=SC2016  # $@ は内側の bash -c で展開させるため単一引用符が正しい
-  run_stage lint "-" "shell: bash -n" \
+  run_stage lint "bash-syntax" "-" "shell: bash -n" \
     bash -c 'for f in "$@"; do bash -n "$f" || exit 1; done' _ "${SH_FILES[@]}"
-  run_stage lint "shellcheck" "shell: shellcheck" \
+  run_stage lint "shellcheck" "shellcheck" "shell: shellcheck" \
     shellcheck -x -S "$SHELLCHECK_SEVERITY" "${SH_FILES[@]}"
 fi
 
@@ -342,7 +450,7 @@ while IFS= read -r f; do
   [[ -n "$f" && -f "$f" ]] && JSON_FILES+=("$f")
 done < <(list_files '*.json')
 if [[ ${#JSON_FILES[@]} -gt 0 ]]; then
-  run_stage lint "-" "config: json 構文" harness_validate_json "${JSON_FILES[@]}"
+  run_stage lint "json-syntax" "-" "config: json 構文" harness_validate_json "${JSON_FILES[@]}"
 fi
 
 YAML_FILES=()
@@ -354,9 +462,9 @@ while IFS= read -r f; do
 done < <(list_files '*.yml')
 if [[ ${#YAML_FILES[@]} -gt 0 ]]; then
   if harness_has_pyyaml; then
-    run_stage lint "-" "config: yaml 構文" harness_validate_yaml "${YAML_FILES[@]}"
+    run_stage lint "yaml-syntax" "-" "config: yaml 構文" harness_validate_yaml "${YAML_FILES[@]}"
   else
-    RESULTS+=("SKIP  config: yaml 構文 (PyYAML 未インストール)")
+    record_skip "yaml-syntax" lint "config: yaml 構文" "PyYAML 未インストール"
   fi
 fi
 
@@ -367,7 +475,7 @@ while IFS= read -r f; do
   [[ -n "$f" && -f "$f" ]] && MD_FILES+=("$f")
 done < <(list_files '*.md')
 if [[ ${#MD_FILES[@]} -gt 0 ]]; then
-  run_stage docs "-" "docs: 内部リンク" harness_check_md_links "${MD_FILES[@]}"
+  run_stage docs "md-links" "-" "docs: 内部リンク" harness_check_md_links "${MD_FILES[@]}"
 fi
 
 # 検査対象を何か検出できたか。ここまでの全ステージの結果を見て判断する。
@@ -383,12 +491,12 @@ if ls .secretlintrc.* >/dev/null 2>&1; then
   # npx は「未インストール」も「秘密を検出」も exit 1 を返すので区別できない。
   # tsc と同じく --version で事前プローブし、未導入を誤FAILにしない
   if has npx && npx --no-install secretlint --version >/dev/null 2>&1; then
-    run_stage security "-" "security: secretlint" npx --no-install secretlint "**/*"
+    run_stage security "secretlint" "-" "security: secretlint" npx --no-install secretlint "**/*"
   else
-    RESULTS+=("SKIP  security: secretlint (secretlint 未インストール)")
+    record_skip "secretlint" security "security: secretlint" "secretlint 未インストール"
   fi
 elif anything_detected; then
-  RESULTS+=("SKIP  security: secretlint (.secretlintrc.* が無い — 設定すると検査が有効になります)")
+  record_skip "secretlint" security "security: secretlint" ".secretlintrc.* が無い — 設定すると検査が有効になります"
 fi
 
 # gitleaks があれば併用する(OS固有バイナリのため任意扱い)。バージョン差が
@@ -398,10 +506,10 @@ fi
 if anything_detected && has gitleaks; then
   GL_HELP="$(gitleaks detect --help 2>&1)"
   if [[ "$GL_HELP" == *"--no-git"* && "$GL_HELP" == *"--redact"* ]]; then
-    run_stage security "-" "security: gitleaks" \
+    run_stage security "gitleaks" "-" "security: gitleaks" \
       gitleaks detect --no-git --redact --no-banner -s .
   else
-    RESULTS+=("SKIP  security: gitleaks (この版は detect --no-git/--redact に非対応)")
+    record_skip "gitleaks" security "security: gitleaks" "この版は detect --no-git/--redact に非対応"
   fi
 fi
 
@@ -410,9 +518,9 @@ fi
 # バイナリのため任意扱い(あれば使う)
 if compgen -G ".github/workflows/*.y*ml" >/dev/null 2>&1; then
   if has actionlint; then
-    run_stage lint "-" "ci: actionlint" actionlint
+    run_stage lint "actionlint" "-" "ci: actionlint" actionlint
   else
-    RESULTS+=("SKIP  ci: actionlint (actionlint 未インストール)")
+    record_skip "actionlint" lint "ci: actionlint" "actionlint 未インストール"
   fi
 fi
 
@@ -432,12 +540,17 @@ if [[ ${#DOCKER_FILES[@]} -gt 0 ]]; then
   if has npx && npx --no-install dockerfilelint --version >/dev/null 2>&1; then
     # dockerfilelint は問題があると exit 2 を返す(実測)。run_stage は非0を
     # FAIL とするため、そのまま扱える
-    run_stage lint "-" "docker: dockerfilelint" \
+    run_stage lint "dockerfilelint" "-" "docker: dockerfilelint" \
       npx --no-install dockerfilelint "${DOCKER_FILES[@]}"
   elif has hadolint; then
-    run_stage lint "-" "docker: hadolint" hadolint "${DOCKER_FILES[@]}"
+    run_stage lint "hadolint" "-" "docker: hadolint" hadolint "${DOCKER_FILES[@]}"
   else
-    RESULTS+=("SKIP  docker: lint (dockerfilelint / hadolint 未インストール)")
+    if [[ "$LIST_MODE" == "1" ]]; then
+      record_skip "dockerfilelint" lint "docker: lint" "dockerfilelint / hadolint 未インストール"
+      record_skip "hadolint" lint "docker: lint" "dockerfilelint / hadolint 未インストール"
+    else
+      RESULTS+=("SKIP  docker: lint (dockerfilelint / hadolint 未インストール)")
+    fi
   fi
 fi
 
@@ -453,25 +566,37 @@ for f in openapi.yaml openapi.json api/openapi.yaml api/openapi.json; do
   fi
 done
 if [[ -n "$OPENAPI_SPEC" ]] && has oasdiff; then
-  BASE_SHA="$(git merge-base HEAD "${FEEDBACK_CONTRACT_BASE:-main}" 2>/dev/null \
+  BASE_SHA="$(git merge-base HEAD "$HARNESS_OASDIFF_BASE" 2>/dev/null \
     || git rev-parse HEAD 2>/dev/null)"
   TMP_BASE="$(mktemp)"
   if [[ -n "$BASE_SHA" ]] && git show "$BASE_SHA:$OPENAPI_SPEC" > "$TMP_BASE" 2>/dev/null; then
-    run_stage contract "-" "contract: oasdiff" oasdiff breaking "$TMP_BASE" "$OPENAPI_SPEC"
+    run_stage contract "oasdiff" "-" "contract: oasdiff" oasdiff breaking "$TMP_BASE" "$OPENAPI_SPEC"
   else
-    RESULTS+=("SKIP  contract: oasdiff (ベースライン取得不能 — $OPENAPI_SPEC がベースラインに無い)")
+    record_skip "oasdiff" contract "contract: oasdiff" "ベースライン取得不能 — $OPENAPI_SPEC がベースラインに無い"
   fi
   rm -f "$TMP_BASE"
 elif [[ -n "$OPENAPI_SPEC" ]]; then
-  RESULTS+=("SKIP  contract: oasdiff (oasdiff 未インストール)")
+  record_skip "oasdiff" contract "contract: oasdiff" "oasdiff 未インストール"
 fi
 
 # Rust ライブラリの破壊的変更。cargo-semver-checks の導入自体が宣言
-# (ビルドを伴い重いため、入れたプロジェクトだけがコストを払う)
+# (ビルドを伴い重いため、入れたプロジェクトだけがコストを払う)。
+# --baseline-rev を指定しない既定動作は crates.io レジストリから公開済みの
+# ベースラインを取得しにいく — check.sh の「ネットワーク不使用」原則(oasdiff
+# 等で繰り返し明記)に反するため、oasdiff と同じく git 由来のベースラインへ
+# 差し替える(merge-base が解決できなければベースライン無しとして SKIP)
 if [[ -f Cargo.toml ]] && has cargo \
    && cargo semver-checks --version >/dev/null 2>&1 \
    && grep -q "^\[lib\]" Cargo.toml; then
-  run_stage contract "-" "contract: cargo semver-checks" cargo semver-checks check-release
+  RUST_BASE_SHA="$(git merge-base HEAD "$HARNESS_OASDIFF_BASE" 2>/dev/null \
+    || git rev-parse HEAD 2>/dev/null)"
+  if [[ -n "$RUST_BASE_SHA" ]]; then
+    run_stage contract "cargo-semver-checks" "-" "contract: cargo semver-checks" \
+      cargo semver-checks check-release --baseline-rev "$RUST_BASE_SHA"
+  else
+    record_skip "cargo-semver-checks" contract "contract: cargo semver-checks" \
+      "ベースライン取得不能(git merge-base 解決不可)"
+  fi
 fi
 
 # ---------- 汎用フォールバック ----------
@@ -483,12 +608,39 @@ fi
 if [[ -f Makefile ]] && grep -qE "^check:" Makefile; then
   STACK_FOUND=1
   if [[ -n "${FEEDBACK_CHECK_RECURSION_GUARD:-}" ]]; then
-    RESULTS+=("SKIP  make check (再帰ガード — check.sh 起因のmake実行内のため)")
+    record_skip "make-check" test "make check" "再帰ガード — check.sh 起因のmake実行内のため"
   else
     # env 経由で make とその子孫にだけ伝える。check.sh 全体へ export すると
     # 直接ステージの子孫(テスト内で別プロジェクトを検証する等)まで誤スキップする
-    run_stage test "make" "make check" env FEEDBACK_CHECK_RECURSION_GUARD=1 make check
+    run_stage test "make-check" "make" "make check" env FEEDBACK_CHECK_RECURSION_GUARD=1 make check
   fi
+fi
+
+if [[ "$LIST_MODE" == "1" ]]; then
+  if [[ "$LIST_JSON" == "1" ]]; then
+    python3 -c '
+import json, sys
+rows = []
+for line in sys.stdin:
+    parts = line.rstrip("\n").split("\t")
+    if len(parts) == 5:
+        rows.append(dict(zip(["id", "label", "stage", "severity", "source"], parts)))
+print(json.dumps(rows, ensure_ascii=False, indent=2))
+' < "$LOGDIR/list.txt"
+  else
+    python3 "$LIBDIR/harness_config.py" --format-table < "$LOGDIR/list.txt"
+  fi
+  # config が壊れていると一覧は「すべて既定」を並べる。これは事実だが、
+  # 打ち間違いを調べようと --list-checks を叩いた利用者には最も知りたい情報が
+  # 見えないまま「既定」とだけ映り、原因に辿り着けない。stdout ではなく stderr へ
+  # 出すのは --json の出力をパイプで処理する経路を壊さないため
+  if [[ -n "${HARNESS_CONFIG_ERROR:-}" ]]; then
+    echo "" >&2
+    echo "ERROR: .feedback/config.yaml を読めませんでした。以下はすべて既定値です。" >&2
+    echo "$HARNESS_CONFIG_ERROR" >&2
+    exit 1
+  fi
+  exit 0
 fi
 
 # ---------- 結果出力 ----------

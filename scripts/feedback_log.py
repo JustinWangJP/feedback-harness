@@ -64,7 +64,29 @@ EVENTS_FILE = ROOT / ".feedback" / "events.jsonl"
 LAST_RETRO = ROOT / ".feedback" / ".last-retro"
 # audit.sh が監査成功時にだけ書くスタンプ。stats/report が「最終監査日」として表示する
 LAST_AUDIT = ROOT / ".feedback" / ".last-audit"
-AUDIT_INTERVAL_DAYS = 7
+# 設定は harness_config が解決する(bash 側と同じ解決規則を使うため、
+# ここで環境変数や既定値を独自に読み直さない)
+# dont_write_bytecode: init.sh 配布先の scripts/ に __pycache__/ が生えて
+# Python プロジェクトでない導入先の untracked ノイズになるのを防ぐ
+sys.dont_write_bytecode = True
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+try:
+    import harness_config as _hc
+
+    _CFG = _hc.effective(str(ROOT), os.environ)
+    if _CFG.get("error"):
+        print(f"WARNING: {_CFG['error']}", file=sys.stderr)
+except Exception:  # ローダーが壊れていても記録・集計は止めない
+    _CFG = {"values": {}}
+
+
+def _cfg(key, default):
+    entry = _CFG.get("values", {}).get(key)
+    return entry[0] if entry else default
+
+
+AUDIT_INTERVAL_DAYS = _cfg("audit.interval_days", 7)
+OPEN_THRESHOLD = _cfg("feedback.open_threshold", 3)
 # バンドル資産は状態と違い、スクリプトに同梱されて配られる読み取り専用のファイル。
 # 導入先が rules.template.md を持たない(プラグインのみで導入した)場合の供給元。
 BUNDLED_TEMPLATE = Path(__file__).resolve().parent.parent / ".feedback" / "rules.template.md"
@@ -277,7 +299,7 @@ status: open
     )
     print(f"recorded: {path.relative_to(ROOT)} (id={entry_id})")
     open_count = sum(1 for e in entries() if e.get("status") == "open")
-    if open_count >= 3:
+    if open_count >= OPEN_THRESHOLD:
         print(f"NOTE: open状態のエントリが{open_count}件あります。一般化できるものは promote を検討してください。")
 
 
@@ -515,7 +537,7 @@ def audit_status_lines() -> list:
     days = (datetime.date.today() - d).days
     line = f"最終監査: {raw} ({days}日前)"
     if days > AUDIT_INTERVAL_DAYS:
-        line += " — 7日超過、監査を推奨(bash scripts/audit.sh)"
+        line += f" — {AUDIT_INTERVAL_DAYS}日超過、監査を推奨(bash scripts/audit.sh)"
     return [line]
 
 
@@ -564,7 +586,8 @@ def cmd_stats(args):
     sig = {s: 0 for s in SIGNALS}
     sig["unknown"] = 0
     for e in es:
-        sig[e.get("signal") or "unknown"] += 1
+        k = e.get("signal") or "unknown"
+        sig[k] = sig.get(k, 0) + 1
     print("signal: " + " / ".join(f"{k} {v}" for k, v in sig.items()))
     cats, causes, srcs, st = {}, {}, {}, {}
     for e in es:
@@ -585,8 +608,8 @@ def cmd_stats(args):
             print(f"open: {len(opens)}件(最古 {oldest.get('id')} から {days}日経過)")
         else:
             print(f"open: {len(opens)}件")
-        if len(opens) >= 3:
-            print("NOTE: openが3件以上 — promote/close を検討してください")
+        if len(opens) >= OPEN_THRESHOLD:
+            print(f"NOTE: openが{OPEN_THRESHOLD}件以上 — promote/close を検討してください")
 
     print()
     print("[監査]")
@@ -657,7 +680,7 @@ def cmd_report(args):
     else:
         for e in sorted(opens, key=lambda e: e.get("date") or ""):
             print(f"- {e.get('id')} ({e.get('date', '?')}) [{e.get('signal') or 'unknown'}/{e.get('category','-')}]")
-        if len(opens) >= 3:
+        if len(opens) >= OPEN_THRESHOLD:
             print(f"NOTE: open が{len(opens)}件 — promote/close を検討してください")
 
     print()
