@@ -1,5 +1,5 @@
 ---
-description: このプロジェクトへフィードバックハーネスの Hooks 非対応環境向け資産(scripts/ と AGENTS.md)を展開する
+description: このプロジェクトへフィードバックハーネスの Hooks 非対応環境向け資産（scripts/ と CLAUDE.md / AGENTS.md の規約）を展開する
 ---
 
 # feedback-harness init

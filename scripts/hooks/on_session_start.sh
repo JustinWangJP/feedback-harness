@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # on_session_start.sh — Claude Code / Codex SessionStart フック。
 #
-# プラグインのみで導入したプロジェクトには .feedback/ を作る担い手がいない
-# (init.sh を実行するのは Codex 併用時だけ)。ここで一度だけシードする。
+# プラグインだけで導入したプロジェクトでは init.sh を実行しないため、
+# .feedback/ の初期化をここで一度だけ担う。
 #
 # 既存の .feedback/ には一切触れない。失敗してもセッションはブロックしない。
 set -u

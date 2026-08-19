@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# ruff: noqa -- ハーネス配布ファイル(導入元で管理・検査済み。導入先の ruff 設定の対象外)
+# fmt: off
 """harness_config.py — .feedback/config.yaml を読む唯一のパーサ。
 
 bash(check.sh / check_file.sh / audit.sh)と Python(feedback_log.py)の
@@ -628,3 +630,4 @@ if __name__ == "__main__":
         "usage: harness_config.py "
         "[--keys | --json [root] | --shell [root] | --format-table]"
     )
+# fmt: on

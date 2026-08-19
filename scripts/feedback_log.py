@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# ruff: noqa -- ハーネス配布ファイル(導入元で管理・検査済み。導入先の ruff 設定の対象外)
+# fmt: off
 """feedback_log.py — 人間のレビュー・修正指摘を記録・検索・ルール化するCLI。
 
 エントリは .feedback/log/ に frontmatter 付き Markdown で保存され、
@@ -120,25 +122,36 @@ def slugify(text: str, limit: int = 40) -> str:
 
 
 SIGNALS = ["context", "instruction", "workflow", "failure"]
+ROOT_CAUSES = ["文脈欠落", "指示欠陥", "実行誤り", "モデル限界", "未判定"]
+ROOT_CAUSE_RE = re.compile(r"根因:\s*(" + "|".join(map(re.escape, ROOT_CAUSES)) + r")")
+ROOT_CAUSE_TOKEN_RE = re.compile(r"根因:\s*([^\s（(、。]+)")
+
+
+def validate_root_cause(detail: str) -> None:
+    """根因行がある場合、定義済みの分類が1件だけ指定されていることを確認する。"""
+    if "根因:" not in detail:
+        return
+    found = ROOT_CAUSE_TOKEN_RE.findall(detail)
+    if len(found) != 1 or found[0] not in ROOT_CAUSES:
+        allowed = " / ".join(ROOT_CAUSES)
+        sys.exit(f"ERROR: 根因は次のいずれかを1件指定してください: {allowed}")
 
 
 def infer_signal(category: str, detail: str) -> str:
     """--signal 省略時に detail/category から信号種を推論する。
 
-    根因は failure のサブルーティング材料であり、signal はそれを置き換えない。
-    「根因: 文脈欠落」の失敗は直す先がプライミング文書(context)なのに対し、
-    「指示欠陥/モデル限界」は失敗信号(failure)として扱う。
+    signal は観測した出来事の種類、根因は失敗理由であり別軸である。
+    根因を記録するのは誤った出力・行動があったときなので、根因の種類に
+    かかわらず failure とする。失敗を伴わない context 信号は --signal context
+    で明示する。
     """
-    if "根因" in detail and "文脈欠落" in detail:
-        return "context"
-    if "根因" in detail and ("指示欠陥" in detail or "モデル限界" in detail):
+    if ROOT_CAUSE_RE.search(detail):
         return "failure"
     if category == "workflow":
         return "workflow"
     return "instruction"
 
 
-ROOT_CAUSE_RE = re.compile(r"根因:\s*(文脈欠落|指示欠陥|モデル限界)")
 RULE_DATE_RE = re.compile(r"\((\d{4}-\d{2}-\d{2}) 昇華\)")
 
 
@@ -276,6 +289,7 @@ def next_entry_id(now: datetime.datetime) -> str:
 
 
 def cmd_add(args):
+    validate_root_cause(args.detail)
     LOG_DIR.mkdir(parents=True, exist_ok=True)
     now = datetime.datetime.now()
     entry_id = next_entry_id(now)
@@ -804,3 +818,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+# fmt: on

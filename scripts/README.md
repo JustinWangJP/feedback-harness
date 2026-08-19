@@ -137,7 +137,7 @@ python3 scripts/feedback_log.py <サブコマンド> [引数]
 
 | サブコマンド | 引数 | 説明 |
 |-------------|------|------|
-| `add` | `--category <cat>` `--summary "<要約>"` `[--detail "<詳細>"]` `[--source human\|hook\|agent]` `[--signal <context\|instruction\|workflow\|failure>]` | エントリを記録。`open` が3件以上で promote 候補の通知を出す。`--signal` は信号種(省略時は detail/category から推論。昇華先ルーティングの軸) |
+| `add` | `--category <cat>` `--summary "<要約>"` `[--detail "<詳細>"]` `[--source human\|hook\|agent]` `[--signal <context\|instruction\|workflow\|failure>]` | エントリを記録。`open` が3件以上で promote 候補の通知を出す。`--signal` は信号種（省略時は detail/category から推論）。`根因:` 行がある場合は、定義済み5分類のいずれか1件だけを許可する |
 | `list` | `[--status open\|promoted\|closed\|retired\|all]` `[--category <cat>]` `[--signal <context\|instruction\|workflow\|failure\|unknown>]` | エントリ一覧(既定は `open`)。`--signal unknown` は signal を持たない旧エントリを拾う |
 | `search` | `<キーワード>` | エントリの全文検索 |
 | `promote` | `<entry-id>` `--rule "<一般化ルール1行>"` | `rules.md` に**新規ルールを追記**し、対象エントリを `promoted` に更新 |
@@ -163,7 +163,7 @@ bash scripts/audit.sh [プロジェクトルート]
 
 Claude Code / Codex の Hooks から起動される薄いラッパ。判定・実行は `check_file.sh` / `check.sh` に委譲し、フック固有の処理(stdin JSONのパース、exit code 2 によるエージェントへの差し戻し、無限ループ防止)だけを担う。**`init.sh` 導入ではコピーされない**（プラグインから実行するため）。
 
-- **`on_session_start.sh`** (SessionStart): `.feedback/log/` と `rules.md` をテンプレートから初回シードする。プラグインのみで導入したプロジェクトには `.feedback/` を作る担い手が居ない(`init.sh` を実行するのは Codex 併用時だけ)ため。**既存の `.feedback/` には一切触れず**、失敗してもセッションをブロックしない。
+- **`on_session_start.sh`** (SessionStart): `.feedback/log/` と `rules.md` をテンプレートから初回シードする。プラグインだけで導入したプロジェクトでは `init.sh` を実行しないため、Hooks 側が初期化を担う。**既存の `.feedback/` には一切触れず**、失敗してもセッションをブロックしない。
 - **`post_edit.sh`** (PostToolUse: `Edit|Write|MultiEdit`): Claude Code では stdin の `tool_input.file_path`、Codex の `apply_patch` では `tool_input.command` のパッチヘッダーから対象ファイルを取り出し、`check_file.sh` でチェックする。問題があれば **`exit 2` + stderr** でエージェントにフィードバックし、自己修正ループを起動する。対象ファイルが取れないときは何も記録しない。
   - 合否(成功・失敗の両方)を `.feedback/events.jsonl` に1行追記する(`stats` の初回通過率の原料。ローカル状態で共有しない)
 - **`on_stop.sh`** (Stop): 応答完了前に `check.sh` を実行。失敗すれば **`exit 2`** で完了をブロックし失敗内容を返す。`stop_hook_active` が `true`(2周目以降)のときは何もせず `exit 0` し、**無限ループを防止**する。
@@ -187,14 +187,14 @@ Claude Code と Codex app / CLI は、プラグインが提供する Hooks (`hoo
 | ファイル編集直後 | `PostToolUse` (`Edit\|Write\|MultiEdit`) | `post_edit.sh` → `check_file.sh` | Claude の Edit/Write と Codex の `apply_patch` を検出。問題があれば `exit 2` で即時差し戻し → 自動修正 |
 | 応答完了前 | `Stop` | `on_stop.sh` → `check.sh` | FAILがあれば完了をブロック → 修正を継続(前回の成功検査以降に変更が無ければ検査自体を省略) |
 
-- **ルールの反映**: `apply-feedback` スキルが `.feedback/rules.md` を読み込む。`CLAUDE.md` / `AGENTS.md` のポインタが作業開始前にスキル使用を促す。
+- **ルールの反映**: `apply-feedback` スキルが `.feedback/rules.md` を読み込む。`init.sh` を併用している場合は、`CLAUDE.md` / `AGENTS.md` の規約が Hooks 無効時の手動手順も示す。
 - **指摘の記録**: `capture-feedback` / `feedback-loop` スキルが `feedback_log.py` を呼ぶ。
 - スキル・エージェントの起動条件と手順はプロジェクトルート README.md の「Skills / Agents / Commands の使い方（プラグイン導入時）」節を参照（`init.sh` 導入では配られず、下記の規約駆動が代替）。
-- **設定ファイル**: プラグインの `hooks/hooks.json` + `skills/` + 導入先の `CLAUDE.md` / `AGENTS.md`。Claude Code は `.claude-plugin/plugin.json`、Codex は `.codex-plugin/plugin.json` を読む。
+- **設定ファイル**: プラグインの `hooks/hooks.json` + `skills/`。Claude Code は `.claude-plugin/plugin.json`、Codex は `.codex-plugin/plugin.json` を読む。`CLAUDE.md` / `AGENTS.md` の規約は `init.sh` 併用時に追加される。
 
-### Codex IDE 拡張 / 汎用エージェント — 規約駆動（手動）
+### Claude Code の init-only / Codex IDE 拡張 / 汎用エージェント — 規約駆動（手動）
 
-プラグインを利用できない環境や Hooks が無効・未信頼の環境では、`AGENTS.md` の規約が自動ループの代替となる。エージェント自身が規約に従ってスクリプトを呼ぶ（自動ではない）。
+`init.sh` だけで導入した環境や Hooks が無効・未信頼の環境では、Claude Code は `CLAUDE.md`、Codex IDE 拡張と汎用エージェントは `AGENTS.md` の規約を自動ループの代替とする。エージェント自身が規約に従ってスクリプトを呼ぶ（自動ではない）。
 
 | タイミング | 実行コマンド | 根拠 |
 |-----------|-------------|------|
@@ -205,19 +205,19 @@ Claude Code と Codex app / CLI は、プラグインが提供する Hooks (`hoo
 | 振り返り・朝会 | `python3 scripts/feedback_log.py report --last --mark` | 期間ダイジェストを議題にし、実施後に基点を更新 |
 | 監査を促されたら | `bash scripts/audit.sh` | `stats`/`report` が「監査を推奨」を出したとき(7日超過・未実行) |
 
-- **ルールの反映**: `AGENTS.md` §1 で `.feedback/rules.md` の必読を規定。
-- **設定ファイル**: `AGENTS.md` のみ(Hooks 不要)。
+- **ルールの反映**: `CLAUDE.md` / `AGENTS.md` §1 で `.feedback/rules.md` の必読を規定。
+- **設定ファイル**: `CLAUDE.md` または `AGENTS.md`（Hooks 不要）。
 
 ### 比較まとめ
 
-| 観点 | プラグイン（Claude Code / Codex） | `init.sh`（Codex IDE 拡張 / 汎用） |
+| 観点 | プラグイン（Claude Code / Codex） | `init.sh`（Claude Code / Codex IDE 拡張 / 汎用） |
 |------|-------------|-------------|
-| 起動ドライバ | Hooks（自動） | AGENTS.md 規約（エージェント自律） |
+| 起動ドライバ | Hooks（自動） | CLAUDE.md / AGENTS.md 規約（エージェント自律） |
 | 編集直後チェック | `PostToolUse` で自動 | 都度 `check_file.sh` を手動実行 |
 | 完了前チェック | `Stop` で自動（ブロック付き） | 完了前に `check.sh` を手動実行 |
-| ルール反映 | `apply-feedback` スキル + ポインタ | `AGENTS.md` §1 規約 |
-| 指摘記録 | `capture-feedback` / `feedback-loop` スキル | `AGENTS.md` §4 手順で手動 |
-| 主な設定・指示ファイル | `hooks/hooks.json`、`.claude-plugin/plugin.json` / `.codex-plugin/plugin.json` | `AGENTS.md` |
+| ルール反映 | `apply-feedback` スキル | `CLAUDE.md` / `AGENTS.md` §1 規約 |
+| 指摘記録 | `capture-feedback` / `feedback-loop` スキル | `CLAUDE.md` / `AGENTS.md` §4 手順で手動 |
+| 主な設定・指示ファイル | `hooks/hooks.json`、`.claude-plugin/plugin.json` / `.codex-plugin/plugin.json` | `CLAUDE.md` / `AGENTS.md` |
 | 共有スクリプト | `scripts/*`, `.feedback/` | ← 同じ |
 
 ---

@@ -41,6 +41,12 @@ assert_eq "1" "$(grep -c '<!-- feedback-harness:pointer:start -->' "$WORK/target
   "AGENTS.md に管理開始マーカーが1つある"
 assert_eq "1" "$(grep -c '<!-- feedback-harness:pointer:end -->' "$WORK/target/AGENTS.md")" \
   "AGENTS.md に管理終了マーカーが1つある"
+assert_contains "$(cat "$WORK/target/CLAUDE.md")" '`init.sh` だけで導入した場合' \
+  "CLAUDE.md が init.sh 単独導入を区別する"
+assert_contains "$(cat "$WORK/target/CLAUDE.md")" 'bash scripts/check_file.sh <編集したファイル>' \
+  "CLAUDE.md に Hooks 無効時の手動チェックがある"
+assert_contains "$(cat "$WORK/target/CLAUDE.md")" '根因: <分類>' \
+  "CLAUDE.md にスキルなしでも使える根因分類がある"
 
 # プラグインが担う領域はコピーしない
 assert_file_absent "$WORK/target/.claude/skills" ".claude/skills をコピーしない"
