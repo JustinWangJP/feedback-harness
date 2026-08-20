@@ -1,138 +1,142 @@
+English | [日本語](README.ja.md) | [简体中文](README.zh-CN.md)
+
 # feedback-harness
 
-Claude Code と Codex の両方で使えるフィードバックハーネスです。次の2つの仕組みを提供します。
+A feedback harness for both Claude Code and Codex. It provides two mechanisms:
 
-1. **自動フィードバックループ** — lint / typecheck / test / build の結果をエージェントへ自動で返し、問題を自分で修正できるようにする
-2. **人間フィードバックの蓄積** — レビューで受けた指摘や有効だった進め方を記録して共通ルールにまとめ、次回以降の作業に反映する
+1. **Automated feedback loop** — returns lint, type-check, test, and build results to the agent automatically so it can fix problems itself
+2. **Accumulated human feedback** — records review comments and successful working patterns, consolidates them into shared rules, and applies them to future work
 
-## 必要な環境
+## Requirements
 
-- **必須:** `bash`、`python3`
-- **任意:** プロジェクトで使う lint、型検査、テスト、ビルドなどのツール
+- **Required:** `bash`, `python3`
+- **Optional:** the linting, type-checking, testing, building, and other tools used by your project
 
-任意のツールは、すでに導入されているものだけを使います。見つからないツールは理由を示して `SKIP` し、ハーネスが自動でインストールすることはありません。
+Optional tools are used only when they are already installed. Missing tools are reported as `SKIP` with a reason; the harness never installs them automatically.
 
-## 仕組み
+## How it works
 
-| 環境 | 自動チェック | ルール反映 |
+| Environment | Automated checks | Applying rules |
 |------|-------------|-----------|
-| Claude Code（プラグイン導入） | プラグインの `hooks/hooks.json` が Hooks を提供する。ファイルを編集した直後に `check_file.sh`、応答を終える前に `check.sh` を実行する（`check.sh` は、前回の検査成功後に変更がある場合のみ実行）。失敗時は exit code 2 で結果をエージェントへ返す。設定ファイル（JSON/YAML）の構文、秘密情報、内部リンク、依存関係、CI 設定も検査する。設定で明示していない検査の指摘は WARN（処理を止めない警告）として `events.jsonl` に記録する。必要なツールが入っていない場合は SKIP とし、ハーネスが自動でインストールすることはない | `apply-feedback` スキルが `.feedback/rules.md` と未整理の指摘を読む |
-| Claude Code（`init.sh` のみ） | CLAUDE.md の規約に従い、変更ごとに `check_file.sh`、完了前に `check.sh` をエージェント自身が実行する | CLAUDE.md の規約により、作業前に `.feedback/rules.md` と未整理の指摘を読む |
-| Codex（プラグイン導入） | 同じ `hooks/hooks.json` を Codex Hooks として読み込む。`apply_patch` のパッチ内容から対象ファイルを見つけてすぐに検査し、Stop の前に全体を検査する | `apply-feedback` スキルが `.feedback/rules.md` と未整理の指摘を読む |
-| Codex IDE 拡張・汎用エージェント（`scripts/init.sh` で導入） | AGENTS.md の規約に従い、変更ごとに `check_file.sh`、完了前に `check.sh` をエージェント自身が実行する | AGENTS.md の規約により、作業前に `.feedback/rules.md` を必ず読む |
+| Claude Code (plugin installed) | The plugin's `hooks/hooks.json` provides Hooks. It runs `check_file.sh` immediately after a file is edited and `check.sh` before the response ends (`check.sh` runs only when something has changed since the last successful check). On failure, exit code 2 returns the result to the agent. It also checks configuration syntax (JSON/YAML), secrets, internal links, dependencies, and CI configuration. Findings from checks that the project has not explicitly configured are recorded in `events.jsonl` as WARNs (non-blocking warnings). Missing tools produce SKIP; the harness never installs them automatically. | The `apply-feedback` skill reads `.feedback/rules.md` and unprocessed feedback. |
+| Claude Code (`init.sh` only) | Following the rules in CLAUDE.md, the agent runs `check_file.sh` after every change and `check.sh` before completion. | CLAUDE.md requires the agent to read `.feedback/rules.md` and unprocessed feedback before starting work. |
+| Codex (plugin installed) | Codex loads the same `hooks/hooks.json` as Codex Hooks. It identifies files from `apply_patch` patches and checks them immediately, then runs a full check before Stop. | The `apply-feedback` skill reads `.feedback/rules.md` and unprocessed feedback. |
+| Codex IDE extension or a general-purpose agent (installed with `scripts/init.sh`) | Following the rules in AGENTS.md, the agent runs `check_file.sh` after every change and `check.sh` before completion. | AGENTS.md requires the agent to read `.feedback/rules.md` before starting work. |
 
-フィードバックは、どの環境でも各プロジェクトの `.feedback/` に保存します。Claude Code、ChatGPT デスクトップアプリの Codex、Codex CLI では、プラグインの Hooks が検査を自動実行します。`init.sh` だけで導入する場合は、Claude Code では CLAUDE.md、Codex IDE 拡張や汎用エージェントでは AGENTS.md の規約に従い、エージェント自身が検査を実行します。Codex では、初回に `/hooks` を開いて内容を確認し、信頼済みとして有効にする必要があります。このリポジトリの `.claude/settings.json` は Claude Code で開発するための設定であり、導入先には配布されません。
+In every environment, feedback is stored in each project's `.feedback/` directory. In Claude Code, Codex in the ChatGPT desktop app, and Codex CLI, plugin Hooks run checks automatically. With an `init.sh`-only installation, the agent runs checks itself by following CLAUDE.md in Claude Code or AGENTS.md in the Codex IDE extension and other general-purpose agents. In Codex, open `/hooks` the first time, review the contents, and enable them as trusted. This repository's `.claude/settings.json` is development configuration for working on the harness in Claude Code and is not distributed to target projects.
 
-## 機能一覧
+## Features
 
-検査は、プロジェクトの**技術スタックを自動検出**して実行します。事前設定は不要です。必要なツールがなければ理由を示して `SKIP` し、自動でインストールすることはありません。
+Checks **detect the project's technology stack automatically**. No advance configuration is required. If a required tool is missing, the check reports `SKIP` with a reason and never installs the tool automatically.
 
-| ステージ | 検査内容 | 対象 |
+| Stage | What it checks | Tools / targets |
 |---|---|---|
-| `lint` | 静的解析 | ruff / eslint / go vet / clippy / shellcheck・bash -n |
-| `typecheck` | 型検査 | mypy(`[tool.mypy]` 宣言時)/ tsc |
-| `test` | テスト（既存のテスト実行に**カバレッジ計測を追加**） | pytest(`--cov`)/ go test `-cover` / npm `test:coverage` / cargo test / mvn verify |
-| `build` | ビルド | go build / npm run build / cargo check |
-| `format` | コード整形のずれ | ruff format / prettier / gofmt / cargo fmt |
-| `security` | 秘密情報の混入 | secretlint(`.secretlintrc.*` 宣言時)/ gitleaks |
-| `docs` | Markdown の内部リンク切れ | 自前実装(python3 のみ) |
-| `contract` | API の破壊的変更 | oasdiff(OpenAPI)/ cargo semver-checks(`[lib]` crate) |
-| — | 設定ファイルの構文 | `*.json` / `*.yaml`(JSONC・複数文書YAMLを誤検出しない) |
-| — | 依存関係の存在・整合性 | npm ls / go mod verify / cargo metadata / deptry |
-| — | CI設定・Dockerfile | actionlint / dockerfilelint・hadolint |
-| — | 未使用コード・アーキテクチャ制約 | vulture / knip / import-linter(いずれも宣言時) |
+| `lint` | Static analysis | ruff / eslint / go vet / clippy / shellcheck and bash -n |
+| `typecheck` | Type checking | mypy (when `[tool.mypy]` is declared) / tsc |
+| `test` | Tests (**adds coverage measurement** to the existing test run) | pytest (`--cov`) / go test `-cover` / npm `test:coverage` / cargo test / mvn verify |
+| `build` | Build | go build / npm run build / cargo check |
+| `format` | Formatting drift | ruff format / prettier / gofmt / cargo fmt |
+| `security` | Committed secrets | secretlint (when `.secretlintrc.*` is declared) / gitleaks |
+| `docs` | Broken internal Markdown links | built-in implementation (requires only python3) |
+| `contract` | Breaking API changes | oasdiff (OpenAPI) / cargo semver-checks (`[lib]` crate) |
+| — | Configuration syntax | `*.json` / `*.yaml` (avoids false positives for JSONC and multi-document YAML) |
+| — | Dependency presence and consistency | npm ls / go mod verify / cargo metadata / deptry |
+| — | CI configuration and Dockerfiles | actionlint / dockerfilelint or hadolint |
+| — | Unused code and architecture constraints | vulture / knip / import-linter (only when declared) |
 
-フィードバックを蓄積する機能は次のとおりです。
+The feedback accumulation features are:
 
-| 機能 | コマンド | 用途 |
+| Feature | Command | Purpose |
 |---|---|---|
-| 指摘の記録 | `feedback_log.py add` | 人間からの指摘や、うまくいった進め方をその場で記録（signal も保存） |
-| ルール化 | `promote` / `merge` / `close` / `retire` | `rules.md` へのルール追加・統合・処理済み化・廃止 |
-| 測定 | `stats` | 初回通過率・平均再チェック回数・よく出る WARN・**再発候補** |
-| 報告 | `report` | 朝会や振り返りに使う期間別の要約（前の期間との比較付き） |
-| 脆弱性監査 | `audit.sh` | 必要なときだけ実行（この処理だけがネットワークを使う） |
+| Record feedback | `feedback_log.py add` | Records human feedback or a successful working pattern immediately, including its signal |
+| Turn feedback into rules | `promote` / `merge` / `close` / `retire` | Adds or merges rules in `rules.md`, closes processed feedback, or retires obsolete rules |
+| Measure | `stats` | Reports first-pass rate, average recheck count, frequent WARNs, and **recurrence candidates** |
+| Report | `report` | Produces a period summary for stand-ups and retrospectives, including comparison with the preceding period |
+| Vulnerability audit | `audit.sh` | Runs only when requested (the only operation that uses the network) |
 
-## できること / できないこと
+## What it does and does not do
 
-このハーネスには、意図的に**行わないこと**があります。以下は未実装の機能ではなく、設計上の判断です。
+The harness deliberately leaves some things undone. These are design decisions, not missing features.
 
-| できること | できないこと(と、その理由) |
+| What it does | What it does not do (and why) |
 |---|---|
-| 検査の失敗をエージェントへ自動で返し、問題を自分で修正できるようにする | **完了を強制しない** — WARN（設定で明示していない検査の指摘）は exit 0 のままとし、処理を止めるのは FAIL だけ |
-| ツールがあれば使い、なければ SKIP して理由を示す | **ツールを自動インストールしない**。環境を変更するかどうかはユーザーが決める |
-| オフラインで完結する検査を毎ターン走らせる | **`check.sh` はネットワークを使わない**。脆弱性監査だけは `audit.sh` に分離し、Stop フックからは呼ばない |
-| カバレッジを計測する | **テストを2回実行しない**。既存の test コマンドにカバレッジ計測を追加する（または `test:coverage` に切り替える）だけ |
-| 破壊的変更を git ベースラインとの差分で検出する | **リモートを参照しない**。比較元は `git merge-base HEAD <既定ブランチ>`、解決できなければ `HEAD` |
-| `apply-feedback` スキルが記録済みの指摘を読み、次の作業へ反映する | **共有ファイルを無断で書き換えない**。`rules.md` 以外への変更（CLAUDE.md への追記・lint の追加）は提案のみとし、人間が承認してから反映する |
-| 数値を出す（`stats` / `report`） | **ダッシュボードを作らない**。バックグラウンドで動き続ける処理やグラフ、外部へのデータ送信は行わず、求められたときだけテキストで出力する |
-| 秘密情報を検出する | **値そのものは出力しない**（secretlint は標準でマスクし、gitleaks では `--redact` を必須にする）。失敗ログはエージェントへ渡されるため |
+| Returns failed checks to the agent automatically so it can fix problems itself | **Does not force completion** — WARNs (findings from checks not explicitly configured by the project) keep exit code 0; only FAIL blocks completion |
+| Uses tools that are available and reports missing ones as SKIP with a reason | **Does not install tools automatically.** The user decides whether to change the environment |
+| Runs fully offline checks on every turn | **`check.sh` does not use the network.** Vulnerability auditing is isolated in `audit.sh` and is never called by the Stop hook |
+| Measures coverage | **Does not run tests twice.** It only adds coverage instrumentation to the existing test command (or switches to `test:coverage`) |
+| Detects breaking changes against a Git baseline | **Does not consult a remote.** The baseline is `git merge-base HEAD <default-branch>`, falling back to `HEAD` when it cannot be resolved |
+| Uses the `apply-feedback` skill to read recorded feedback and apply it to the next task | **Does not modify shared files without permission.** Changes outside `rules.md` (such as additions to CLAUDE.md or a new linter) are proposed and applied only after human approval |
+| Produces numbers with `stats` and `report` | **Does not build a dashboard.** There are no persistent background processes, charts, or external data transmission; output is text produced on request |
+| Detects secrets | **Does not print the values themselves.** secretlint masks by default, and gitleaks must use `--redact`, because failure logs are sent to the agent |
 
-## 構成
+## Repository layout
 
-```
+```text
 .claude-plugin/
-  plugin.json       # Claude Code プラグイン定義
-  marketplace.json  # Claude Code のマーケットプレイス兼 Codex 互換カタログ
+  plugin.json       # Claude Code plugin definition
+  marketplace.json  # Claude Code marketplace and Codex-compatible catalog
 .codex-plugin/
-  plugin.json       # Codex プラグイン定義
-skills/             # feedback-loop (オーケストレーター) / capture-feedback / apply-feedback
-agents/             # feedback-curator (ルール化) / harness-qa (整合性検証)
+  plugin.json       # Codex plugin definition
+skills/             # feedback-loop (orchestrator) / capture-feedback / apply-feedback
+agents/             # feedback-curator (rule curation) / harness-qa (consistency validation)
 commands/
-  init.md           # /feedback-harness:init — Hooks 非対応環境向け資産の展開
+  init.md           # /feedback-harness:init — deploy assets for environments without Hooks
 hooks/
-  hooks.json        # Claude Code / Codex 共通の配布用 Hooks 定義
+  hooks.json        # Shared Claude Code / Codex Hooks definition for distribution
 scripts/
-  check.sh          # スタック自動検出 (Python/Node/Go/Rust/Java/Shell/Make) → 8ステージ + 横断チェック
-  check_file.sh     # 単一ファイルの高速チェック (拡張子ベース)
-  audit.sh          # 必要なときに実行する脆弱性監査 (唯一のネットワーク検査・Stopフック対象外)
-  lib.sh            # 共有ユーティリティ (has / harness_project_root / harness_tree_changed /
+  check.sh          # Detects stacks (Python/Node/Go/Rust/Java/Shell/Make) → 8 stages + cross-cutting checks
+  check_file.sh     # Fast single-file checks based on file extension
+  audit.sh          # On-demand vulnerability audit (only networked check; excluded from Stop hooks)
+  lib.sh            # Shared utilities (has / harness_project_root / harness_tree_changed /
                     #   harness_validate_json|yaml / harness_check_md_links / harness_log_event|warn)
-  harness_config.py # .feedback/config.yaml の読み込みと検査設定の解決
-  feedback_log.py   # フィードバック記録CLI (add / list / search / promote / merge / close /
+  harness_config.py # Loads .feedback/config.yaml and resolves check settings
+  feedback_log.py   # Feedback CLI (add / list / search / promote / merge / close /
                     #   retire / rules / stats / report)
-  init.sh           # 導入スクリプト (Hooks 非対応環境向け資産の展開)
-  README.md         # 各スクリプトの詳しい仕様と必要ツール
-  hooks/            # Claude Code / Codex Hooks ラッパー (SessionStart / PostToolUse / Stop)
+  init.sh           # Installer (deploys assets for environments without Hooks)
+  README.md         # Detailed script specifications and tool requirements
+  README.ja.md      # Japanese version of the script documentation
+  README.zh-CN.md   # Simplified Chinese version of the script documentation
+  hooks/            # Claude Code / Codex Hooks wrappers (SessionStart / PostToolUse / Stop)
 .feedback/
-  rules.md          # 一般化された恒久ルール (エージェント必読・失敗由来/成功由来の2セクション)
-  rules.template.md # rules.md の初期ファイル (導入時・再生成時に使う雛形)
-  config.yaml       # プロジェクト設定 (任意・Git にコミットして共有。config.example.yaml から始める)
-  config.example.yaml # config.yaml の雛形 (全項目をコメント付きで並べたもの)
-  log/              # 記録したフィードバック (先頭にメタデータを持つ Markdown)
-  .last-check       # Stop フックの検査記録 (更新日時の比較に使うローカル状態・Git 管理外)
-  .last-retro       # 振り返り期間の開始点 (report --mark が更新・Git 管理外)
-  .last-audit       # 脆弱性監査の最終実行日 (audit.sh が成功した場合のみ更新・Git 管理外)
-  events.jsonl      # フックの実行結果と WARN のログ (stats/report 用のローカル状態・Git 管理外)
-package.json        # 検査ツール(secretlint 等)を npx --no-install で解決するためだけの宣言
-tests/              # bash テスト (make check → check.sh から自動実行される)
+  rules.md          # Generalized permanent rules (required reading; failure/success sections)
+  rules.template.md # Template used to initialize or regenerate rules.md
+  config.yaml       # Optional project configuration (commit to share; start from config.example.yaml)
+  config.example.yaml # Fully commented configuration template
+  log/              # Recorded feedback as Markdown with metadata frontmatter
+  .last-check       # Local Stop-hook check marker based on modification time (not tracked by Git)
+  .last-retro       # Start of the retrospective reporting period (updated by report --mark; not tracked)
+  .last-audit       # Date of the last successful vulnerability audit (not tracked)
+  events.jsonl      # Hook results and WARN log for stats/report (local state; not tracked)
+package.json        # Declares check tools such as secretlint solely for npx --no-install resolution
+tests/              # Bash tests (make check is detected and run automatically by check.sh)
 docs/
-  pointer_claude.md # 導入先の CLAUDE.md に追加する案内文
-  pointer_agents.md # 導入先の AGENTS.md に追加する案内文
-  superpowers/      # 設計書 (specs/) と実装計画 (plans/)
+  pointer_claude.md # Guidance inserted into target CLAUDE.md files
+  pointer_agents.md # Guidance inserted into target AGENTS.md files
+  superpowers/      # Design specifications (specs/) and implementation plans (plans/)
 .claude/
-  settings.json     # このリポジトリでプラグインを有効化する開発用設定 (配布対象外)
+  settings.json     # Development configuration that enables the plugin in this repository (not distributed)
 ```
 
-ハーネス自身も `check.sh` の検査対象です（`*.sh` と `*.py` を検出します）。
+The harness itself is also checked by `check.sh` (which detects its `*.sh` and `*.py` files).
 
-### ドキュメントの位置づけ
+### Documentation authority
 
-現在の使い方は、この README、[設定ガイド](docs/configuration.md)、[スクリプト仕様](scripts/README.md)を参照してください。日付付きの `docs/proposals/` と `docs/superpowers/` は、提案や設計を行った時点の判断を残す履歴資料です。現在の仕様と内容が異なる場合は、先に挙げた3つの文書と実装を優先してください。文書の一覧は[ドキュメント案内](docs/README.md)にまとめています。
+For current usage, see this README, the [configuration guide](docs/configuration.md), and the [script reference](scripts/README.md). Dated files under `docs/proposals/` and `docs/superpowers/` preserve decisions made when proposals and designs were written. If they differ from the current specification, prefer the three documents listed above and the implementation. See the [documentation index](docs/README.md) for the full list.
 
-Codex 側の現在の仕様は、OpenAI 公式の[プラグイン利用ガイド](https://learn.chatgpt.com/docs/plugins)、[プラグインのパッケージ仕様](https://developers.openai.com/plugins/build/plugins)、[Hooks 仕様](https://developers.openai.com/codex/hooks)を参照してください。Claude Code 側は、Anthropic 公式の[プラグイン導入ガイド](https://code.claude.com/docs/en/discover-plugins)を参照してください。
+For current Codex behavior, see OpenAI's official [plugin usage guide](https://learn.chatgpt.com/docs/plugins), [plugin package specification](https://developers.openai.com/plugins/build/plugins), and [Hooks specification](https://developers.openai.com/codex/hooks). For Claude Code, see Anthropic's official [plugin installation guide](https://code.claude.com/docs/en/discover-plugins).
 
-## 他プロジェクトへの導入
+## Install in another project
 
-### Claude Code だけで使う場合
+### Claude Code only
 
-```
+```text
 /plugin marketplace add JustinWangJP/feedback-harness
 /plugin install feedback-harness@feedback-harness
 ```
 
-導入先に置かれるのは、蓄積データを保存する `.feedback/` だけです。スクリプト、スキル、エージェント、Hooks はプラグイン側にあります。Anthropic 公式以外のマーケットプレイス（第三者マーケットプレイス）は、自動更新が標準では無効です。利用者が自動更新を有効にした場合にのみ、起動時に最新版へ更新されます。
+Only `.feedback/`, which stores accumulated data, is created in the target project. Scripts, skills, agents, and Hooks remain in the plugin. Automatic updates are disabled by default for marketplaces outside Anthropic's official marketplace. The plugin updates at startup only when the user enables automatic updates.
 
-チーム全員に配布する場合は、導入先の `.claude/settings.json` に次の設定を書きます。利用者がフォルダを信頼すると、プラグインのインストールが案内されます。
+To distribute the plugin to an entire team, add the following to the target project's `.claude/settings.json`. Users are prompted to install the plugin after they trust the folder.
 
 ```json
 {
@@ -145,269 +149,270 @@ Codex 側の現在の仕様は、OpenAI 公式の[プラグイン利用ガイド
 }
 ```
 
-### ChatGPT デスクトップアプリの Codex / Codex CLI で使う場合
+### Codex in the ChatGPT desktop app or Codex CLI
 
 ```bash
 codex plugin marketplace add JustinWangJP/feedback-harness
 ```
 
-マーケットプレイスを登録したら、次のどちらかでプラグインをインストールします。
+After registering the marketplace, install the plugin in either of these ways:
 
-- ChatGPT デスクトップアプリでは「Plugins」を開き、`feedback-harness` をインストールする
-- Codex CLI では `/plugins` を開き、`feedback-harness` をインストールして有効にする
+- In the ChatGPT desktop app, open Plugins and install `feedback-harness`
+- In Codex CLI, open `/plugins`, then install and enable `feedback-harness`
 
-インストール後は新しいセッションを開始します。Codex で `/hooks` を開き、`SessionStart` / `PostToolUse` / `Stop` の各 Hook の内容を確認して、信頼済みとして有効にしてください。Codex IDE 拡張はプラグインに対応していないため、次の `init.sh` を使います。
+Start a new session after installation. In Codex, open `/hooks`, review the `SessionStart`, `PostToolUse`, and `Stop` hooks, and enable them as trusted. The Codex IDE extension does not support plugins, so use `init.sh` as described next.
 
-### `init.sh` で手動運用する場合（Claude Code / Codex IDE 拡張 / 汎用エージェント）
+### Manual operation with `init.sh` (Claude Code / Codex IDE extension / general-purpose agents)
 
-Claude Code プラグインから `init.sh` を併用する場合:
+When combining `init.sh` with the Claude Code plugin:
 
-```
+```text
 /feedback-harness:init
 ```
 
-プラグインを使わない場合、または Claude Code 以外から導入する場合は直接:
+Without the plugin, or when installing from outside Claude Code:
 
 ```bash
 git clone https://github.com/JustinWangJP/feedback-harness
 bash feedback-harness/scripts/init.sh /path/to/your-project
-cd /path/to/your-project && bash scripts/check.sh   # スタック検出の確認
+cd /path/to/your-project && bash scripts/check.sh   # Verify stack detection
 ```
 
-`scripts/` と `AGENTS.md` が導入先にコピーされます。`CLAUDE.md` / `AGENTS.md` には、feedback-harness が管理する範囲を示すコメント（管理マーカー）付きで案内文を追加します。`init.sh` を再実行すると、管理マーカーの内側だけを最新版に置き換え、外側にある利用者の記述は残します。`.feedback/rules.md` は空のテンプレートから始まります。
+The installer copies `scripts/` and AGENTS.md into the target project. It adds guidance to CLAUDE.md and AGENTS.md inside management markers that identify the section maintained by feedback-harness. Running `init.sh` again replaces only the contents inside those markers and preserves user-authored text outside them. `.feedback/rules.md` starts from an empty template.
 
-### 導入形態ごとの配布物
+### Assets by installation method
 
-| 資産 | プラグイン | `init.sh` |
+| Asset | Plugin | `init.sh` |
 |---|---|---|
-| `scripts/check.sh` `check_file.sh` `audit.sh` `lib.sh` `harness_config.py` `feedback_log.py` `README.md` | プラグイン側に置かれる。Codex は `PLUGIN_ROOT`（Hooks では互換用の変数 `CLAUDE_PLUGIN_ROOT` も設定）、Claude Code は `CLAUDE_PLUGIN_ROOT` を使って実行する | 導入先の `scripts/` にファイルをコピー |
-| Hooks(`hooks.json`) | ○（有効化後に自動起動） | ✗（CLAUDE.md / AGENTS.md の規約が代替） |
-| skills | ○（Claude Code / Codex） | ✗（CLAUDE.md / AGENTS.md の規約が代替） |
-| agents / commands | Claude Code のみ | ✗ |
-| `scripts/hooks/*`・`init.sh` 自身 | ○ | ✗ |
-| `.feedback/`（蓄積データ） | SessionStart フックが初回に作成 | `init.sh` が初回に作成 |
-| `CLAUDE.md` / `AGENTS.md` への案内文 | ✗（必要な場合は `init.sh` 方式を併用） | 両方（再実行時は管理マーカー内だけを更新し、マーカー外は保持） |
+| `scripts/check.sh` `check_file.sh` `audit.sh` `lib.sh` `harness_config.py` `feedback_log.py` `README.md` `README.ja.md` `README.zh-CN.md` | Stored in the plugin. Codex runs them through `PLUGIN_ROOT` (Hooks also set the compatibility variable `CLAUDE_PLUGIN_ROOT`); Claude Code uses `CLAUDE_PLUGIN_ROOT` | Copied into the target project's `scripts/` directory |
+| Hooks (`hooks.json`) | Yes (runs automatically after enablement) | No (CLAUDE.md / AGENTS.md rules are the fallback) |
+| skills | Yes (Claude Code / Codex) | No (CLAUDE.md / AGENTS.md rules are the fallback) |
+| agents / commands | Claude Code only | No |
+| `scripts/hooks/*` and `init.sh` itself | Yes | No |
+| `.feedback/` (accumulated data) | Created by the SessionStart hook on first use | Created by `init.sh` on first use |
+| Guidance in `CLAUDE.md` / `AGENTS.md` | No (combine with `init.sh` when needed) | Both files (reruns replace only managed sections and preserve content outside the markers) |
 
-### 更新
+### Updating
 
-| 導入形態 | 更新方法 |
+| Installation | How to update |
 |---------|---------|
-| Claude Code プラグイン | 第三者マーケットプレイスの自動更新は標準で無効。`/plugin` → `Marketplaces` で `Enable auto-update` を選ぶか、`/plugin marketplace update feedback-harness` と `/plugin update feedback-harness@feedback-harness` を実行する |
-| Codex プラグイン | `codex plugin marketplace upgrade feedback-harness` でマーケットプレイスを更新し、`/plugins` でプラグインを確認する。更新後は新しいセッションを開始する |
-| `init.sh` でコピーした `scripts/` | 配布元の feedback-harness リポジトリを最新版へ更新してから、そのリポジトリの `init.sh` を再実行する。スクリプトに加え、CLAUDE.md / AGENTS.md の管理マーカー内も最新版に置き換え、マーカー外にある利用者の記述は残す |
+| Claude Code plugin | Automatic updates are disabled by default for third-party marketplaces. Choose `Enable auto-update` under `/plugin` → `Marketplaces`, or run `/plugin marketplace update feedback-harness` and `/plugin update feedback-harness@feedback-harness` |
+| Codex plugin | Run `codex plugin marketplace upgrade feedback-harness`, check the plugin in `/plugins`, and start a new session after updating |
+| `scripts/` copied by `init.sh` | Update the source feedback-harness repository, then rerun its `init.sh`. It replaces scripts and the managed sections of CLAUDE.md / AGENTS.md while preserving user content outside the markers |
 
-## Skills / Agents / Commands の使い方（プラグイン導入時）
+## Using Skills, Agents, and Commands (plugin installations)
 
-マーケットプレイスから導入すると、Claude Code と Codex の両方で **3つの Skill** を使えます。**2つの Agent と1つの Command は Claude Code 専用**です。Codex の `feedback-loop` スキルは、Codex のサブエージェント機能を使います。`init.sh` で導入する場合はこれらを含めず、CLAUDE.md / AGENTS.md に追加される規約と、コピーされたスクリプトで同じ運用を行います。
+Marketplace installations provide **three Skills** in both Claude Code and Codex. **Two Agents and one Command are available only in Claude Code.** In Codex, the `feedback-loop` skill uses Codex's subagent capability. `init.sh` installations do not include these components; the rules added to CLAUDE.md / AGENTS.md and the copied scripts provide the same workflow.
 
-### 呼び出され方の違い
+### How each component is invoked
 
-| 種別 | 起動のしかた | 誰が起動するか |
+| Type | How it starts | Who starts it |
 |---|---|---|
-| **Skill** | 依頼の内容に応じて**自動で起動**する。明示的に使う場合は、スキル名を指定して頼む（例: 「apply-feedback スキルでルールを反映して」） | Claude / Codex 自身 |
-| **Agent** | `feedback-loop` スキルが環境のサブエージェント機能で起動する（Claude Code の配布 Agent 定義も利用） | スキル(**直接呼ぶ必要はない**) |
-| **Command** | `/feedback-harness:init` と入力する | ユーザー |
+| **Skill** | Starts **automatically** based on the request. To invoke one explicitly, name it in your request (for example, “Apply the rules with the apply-feedback skill.”) | Claude / Codex |
+| **Agent** | The `feedback-loop` skill starts it through the environment's subagent capability (also using the distributed Agent definitions in Claude Code) | The skill (**you do not need to call it directly**) |
+| **Command** | Enter `/feedback-harness:init` | The user |
 
-**プラグイン方式では、普段は特別な操作をする必要はありません。** 各 Skill は依頼の内容に応じて自動で起動します。`init.sh` 方式では Skill をコピーしないため、CLAUDE.md / AGENTS.md に追加される規約に従って、対応するスクリプトを直接実行します。以下は、プラグインの Skill を明示的に動かしたい場合の手順です。
+**With a plugin installation, you normally do not need to do anything special.** Each Skill starts automatically when the request matches. Because `init.sh` does not copy Skills, its workflow instead follows the rules added to CLAUDE.md / AGENTS.md and runs the corresponding scripts directly. The following sections show how to invoke plugin Skills explicitly.
 
-### Skill 1: `apply-feedback` — 作業前に過去のルールを反映する
+### Skill 1: `apply-feedback` — apply previous feedback before work
 
-**いつ起動するか**: 実装・編集・レビュー・設計を始める前。「過去の指摘を踏まえて」「前回のフィードバックを反映して」「ルールに従って」と言ったとき、およびやり直し・修正の依頼のとき。
+**When it starts:** Before implementation, editing, review, or design. It also starts when you ask to “apply previous feedback,” “use the earlier feedback,” or “follow the rules,” and for requests to redo or correct work.
 
-**何をするか**:
+**What it does:**
 
-1. `.feedback/rules.md` を読む(**失敗由来**=守るべき制約 / **成功由来**=再現すべき正例 の2セクション)
-2. まだルール化していない open エントリも `list --status open` で確認する（ルール化まで使われない状態を避けるため）
-3. 今回の作業カテゴリに一致するルールを特定し、方針に組み込んでから実装を始める
-4. ルールと今回の指示が矛盾する場合は**今回の指示を優先**し、矛盾があったことを伝える（ルールを見直す機会になる）
+1. Reads `.feedback/rules.md` (two sections: **failure-derived** constraints and **success-derived** patterns to repeat)
+2. Uses `list --status open` to read open entries that have not yet become rules, so they are not ignored while awaiting promotion
+3. Finds rules in categories relevant to the current task and incorporates them before implementation
+4. If a rule conflicts with the current request, follows the **current request** and tells you about the conflict so the rule can be reconsidered
 
-```
-あなた: 認証まわりをリファクタして
-  → apply-feedback が自動起動し、rules.md を読んでから着手する
-```
-
-### Skill 2: `capture-feedback` — 指摘や成功パターンを記録する
-
-**いつ起動するか**: あなたが成果物を修正・指摘した、「こうして」「次からはこうやって」と言った、方針を訂正した — そのすべて。うまくいった進め方を残したいときにも使う。
-
-**何をするか**:
-
-1. 指摘を1文の要約に整理する
-2. 失敗に関する指摘なら、根因を1行で分類する（`文脈欠落` / `指示欠陥` / `実行誤り` / `モデル限界` / `未判定`）
-3. signal（起きた出来事の種類）を決める。誤った出力や行動への指摘は、根因にかかわらず `failure` とする（省略した場合は CLI が自動で判断する）
-4. カテゴリを選び `feedback_log.py add` で記録する
-5. open が3件以上になったら、共通ルールへの整理（`feedback-loop`）を提案する
-
-```
-あなた: エラーメッセージは日本語で書いて。次からもそうして
-  → capture-feedback が自動起動し、根因も付けて記録する
+```text
+You: Refactor the authentication code.
+  → apply-feedback starts automatically and reads rules.md before work begins.
 ```
 
-根因は、次の基準で判断します。
+### Skill 2: `capture-feedback` — record corrections and successful patterns
 
-| 根因 | 判断基準 |
+**When it starts:** Whenever you correct or comment on an artifact, say “do it this way” or “do this next time,” or revise a direction. It also applies when you want to preserve a successful working pattern.
+
+**What it does:**
+
+1. Summarizes the feedback in one sentence
+2. For feedback about a failure, classifies the root cause on one line (`文脈欠落` / `指示欠陥` / `実行誤り` / `モデル限界` / `未判定`)
+3. Determines the signal (what happened). A correction to incorrect output or behavior is always `failure`, regardless of root cause; when omitted, the CLI infers it
+4. Selects a category and records the entry with `feedback_log.py add`
+5. When three or more entries are open, suggests consolidating them through `feedback-loop`
+
+```text
+You: Write error messages in Japanese. Do that from now on.
+  → capture-feedback starts automatically and records the correction with its root cause.
+```
+
+Root causes use these criteria:
+
+| Root cause | Criterion |
 |---|---|
-| `文脈欠落` | 判断時に必要な事実・ルール・バージョン情報が、読み込まれた文脈に存在しなかった。参照できた情報を見落とした場合は含めない |
-| `指示欠陥` | 期待結果・制約・受け入れ条件・手順が不足、曖昧、または矛盾しており、通常の品質基準だけでは一意に判断できなかった。個別の禁止事項がなかっただけの通常の不具合は含めない |
-| `実行誤り` | 必要な文脈と十分明確な指示はあったが、見落とし、違反、推論ミス、実装ミスが起きた。単発の失敗では最初に検討する |
-| `モデル限界` | 文脈・指示・利用可能なツール・妥当な再試行をそろえても、同種の失敗を安定して避けられない。単発の見落としだけでは判定しない |
-| `未判定` | 証拠が不足している、または複数の原因を分離できない。無理に決めず、追加情報を待つ |
+| `文脈欠落` (missing context) | Facts, rules, or version information needed for the decision were absent from the loaded context. This does not include overlooking available information |
+| `指示欠陥` (instruction defect) | Expected results, constraints, acceptance criteria, or procedure were missing, ambiguous, or contradictory, so ordinary quality standards could not determine a unique answer. A normal bug does not qualify merely because no specific prohibition existed |
+| `実行誤り` (execution error) | The necessary context and sufficiently clear instructions existed, but the agent overlooked them, violated them, reasoned incorrectly, or implemented incorrectly. Consider this first for isolated failures |
+| `モデル限界` (model limitation) | The same failure cannot be avoided reliably even with sufficient context, clear instructions, available tools, and reasonable retries. Do not choose this for a single oversight |
+| `未判定` (undetermined) | Evidence is insufficient or multiple causes cannot be separated. Wait for more information instead of forcing a classification |
 
-`根因:` 行は1件だけ記録します。未定義の分類は CLI が拒否し、上の5分類から選び直すよう案内します。
+Record exactly one `根因:` line. The CLI rejects undefined classifications and asks you to choose from these five values.
 
-### Skill 3: `feedback-loop` — 全体の処理を振り分ける
+### Skill 3: `feedback-loop` — route the overall workflow
 
-**いつ起動するか**: 「フィードバックを整理して」「ルール化して」「ハーネスを点検して」「○○プロジェクトに導入して」「ルールを棚卸しして」「調子はどう?」「監査して」など。
+**When it starts:** For requests such as “organize the feedback,” “turn it into rules,” “inspect the harness,” “install it in project X,” “review the rules,” “how is it doing?”, or “audit it.”
 
-依頼の内容から **Phase を自動で判断**して実行します。
+It selects a **Phase automatically** from the request.
 
-| 依頼の例 | Phase | 実行内容 |
+| Example request | Phase | Action |
 |---|---|---|
-| 「フィードバックを整理して」「ルール化して」 | 1 | **feedback-curator エージェント**を起動し、promote / merge / close のどれを使うか判断 |
-| 「ハーネスを点検して」「検証して」 | 2 | **harness-qa エージェント**を起動し、整合性レポートを `_workspace/` に出力 |
-| 「このハーネスを ○○ に導入して」 | 3 | `init.sh` を実行し、導入先で `check.sh` を1回流して確認 |
-| 「ルールを棚卸しして」「定期審査」 | 4 | `stats` を基に、各ルールを 維持 / 文言強化 / 廃止候補 に分類して提示 |
-| 「調子は?」「初回通過率は?」「振り返りの議題」 | — | `stats` / `report --last`（実施後は `--mark` で振り返り期間の開始点を更新） |
-| 「監査して」「脆弱性チェック」 | — | `audit.sh` を実行(ネットワークを使うためフックでは走らない) |
+| “Organize the feedback” / “Turn it into rules” | 1 | Starts the **feedback-curator agent**, which decides between promote, merge, and close |
+| “Inspect the harness” / “Validate it” | 2 | Starts the **harness-qa agent** and writes a consistency report under `_workspace/` |
+| “Install this harness in project X” | 3 | Runs `init.sh`, then runs `check.sh` once in the target project |
+| “Review the rules” / “Periodic review” | 4 | Uses `stats` to classify each rule as keep, strengthen wording, or retirement candidate |
+| “How is it doing?” / “What is the first-pass rate?” / “Topics for the retrospective” | — | Runs `stats` or `report --last` (then `--mark` after the retrospective to advance the reporting period) |
+| “Audit it” / “Check for vulnerabilities” | — | Runs `audit.sh` (uses the network, so Hooks never run it automatically) |
 
+```text
+You: Organize the accumulated feedback and turn it into rules.
+  → feedback-loop selects Phase 1 and starts feedback-curator.
+  → It presents the rule changes and the rules.md diff for your decision.
 ```
-あなた: 溜まったフィードバックを整理してルールにして
-  → feedback-loop が Phase 1 と判断 → feedback-curator を起動
-  → ルール化の結果と rules.md の差分を提示（採用するかどうかはあなたが決める）
-```
 
-### Agents（スキル経由で起動される）
+### Agents (started through Skills)
 
-直接呼び出す必要はありませんが、それぞれの役割を知っておくと結果を理解しやすくなります。Codex では、同名の Markdown を作業ルールとして読み、Codex のサブエージェントへ渡します。
+You do not need to invoke these agents directly, but understanding their roles makes their results easier to interpret. In Codex, same-named Markdown files are read as working rules and passed to Codex subagents.
 
-| Agent | 起動元 | 役割 | 出力 |
+| Agent | Started by | Role | Output |
 |---|---|---|---|
-| `feedback-curator` | `feedback-loop` Phase 1（Phase 4 では起動せず、判断の考え方だけを使う） | 指摘を共通ルールにまとめる。signal（指摘の種類）を基に反映先を振り分け、失敗に関する指摘は根本原因によってさらに振り分ける | `promote`/`merge`/`close` の実行結果と判断の要約。`rules.md` 以外への反映案（CLAUDE.md への追記・lint の追加）は**提案のみ** |
-| `harness-qa` | `feedback-loop` Phase 2 | スクリプトが動くか、Hooks の設定が正しいか、CLAUDE.md / AGENTS.md / rules.md が一致しているかを横断して検証する | `_workspace/qa_report_{日付}.md` に PASS/FAIL/SKIP レポート |
+| `feedback-curator` | `feedback-loop` Phase 1 (Phase 4 uses its decision framework without starting it) | Consolidates feedback into shared rules. It routes by signal and further routes failure feedback by root cause | Result and rationale for `promote`, `merge`, or `close`. Changes outside `rules.md` (such as additions to CLAUDE.md or a new linter) are **proposals only** |
+| `harness-qa` | `feedback-loop` Phase 2 | Checks script behavior, Hook configuration, and consistency among CLAUDE.md, AGENTS.md, and rules.md | A PASS/FAIL/SKIP report at `_workspace/qa_report_{date}.md` |
 
-どちらも**共有ファイルを自動では書き換えません**。`rules.md` 以外への変更は提案として示し、実際に反映するかどうかはユーザーが決めます。
+Neither agent **modifies shared files automatically**. Changes outside `rules.md` are proposed, and you decide whether to apply them.
 
 ### Command: `/feedback-harness:init`
 
-Codex や他の汎用エージェントと**併用する**場合に、現在のプロジェクトへ `scripts/` と `AGENTS.md` をコピーします。Claude Code だけで使う場合は必要ありません（スクリプトはプラグイン側にあるため）。
+When using Codex or another general-purpose agent **alongside** Claude Code, this command copies `scripts/` and AGENTS.md into the current project. It is unnecessary when you use Claude Code alone because the scripts remain in the plugin.
 
-```
+```text
 /feedback-harness:init
 ```
 
-### 導入できているかの確認
+### Verify the installation
 
+```text
+/plugin                      # Claude Code: check that feedback-harness is enabled
+/plugins                     # Codex: check that feedback-harness is installed and enabled
+/hooks                       # Codex: check that all three Hooks are trusted
 ```
-/plugin                      # Claude Code: feedback-harness が enabled になっているか
-/plugins                     # Codex: feedback-harness がインストール・有効化されているか
-/hooks                       # Codex: 3つの Hook が信頼済みになっているか
-```
 
-スキルが使われているかどうかは、応答中に該当する Skill の使用表示が出ることで確認できます。Hooks が動いているかどうかは、ファイルを1つ編集し、`.feedback/events.jsonl` に新しい行が増えることで確認できます。
+You can confirm that a Skill is active from the Skill indicator shown in the response. To confirm that Hooks are running, edit one file and check that `.feedback/events.jsonl` gains a new line.
 
-## 使い方
+## Usage
 
-### 日常の開発（Claude Code / Codex プラグイン）
+### Daily development (Claude Code / Codex plugin)
 
-検査は自動で実行されるため、通常は**手動で何かを実行する必要はありません**。ファイルを編集すると `check_file.sh` が、応答を終える前には `check.sh` が動きます。検査に失敗すると、その結果が自動でエージェントへ返されます。
+Checks run automatically, so you normally **do not need to run anything manually**. Editing a file triggers `check_file.sh`; before a response ends, `check.sh` runs. When a check fails, its result is returned to the agent automatically.
 
-次のコマンドは、このリポジトリ内で作業する場合、または `init.sh` で `scripts/` をコピーしたプロジェクトで手動実行する場合に使います。プラグインだけで導入したプロジェクトには `scripts/` をコピーしないため、通常は Hooks に任せます。
+Use the following commands when working in this repository or when manually operating a project into which `init.sh` copied `scripts/`. A plugin-only target does not contain a copied `scripts/` directory and normally relies on Hooks.
 
 ```bash
-bash scripts/check.sh                    # 完了前の全体確認(CIでも同じものを使う)
-bash scripts/check.sh /path/to/project   # 別プロジェクトを検査
-FEEDBACK_CHECK_SKIP="test build" bash scripts/check.sh   # 重いステージを外す
-bash scripts/audit.sh                    # 脆弱性監査(ネットワークを使うので手動)
+bash scripts/check.sh                    # Full pre-completion check (also used in CI)
+bash scripts/check.sh /path/to/project   # Check another project
+FEEDBACK_CHECK_SKIP="test build" bash scripts/check.sh   # Exclude expensive stages
+bash scripts/audit.sh                    # Vulnerability audit (manual because it uses the network)
 ```
 
-### 指摘を記録する
+### Record feedback
 
 ```bash
-# 人間から指摘を受けたとき（失敗に関する指摘には根本原因を1行添える）
+# After receiving human feedback (include one root-cause line for failure feedback)
 python3 scripts/feedback_log.py add --category style --source human \
-  --summary "エラーメッセージは日本語で書く" \
-  --detail "日本語で統一する要件が指示になかった。根因: 指示欠陥"
+  --summary "Write error messages in Japanese" \
+  --detail "The Japanese-only requirement was absent from the instructions. 根因: 指示欠陥"
 
-# うまくいった進め方や指示の言い回しを残すとき（signal は省略時に自動で判断される）
+# To preserve a successful workflow or phrasing (the signal is inferred when omitted)
 python3 scripts/feedback_log.py add --category workflow --source agent \
-  --summary "設計を固めてから実装すると手戻りが無い"
+  --summary "Agreeing on the design before implementation prevents rework"
 ```
 
-Claude Code / Codex プラグインでは `capture-feedback` スキルが同じ処理を行うため、コマンドを直接実行する必要はありません。
+With the Claude Code or Codex plugin, the `capture-feedback` skill performs the same operation, so you do not need to run the command directly.
 
-### 溜まった指摘を整理する
+### Organize accumulated feedback
 
 ```bash
-python3 scripts/feedback_log.py list                    # open エントリ一覧
-python3 scripts/feedback_log.py list --signal failure   # 失敗系だけ絞る
-python3 scripts/feedback_log.py promote <id> --rule "<一般化した1行>"
-python3 scripts/feedback_log.py merge <id> --into <既存ルールの出典id>   # 再発時
-python3 scripts/feedback_log.py retire <出典id> --reason "<退役理由>"    # 棚卸し
+python3 scripts/feedback_log.py list                    # List open entries
+python3 scripts/feedback_log.py list --signal failure   # Show failure signals only
+python3 scripts/feedback_log.py promote <id> --rule "<one generalized rule>"
+python3 scripts/feedback_log.py merge <id> --into <existing-rule-source-id>   # For recurrence
+python3 scripts/feedback_log.py retire <source-id> --reason "<retirement reason>"    # Rule review
 ```
 
-### 効果を測る・共有する
+### Measure and share results
 
 ```bash
-python3 scripts/feedback_log.py stats                 # 初回通過率・再発候補・最終監査日
-python3 scripts/feedback_log.py report --since yesterday   # 朝会の1問
-python3 scripts/feedback_log.py report --last --mark       # 振り返り後に次の集計期間の開始点を更新
+python3 scripts/feedback_log.py stats                      # First-pass rate, recurrence candidates, last audit date
+python3 scripts/feedback_log.py report --since yesterday  # One stand-up question
+python3 scripts/feedback_log.py report --last --mark       # Advance the period after the retrospective
 ```
 
-### 環境変数
+### Environment variables
 
-環境変数は、**config より優先される一時的な設定**です。CI や調査中に、その場限りで設定を変える場合に使います。Git にコミットしてチームで共有する設定は、設定ファイルに書きます。
+Environment variables are **temporary overrides that take precedence over config**. Use them for one-off changes in CI or during investigation. Put settings that should be committed and shared by the team in the configuration file.
 
-| 変数 | 既定 | 効果 |
+| Variable | Default | Effect |
 |---|---|---|
-| `FEEDBACK_CHECK_SKIP` | (空) | 空白区切りでステージを除外(`lint typecheck test build format security docs contract`) |
-| `FEEDBACK_SHELLCHECK_SEVERITY` | `warning` | shellcheck の重大度しきい値。`style` で厳しくする |
-| `FEEDBACK_CONTRACT_BASE` | `main` | API 契約差分のベースラインブランチ |
-| `CLAUDE_PROJECT_DIR` | (自動) | Claude Code が設定する検査対象ルート。Codex では Hook 実行時のカレントディレクトリから解決する |
+| `FEEDBACK_CHECK_SKIP` | (empty) | Space-separated stages to exclude (`lint typecheck test build format security docs contract`) |
+| `FEEDBACK_SHELLCHECK_SEVERITY` | `warning` | shellcheck severity threshold; use `style` for stricter checking |
+| `FEEDBACK_CONTRACT_BASE` | `main` | Baseline branch for API contract differences |
+| `CLAUDE_PROJECT_DIR` | (automatic) | Project root set by Claude Code. Codex resolves the root from the Hook's working directory |
 
-### 設定ファイル
+### Configuration file
 
-`.feedback/config.yaml` にプロジェクトの設定を書き、Git にコミットして共有できます。ステージの skip、FAIL・WARN の切り替え、検査対象の除外（`exclude`）、ログの行数、ツールのしきい値、監査間隔などを、環境変数を使わずに調整できます。記載しなかった項目には既定値が使われます。
+Commit `.feedback/config.yaml` to share project settings. It can configure stage skips, FAIL/WARN behavior, excluded paths (`exclude`), log line limits, tool thresholds, audit intervals, and more without environment variables. Omitted settings use defaults.
 
 ```bash
-cp .feedback/config.example.yaml .feedback/config.yaml   # 雛形から始める
-bash scripts/check.sh --list-checks           # 検査ID・実効判定・「出所」を一覧（検査は実行しない）
-bash scripts/check.sh --list-checks --json    # 同じ内容を機械可読な JSON で出力
+cp .feedback/config.example.yaml .feedback/config.yaml   # Start from the template
+bash scripts/check.sh --list-checks           # List check IDs, effective decisions, and sources without running checks
+bash scripts/check.sh --list-checks --json    # Print the same information as machine-readable JSON
 ```
 
-設定の優先順位は、環境変数 > 検査単位 > スタック単位 > 全体 > 既定値です。書き方とすべての項目は、[設定ガイド](docs/configuration.md)を参照してください。
+Precedence is environment variable > individual check > stack > global > default. See the [configuration guide](docs/configuration.md) for syntax and every available setting.
 
-## フィードバック運用フロー
+## Feedback workflow
 
-```
-[記録]  人間からの指摘・修正 / 有効だった進め方 / 繰り返す check 失敗 / 完了前の振り返り
-          → feedback_log.py add   (capture-feedback スキル / AGENTS.md の規約)
-             失敗に関する指摘は根因を --detail に1行:
+```text
+[record] Human correction / successful workflow / repeated check failure / pre-completion retrospective
+          → feedback_log.py add   (capture-feedback skill / AGENTS.md rules)
+             Failure feedback includes one root cause in --detail:
                文脈欠落 | 指示欠陥 | 実行誤り | モデル限界 | 未判定
-             signal(--signal)は出来事の種類:
-               誤った出力・行動は根因にかかわらず failure。省略時は CLI が自動判断する
+             signal (--signal) describes what happened:
+               Incorrect output or behavior is failure regardless of root cause; the CLI infers it when omitted
                 ↓
-[open]  ├─ ルール化を待たず、次の作業を始めるときに参照する (apply-feedback スキル)
-        └─ feedback-curator が根本原因を見て反映先を選ぶ (feedback-loop スキル)
-             promote → .feedback/rules.md へ新規ルール      (主に指示欠陥)
-             merge   → 既存ルールへ統合。再発なら文言を強化
-             close   → 共通ルールにできない一回限りの指摘を処理済みにする
-             提案    → 文脈欠落: CLAUDE.md などへの前提情報追加案
-                       実行誤り: lint・テスト・チェックリスト追加案
-                       モデル限界: 人間確認・決定的ツールへの切り替え案（再現証拠が必要）
-                       未判定: open のまま追加情報を待つ
-                       ※ rules.md 以外は提案止まり、反映は人間が承認する
+[open]  ├─ Read before the next task without waiting for promotion (apply-feedback skill)
+        └─ feedback-curator selects the destination based on root cause (feedback-loop skill)
+             promote → add a new rule to .feedback/rules.md      (mainly instruction defects)
+             merge   → merge into an existing rule; strengthen wording on recurrence
+             close   → close one-off feedback that cannot become a shared rule
+             propose → Missing context: add prerequisite information to CLAUDE.md, etc.
+                       Execution error: add a linter, test, or checklist
+                       Model limitation: require human review or a deterministic tool (reproduction evidence required)
+                       Undetermined: leave open and wait for more information
+                       Changes outside rules.md remain proposals until approved by a human
                 ↓
-[反映]  .feedback/rules.md → 次セッションの作業開始前に適用
+[apply] .feedback/rules.md → apply before work in the next session
                 ↓
-[棚卸]  定期審査 (feedback-loop Phase 4) → 古くなったルールは retire で廃止
-[測定]  feedback_log.py stats            — 初回通過率・再発候補(要求時のみ・テキスト出力)
-[報告]  feedback_log.py report --last → 朝会/振り返りの5分議題(実施後に --mark で集計期間の開始点を更新)
-[監査]  bash scripts/audit.sh          — 脆弱性監査(必要なときに手動実行・ネットワーク使用)
-                                          成功時のみ .last-audit を更新 → report が期限を見る
+[review] Periodic review (feedback-loop Phase 4) → retire obsolete rules
+[measure] feedback_log.py stats         — first-pass rate and recurrence candidates (text, on request)
+[report]  feedback_log.py report --last → five-minute stand-up/retrospective topic
+                                          (then --mark to advance the reporting period)
+[audit]   bash scripts/audit.sh          — manual vulnerability audit (uses the network)
+                                          updates .last-audit only on success; report checks its age
 ```
 
-記録した内容は、promote によるルール化を待たず、次の作業から参照されます。記録を溜めてからまとめてルール化する方式では、ルール化するまでの間に同じ指摘が繰り返されるためです。
+Recorded feedback is consulted from the next task onward without waiting for `promote`. Otherwise, the same problem could recur while entries wait to be turned into rules.
 
-測定は、Feedback Flywheel における「変化の測定」に当たります。ダッシュボードは作りません。`stats` は求められたときだけテキストを出力し、数値は `report` の「数字」セクションにのみ表示します。`events.jsonl`（フックの実行結果）と `.last-retro`（振り返り期間の開始点）は、端末内だけで使う状態ファイルであり、Git では共有しません。
+Measurement corresponds to “measuring the change” in the Feedback Flywheel. The harness does not build a dashboard. `stats` produces text only on request, and numbers appear only in the “Numbers” section of `report`. `events.jsonl` (Hook results) and `.last-retro` (the reporting period marker) are local state files and are not shared through Git.
 
-反映先を rules.md だけに限定しないのは、シグナルの種類によって改善すべき共有ファイルが異なるためです。知識の不足は、前提情報を示す文書（CLAUDE.md）で補います。機械的に検出できる失敗は lint やテストに組み込む方が、文章のルールだけで防ぐよりも確実です（参考: [Feedback Flywheel](docs/references/fowler-feedback-flywheel-translation.md)）。
+Rules are not the only destination because the right shared artifact depends on the signal. Missing knowledge belongs in prerequisite documentation such as CLAUDE.md. Mechanically detectable failures are prevented more reliably by a linter or test than by prose alone. See [Feedback Flywheel](docs/references/fowler-feedback-flywheel-translation.md).

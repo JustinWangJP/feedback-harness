@@ -1,248 +1,250 @@
-# scripts/ — フィードバックハーネスの実行エンジン
+English | [日本語](README.ja.md) | [简体中文](README.zh-CN.md)
 
-フィードバックハーネスの実行スクリプトを置くディレクトリです。プロジェクトルートに README.md がある場合は、ハーネス全体の概要をそちらで説明します。この文書では、各スクリプトの**役割・仕様・利用方法**を説明します。
+# scripts/ — feedback-harness execution engine
 
-スクリプトと蓄積データ(`.feedback/`)は **Claude Code / Codex 両環境で完全共有**。環境固有なのは「誰が・いつスクリプトを起動するか」のエントリポイントだけ(後述)。
+This directory contains the feedback harness's executable scripts. When a README.md exists at the project root, it provides the overview of the complete harness. This document describes the **role, specification, and usage** of each script.
 
-## 構成
+The scripts and accumulated data (`.feedback/`) are **fully shared between Claude Code and Codex**. Only the entry point—who starts each script and when—is environment-specific, as described later.
+
+## Layout
 
 ```text
 scripts/
-├── check.sh          # フルチェック: スタック自動検出 → 8ステージと横断検査、要約出力
-├── check_file.sh     # 単一ファイル高速チェック: 拡張子ベースの静的チェック
-├── lib.sh            # check.sh / check_file.sh の共有ユーティリティ(has() ほか)
-├── harness_config.py # 設定(.feedback/config.yaml)の唯一のパーサ(YAMLサブセット・スキーマ検証・3層解決)
-├── feedback_log.py   # フィードバック記録CLI: 記録・昇華・棚卸し・集計・期間レポート
-├── audit.sh          # オンデマンド脆弱性監査(唯一のネットワーク検査。Stopフックからは呼ばれない)
-├── init.sh           # 導入スクリプト(Hooks 非対応環境向け資産の展開。導入先にはコピーされない)
+├── check.sh          # Full check: stack detection → 8 stages and cross-cutting checks, then summary
+├── check_file.sh     # Fast single-file check based on file extension
+├── lib.sh            # Shared utilities for check.sh / check_file.sh, including has()
+├── harness_config.py # Sole parser for .feedback/config.yaml (YAML subset, schema validation, 3-level resolution)
+├── feedback_log.py   # Feedback CLI: record, promote, review, aggregate, and report by period
+├── audit.sh          # On-demand vulnerability audit (the only networked check; never called by Stop hooks)
+├── init.sh           # Installer for environments without Hooks (not copied into target projects)
 └── hooks/
-    ├── on_session_start.sh  # Claude Code / Codex SessionStart → .feedback/ の初回シード
+    ├── on_session_start.sh  # Claude Code / Codex SessionStart → initial .feedback/ seed
     ├── post_edit.sh         # Claude Code / Codex PostToolUse → check_file.sh
     └── on_stop.sh           # Claude Code / Codex Stop → check.sh
 ```
 
-3系統に分かれる:
+The scripts fall into three groups:
 
-| 系統 | スクリプト | 役割 |
+| Group | Scripts | Role |
 |------|-----------|------|
-| 自動チェック(オフライン) | `check.sh`, `check_file.sh`, `hooks/*` | lint/test/build 結果をエージェントに返し、自己修正させる |
-| フィードバック蓄積・測定 | `feedback_log.py` | 人間の指摘を記録・一般化し、次セッションに引き継ぐ。数字と期間ダイジェストを出す |
-| オンデマンド監査(ネットワーク) | `audit.sh` | 依存の脆弱性を調べる。フックからは呼ばれない |
+| Automated checks (offline) | `check.sh`, `check_file.sh`, `hooks/*` | Returns lint/test/build results to the agent so it can fix problems itself |
+| Feedback accumulation and measurement | `feedback_log.py` | Records and generalizes human feedback for future sessions; produces metrics and period summaries |
+| On-demand audit (networked) | `audit.sh` | Checks dependencies for vulnerabilities; never called by Hooks |
 
-配布のされ方が2通りある。**プラグイン導入**では全ファイルがプラグイン側に置かれる。Codex は `PLUGIN_ROOT`（Hooks では互換変数 `CLAUDE_PLUGIN_ROOT` も設定）、Claude Code は `CLAUDE_PLUGIN_ROOT` を使う。**`init.sh` 導入**では `check.sh` / `check_file.sh` / `lib.sh` / `audit.sh` / `harness_config.py` / `feedback_log.py` / このREADMEが導入先の `scripts/` にコピーされる（`hooks/` と `init.sh` 自身はコピーされない — 前者はプラグイン専用、後者は配布元から実行するもの）。
+There are two distribution models. With a **plugin installation**, all files remain in the plugin. Codex uses `PLUGIN_ROOT` (Hooks also set the compatibility variable `CLAUDE_PLUGIN_ROOT`), while Claude Code uses `CLAUDE_PLUGIN_ROOT`. With an **`init.sh` installation**, `check.sh`, `check_file.sh`, `lib.sh`, `audit.sh`, `harness_config.py`, `feedback_log.py`, and all three language versions of this README are copied into the target project's `scripts/` directory. `hooks/` and `init.sh` itself are not copied: Hooks are plugin-only, and `init.sh` runs from the source repository.
 
-## 設計思想(共通)
+## Shared design principles
 
-1. **出力はエージェント向け**: 検査ごとの結果と最終状態を簡潔に表示し、失敗の詳細は末尾の指定行数だけを表示する。長大なログ全文は出力しない。
-2. **寛容な検出**: ツール未インストールのステージは `SKIP` で、失敗扱いにしない。ハーネス側でスタックを強要しない。
-3. **宣言の有無で強度を決める**: プロジェクトが設定ファイルで宣言した検査は `FAIL`(完了をブロック)、ハーネスが推測で走らせる検査は `WARN`(報告のみ・exit 0)。宣言していない検査で完了不能にすると、導入初日の既存プロジェクトが作業できなくなる。WARN は `events.jsonl` に記録され `stats` / `report` の「頻出WARN」に現れる。
-4. **ツールを自動インストールしない**: 未導入は `SKIP` と理由表示に留める。インストールは環境を変える行為であり、導入の判断はユーザーが行う。
-5. **スタック非依存**: プロジェクト種別をマニフェスト(`pyproject.toml`/`package.json`/…)から自動検出。設定不要。
-6. **状態を分離する**: スクリプト自身には状態を埋め込まず、すべて `.feedback/` 配下のファイルへ保存する。`rules.md` や `log/` などの共有データは Git で追跡できる。一方、`events.jsonl`、`.last-check`、`.last-retro`、`.last-audit` などの実行時状態は `.gitignore` の対象であり、端末間では共有しない。
+1. **Output is designed for agents:** Show concise results per check and a final status. For a failure, show only a configured number of trailing log lines instead of the entire log.
+2. **Permissive detection:** A stage whose tool is not installed becomes `SKIP`, not a failure. The harness does not impose a stack.
+3. **Declarations determine strictness:** A check declared by the project in configuration becomes `FAIL` and blocks completion. A check inferred by the harness becomes `WARN`, which is reported but keeps exit code 0. Blocking undeclared checks would make existing projects unusable on the first day. WARNs are recorded in `events.jsonl` and appear under frequent WARNs in `stats` and `report`.
+4. **Never install tools automatically:** Missing tools produce `SKIP` with a reason. The user decides whether to modify the environment.
+5. **Stack-independent operation:** Detect the project type automatically from manifests such as `pyproject.toml` and `package.json`; no configuration is required.
+6. **Keep state separate:** Scripts contain no embedded state. Everything is stored under `.feedback/`. Shared data such as `rules.md` and `log/` can be tracked by Git, while runtime state such as `events.jsonl`, `.last-check`, `.last-retro`, and `.last-audit` is ignored by Git and is not shared across machines.
 
 ---
 
-## 各スクリプトの仕様
+## Script specifications
 
-### `check.sh` — フルチェック(完了前 / CI用)
+### `check.sh` — full check (pre-completion / CI)
 
 ```bash
-bash scripts/check.sh [プロジェクトルート]          # 省略時はカレントディレクトリ
-FEEDBACK_CHECK_SKIP="test build" bash scripts/check.sh   # 特定ステージをスキップ
-bash scripts/check.sh --list-checks   # 検査ID・実効判定・「出所」を一覧(検査コマンドは実行しない)
-bash scripts/check.sh --list-checks --json   # 同じ内容を JSON で出力
+bash scripts/check.sh [project-root]          # Defaults to the current directory
+FEEDBACK_CHECK_SKIP="test build" bash scripts/check.sh   # Skip selected stages
+bash scripts/check.sh --list-checks           # List check IDs, effective decisions, and sources without running checks
+bash scripts/check.sh --list-checks --json    # Print the same information as JSON
 ```
 
-**動作:** 検出したスタックごとにステージを走らせ、スタック非依存の横断チェックも実行して、`PASS`/`FAIL`/`WARN`/`SKIP` の要約を出す。
+**Behavior:** Runs stages for every detected stack, runs stack-independent cross-cutting checks, and prints a `PASS`/`FAIL`/`WARN`/`SKIP` summary.
 
-**ステージ別の実行内容**(ツールが無ければ理由付き `SKIP`):
+**Commands by stage** (a missing tool produces `SKIP` with a reason):
 
-| ステージ | Python | Node | Go | Rust | Java | Shell |
+| Stage | Python | Node | Go | Rust | Java | Shell |
 |---|---|---|---|---|---|---|
 | `lint` | `ruff check` | `run lint` / `npm ls --all` | `go vet` / `go mod verify` | `clippy` / `cargo metadata --offline` | — | `bash -n` / `shellcheck` |
-| `typecheck` | `mypy`(宣言時) | `run typecheck` / `tsc --noEmit` | — | — | — | — |
-| `test` | `pytest`(+`--cov`) | `test` または `test:coverage` | `go test -cover` | `cargo test` | `mvn verify` / `gradle check` | — |
-| `build` | — | `run build` | `go build` | `cargo check`(clippy 不在時) | — | — |
-| `format` | `ruff format` | `prettier`(宣言時) | `gofmt -l` | `cargo fmt` | — | — |
-| `contract` | — | — | — | `cargo semver-checks`(`[lib]`) | — | — |
+| `typecheck` | `mypy` (when declared) | `run typecheck` / `tsc --noEmit` | — | — | — | — |
+| `test` | `pytest` (+`--cov`) | `test` or `test:coverage` | `go test -cover` | `cargo test` | `mvn verify` / `gradle check` | — |
+| `build` | — | `run build` | `go build` | `cargo check` (when clippy is absent) | — | — |
+| `format` | `ruff format` | `prettier` (when declared) | `gofmt -l` | `cargo fmt` | — | — |
+| `contract` | — | — | — | `cargo semver-checks` (`[lib]`) | — | — |
 
-**横断チェック**(スタック非依存・`security` / `docs` / `lint` / `contract` ステージ): 設定ファイル構文・内部リンク・秘密情報・CI設定・Dockerfile・OpenAPI 契約差分。
+**Cross-cutting checks** (stack-independent; part of the `security`, `docs`, `lint`, and `contract` stages): configuration syntax, internal links, secrets, CI configuration, Dockerfiles, and OpenAPI contract differences.
 
-**このスクリプトがしないこと:**
+**What this script does not do:**
 
-- **ネットワークを使わない** — 脆弱性監査は `audit.sh` に分離。`npx` は必ず `--no-install` を付け、未導入なら取得せず `SKIP`
-- **ツールを導入しない** — 未導入は `SKIP` と理由表示に留める
-- **テストを2回走らせない** — カバレッジは既存 test コマンドへの計装(または `test:coverage` への差し替え)で賄う
-- **宣言していない検査で完了をブロックしない** — 該当する失敗は `WARN`(exit 0)
-- **リモートを参照しない** — 契約差分のベースラインは `git merge-base HEAD <FEEDBACK_CONTRACT_BASE:-main>`、解決不能なら `HEAD`
+- **Use the network** — vulnerability auditing is isolated in `audit.sh`. `npx` always includes `--no-install`, and a missing tool produces `SKIP` without downloading anything
+- **Install tools** — a missing tool produces `SKIP` with a reason
+- **Run tests twice** — coverage comes from instrumenting the existing test command or replacing it with `test:coverage`
+- **Block completion on an undeclared check** — such findings are `WARN` and keep exit code 0
+- **Consult a remote** — the contract baseline is `git merge-base HEAD <FEEDBACK_CONTRACT_BASE:-main>`, falling back to `HEAD` when it cannot be resolved
 
-- **検出対象**: Python(`pyproject.toml`/`setup.py`/`requirements.txt`、無くても `*.py` があれば `ruff` のみ実行) / Node(`package.json`) / Go(`go.mod`) / Rust(`Cargo.toml`) / Java(`pom.xml`/`build.gradle`) / Shell(`*.sh`) / 汎用(`Makefile` の `check` ターゲット)
-- **横断チェック(スタック非依存)**: `*.json` / `*.yaml` / `*.yml` の構文検証。`tsconfig*.json` / `jsconfig*.json` / `devcontainer.json` / `.vscode/` 配下はコメント付き(JSONC)が慣例のため対象外。YAML は複数文書(`---` 区切り)に対応し、未知のカスタムタグ(`!Ref` 等)は構文エラーとして扱わない。PyYAML 未導入なら YAML は理由付き `SKIP`
-- **ドキュメント整合性**: Markdown の内部リンク切れを検出する(`docs` ステージ)。外部URL・`mailto:`・アンカーのみ・絶対パスは対象外(ネットワークを使わない原則)。コードブロック・コードスパン内のリンク風記述は検証しない
-- **秘密情報**(`security` ステージ): `.secretlintrc.*` があれば `secretlint` を実行する。**設定が無ければ SKIP** — secretlint は設定なしでは起動できないため。値は既定でマスクされ、失敗ログに秘密が出ることはない。`gitleaks` が PATH にあれば併用する(`--no-git --redact` に対応する版のみ)
-- **CI設定・Dockerfile**: `.github/workflows/*.y*ml` があれば `actionlint`、`Dockerfile*` があれば `dockerfilelint`(無ければ `hadolint`)を実行する。いずれも未導入なら SKIP
-- **依存の実在性**(ネットワーク不使用): Node は `npm ls --all`(npm のときのみ。`node_modules` があるときのみ)、Go は `go mod verify`、Rust は `cargo metadata --offline`、Python は `deptry`。「存在しないパッケージ名」「宣言と実体のずれ」を検出する
-- **API契約・破壊的変更**(`contract` ステージ): `openapi.yaml`/`openapi.json`(ルートまたは `api/`)があれば `oasdiff breaking` をベースライン(`git merge-base HEAD <FEEDBACK_CONTRACT_BASE:-main>`、解決不能なら `HEAD`)との差分で実行する。Rust は `[lib]` を持つ crate で `cargo semver-checks check-release --baseline-rev <git由来のSHA>` を実行する。どちらもリモートやレジストリを参照せず、オフラインで完結する
-- **カバレッジ相乗り**: テストを2回走らせず計装フラグを足すだけ — Python は pytest-cov 検出時に `--cov --cov-report=term-missing`(設定の `--cov-fail-under` が自動的に FAIL ゲートになる)、Go は `go test -cover`、Node は `test:coverage` スクリプトがあればそれを `test` の**代わりに**実行する(両方走らせるとテストが2回動くため)
-- **設定ファイル**: `.feedback/config.yaml`(commit して共有)でステージの skip / FAIL・WARN の切替、検査対象の除外(`exclude`)、ログ行数、ツールの閾値(shellcheck の重大度・vulture の confidence・oasdiff のベースライン)、監査間隔等を調整できる。優先順位は**環境変数 > 検査単位(`checks.<id>`) > スタック単位(`check.<stack>`) > 全体(`check`) > 既定値** — `FEEDBACK_CHECK_SKIP` 等の環境変数は config より優先される一時上書き。全項目の一覧は配布元プラグインの設定ガイド `docs/configuration.md` を参照(この scripts/ は docs/ 無しで配布されるため、ここにはリンクを張らない)
-- **`--list-checks`**: 検査ID・ラベル・ステージ・実効判定・**出所**(どの層で判定が決まったか)を一覧する。検査コマンドは実行しない。適用対象になった検査は、ツール未導入でも `skip` と理由を表示する。左端の検査IDはそのまま `checks:` のキーとして利用できる。`--json` を併用すると機械可読な形式で出力する。壊れた config では表を既定値で出した後に stderr へエラーを出し exit 1 する
-- **ステージスキップ**: `FEEDBACK_CHECK_SKIP` に指定できるステージ名は `lint` / `typecheck` / `test` / `build` / `format` / `security` / `docs` / `contract`。空白区切りで複数指定できる(config の `check.skip` と同じ語彙)
-- **make再帰ガード**: `make check` 実行時のみ `FEEDBACK_CHECK_RECURSION_GUARD` を子孫に伝え、その中で起動された check.sh は make フォールバックを `SKIP` する。フック実行時に `CLAUDE_PROJECT_DIR` が伝播し、テスト内の check.sh がルートを本リポジトリに解決し直して make check がテストを再実行する無限再帰(Stop フックの timeout を食い潰す)を断つためのもの。**通常の make 実行・直接ステージ(lint/test/build)には影響しない**
-- **SKIPの理由**: 出力に必ず理由が付く — `(<tool> 未インストール)` / `(<tool> 起動不可 — 環境を確認してください)` / `(実行不可)` / 環境変数由来のスキップは `(env.FEEDBACK_CHECK_SKIP)`、config 由来は `(config: <キーのパス>)`、およびスタック単位でまとめた `(<stack>: 全ステージ …)`。**ツールが無い・壊れているだけの状態を `FAIL` にしない**(ユーザーのコードの問題ではないため)
-- **検査対象ファイル**: Gitリポジトリなら `git ls-files --cached --others --exclude-standard`。**未コミットの新規ファイルも検査し**、`.gitignore` 済みは除外する
-- **ネットワークを使わない**: Node の typecheck フォールバックは `npx --no-install tsc`。`typescript` が未導入なら取得を試みず `SKIP` にする
-- **shellcheck の重大度**: 既定は `warning`(`-S warning`)。`style`/`info` まで拾うと導入初日のプロジェクトが既存コードで詰まるため。`FEEDBACK_SHELLCHECK_SEVERITY=style` で引き上げられる
-- **失敗出力**: `FAIL` したステージは末尾40行のログを `failures.txt` に集約し、最後にまとめて表示する
-- **最終行**(FAIL時を除く。いずれも exit 0):
+- **Detected targets:** Python (`pyproject.toml` / `setup.py` / `requirements.txt`; when absent but `*.py` exists, only `ruff` runs) / Node (`package.json`) / Go (`go.mod`) / Rust (`Cargo.toml`) / Java (`pom.xml` / `build.gradle`) / Shell (`*.sh`) / generic (`check` target in a `Makefile`)
+- **Cross-cutting checks (stack-independent):** Validate `*.json`, `*.yaml`, and `*.yml`. `tsconfig*.json`, `jsconfig*.json`, `devcontainer.json`, and files below `.vscode/` are excluded because comments (JSONC) are conventional there. YAML supports multiple documents separated by `---`, and unknown custom tags such as `!Ref` are not treated as syntax errors. If PyYAML is missing, YAML validation produces `SKIP` with a reason
+- **Documentation consistency:** Detect broken internal Markdown links in the `docs` stage. External URLs, `mailto:`, fragment-only links, and absolute paths are excluded to preserve offline operation. Link-like text inside code blocks and inline code is not validated
+- **Secrets (`security` stage):** Run `secretlint` when `.secretlintrc.*` exists. **Without configuration it produces SKIP**, because secretlint cannot run unconfigured. Values are masked by default and never appear in failure logs. Also run `gitleaks` when it is on PATH, but only versions that support `--no-git --redact`
+- **CI configuration and Dockerfiles:** Run `actionlint` for `.github/workflows/*.y*ml`; run `dockerfilelint`, falling back to `hadolint`, for `Dockerfile*`. Missing tools produce SKIP
+- **Dependency presence (offline):** Node uses `npm ls --all` only for npm projects and only when `node_modules` exists; Go uses `go mod verify`; Rust uses `cargo metadata --offline`; Python uses `deptry`. These checks detect nonexistent package names and mismatches between declarations and installed dependencies
+- **API contracts and breaking changes (`contract` stage):** When `openapi.yaml` or `openapi.json` exists at the root or under `api/`, run `oasdiff breaking` against the Git-derived baseline (`git merge-base HEAD <FEEDBACK_CONTRACT_BASE:-main>`, falling back to `HEAD`). Rust crates with `[lib]` run `cargo semver-checks check-release --baseline-rev <git-derived-SHA>`. Neither operation consults remotes or registries
+- **Coverage piggybacking:** Add instrumentation instead of running tests twice. Python adds `--cov --cov-report=term-missing` when pytest-cov is detected (a configured `--cov-fail-under` automatically becomes a FAIL gate); Go runs `go test -cover`; Node runs `test:coverage` **instead of** `test` when that script exists
+- **Configuration:** Commit `.feedback/config.yaml` to configure stage skips, FAIL/WARN behavior, exclusions (`exclude`), log line limits, tool thresholds (shellcheck severity, vulture confidence, oasdiff baseline), audit intervals, and more. Precedence is **environment variable > individual check (`checks.<id>`) > stack (`check.<stack>`) > global (`check`) > default**. Environment variables such as `FEEDBACK_CHECK_SKIP` are temporary overrides. See `docs/configuration.md` in the source plugin for every setting; no link is used here because a distributed `scripts/` directory does not include `docs/`
+- **`--list-checks`:** List the check ID, label, stage, effective decision, and **source** (the layer that determined it) without running the check commands. An applicable check whose tool is missing still appears as `skip` with a reason. The leftmost check ID can be used directly as a key under `checks:`. With `--json`, output is machine-readable. When config is invalid, the command prints the table using defaults, reports the error to stderr, and exits 1
+- **Stage skipping:** `FEEDBACK_CHECK_SKIP` accepts `lint`, `typecheck`, `test`, `build`, `format`, `security`, `docs`, and `contract`, separated by spaces. This vocabulary matches `check.skip` in config
+- **Make recursion guard:** Only when running `make check`, pass `FEEDBACK_CHECK_RECURSION_GUARD` to descendants so a nested check.sh skips the Make fallback. This prevents an infinite loop where `CLAUDE_PROJECT_DIR` propagates into tests, a nested check.sh resolves the root back to this repository, and Make reruns the tests until the Stop hook times out. **Normal Make commands and direct lint/test/build stages are unaffected**
+- **SKIP reasons:** Output always includes a reason: `(<tool> not installed)`, `(<tool> cannot start — check the environment)`, `(not executable)`, `(env.FEEDBACK_CHECK_SKIP)` for environment-driven skipping, `(config: <key-path>)` for config-driven skipping, or a stack-level `(<stack>: all stages …)`. A missing or broken tool alone is **never a FAIL**, because it is not a problem in the user's code
+- **Files checked:** In a Git repository, use `git ls-files --cached --others --exclude-standard`. This includes **new uncommitted files** and excludes ignored files
+- **No network access:** The Node type-check fallback is `npx --no-install tsc`. If TypeScript is missing, it produces `SKIP` without trying to download it
+- **shellcheck severity:** Defaults to `warning` (`-S warning`). Including `style` and `info` findings would block existing projects on the first day. Set `FEEDBACK_SHELLCHECK_SEVERITY=style` for stricter checking
+- **Failure output:** Collect the final 40 log lines from every failed stage in `failures.txt`, then print them together at the end
+- **Final line** (except on FAIL; all of these exit 0):
 
-  | 最終行 | 意味 |
-  |--------|------|
-  | `ALL PASS` | 全ステージ成功 |
-  | `ALL PASS (N件WARN — 未対応の指摘があります)` | 成功したがブロックしない指摘あり。WARN内容を確認する |
-  | `ALL PASS (N件WARN・M件SKIP — 未検証/未対応の項目があります)` | 成功したが未対応の指摘と未検証あり |
-  | `ALL PASS (N件SKIP — 未検証の項目があります)` | 成功したが未検証あり |
-  | `実行できたステージがありません(すべてSKIP)` | 何も検証できていない |
-  | `検出できたスタックがありません …` | 対応マニフェスト・対象ファイルなし |
+  | Final line | Meaning |
+  |---|---|
+  | `ALL PASS` | Every stage succeeded |
+  | `ALL PASS (N件WARN — 未対応の指摘があります)` | Success with non-blocking findings; review the WARNs |
+  | `ALL PASS (N件WARN・M件SKIP — 未検証/未対応の項目があります)` | Success with both unresolved findings and unverified checks |
+  | `ALL PASS (N件SKIP — 未検証の項目があります)` | Success with unverified checks |
+  | `実行できたステージがありません(すべてSKIP)` | Nothing could be verified |
+  | `検出できたスタックがありません …` | No supported manifest or target file was found |
 
-  全SKIPや部分SKIPを無印の `ALL PASS` と偽らない。
-- **WARN**: 完了をブロックしない指摘。exit code は `0` のまま。最終行に件数が付く(`ALL PASS (1件WARN — 未対応の指摘があります)`)。産出源は宣言(設定ファイル)が無い検査 — `python: ruff format`(`[tool.ruff` があれば FAIL)、`python: deptry` / `python: vulture`(`[tool.deptry` / `[tool.vulture` があれば FAIL)、`rust: cargo fmt`(`rustfmt.toml` があれば FAIL)
-- **exit code**: `0` = FAILなし(全SKIP・スタック未検出を含む) / `1` = FAILあり / `2` = ルートディレクトリ不正。**エージェントは最終行の文字列ではなく exit code で判定すること**
+  Never present an all-SKIP or partial-SKIP run as an unqualified `ALL PASS`.
+- **WARN:** A non-blocking finding with exit code 0. Its count appears in the final line, for example `ALL PASS (1件WARN — 未対応の指摘があります)`. WARNs come from checks without a project declaration: `python: ruff format` (FAIL when `[tool.ruff` exists), `python: deptry` and `python: vulture` (FAIL when `[tool.deptry` or `[tool.vulture` exists), and `rust: cargo fmt` (FAIL when `rustfmt.toml` exists)
+- **Exit codes:** `0` = no FAIL (including all-SKIP and no detected stack) / `1` = at least one FAIL / `2` = invalid root directory. **Agents must decide from the exit code, not from the final-line text**
 
-### `check_file.sh` — 単一ファイル高速チェック(編集直後用)
+### `check_file.sh` — fast single-file check (immediately after editing)
 
 ```bash
-bash scripts/check_file.sh <ファイルパス>
+bash scripts/check_file.sh <file-path>
 ```
 
-**動作:** 拡張子に応じて、フルビルドを伴わない静的チェックだけを実行する。`.feedback/config.yaml` の検査単位の判定を反映し、`skip` は実行せず、`warn` は内容を表示して exit code 0、`fail` は exit code 1 とする。config 自体に設定エラーがある場合も、内容を表示して exit code 1 とする。
+**Behavior:** Runs only static checks that do not require a full build, selected by file extension. It applies per-check decisions from `.feedback/config.yaml`: `skip` does not run, `warn` prints the finding and exits 0, and `fail` exits 1. Invalid configuration is also reported and exits 1.
 
-| 拡張子 | チェック内容 |
-|--------|-------------|
-| `.py` | `ruff check`(無ければ `python3 -m py_compile`) |
-| `.ts`/`.tsx`/`.js`/`.jsx`/`.mjs`/`.cjs` | ESLint設定があれば `eslint`、無ければ `.js`/`.mjs`/`.cjs` を `node --check` |
-| `.go` | `gofmt -l`(未フォーマットを検出) |
+| Extension | Checks |
+|---|---|
+| `.py` | `ruff check`, falling back to `python3 -m py_compile` |
+| `.ts`/`.tsx`/`.js`/`.jsx`/`.mjs`/`.cjs` | `eslint` when configured; otherwise `.js`/`.mjs`/`.cjs` use `node --check` |
+| `.go` | `gofmt -l` (detects unformatted files) |
 | `.rs` | `rustfmt --check` |
-| `.sh` | `bash -n` + `shellcheck`(あれば) |
-| `.json`/`.yaml`/`.yml` | `python3` でパース検証 |
+| `.sh` | `bash -n`, plus `shellcheck` when available |
+| `.json`/`.yaml`/`.yml` | Parse validation with `python3` |
 
-- **exit code**: `0` = 問題なし、WARN のみ、ファイル未指定、または対象ファイルが存在しない / `1` = FAIL、または config の設定エラー(内容を出力)
+- **Exit codes:** `0` = no issue, WARN only, no file argument, or target file does not exist / `1` = FAIL or invalid config (details are printed)
 
-### `feedback_log.py` — フィードバック記録CLI
-
-```bash
-python3 scripts/feedback_log.py <サブコマンド> [引数]
-```
-
-エントリは `.feedback/log/` に frontmatter 付き Markdown、一般化ルールは `.feedback/rules.md` に昇華される。**logファイルを直接作成・編集せず、必ずこのCLIを使うこと**(frontmatter形式が揃わないと `list`/`promote` が壊れる)。
-
-| サブコマンド | 引数 | 説明 |
-|-------------|------|------|
-| `add` | `--category <cat>` `--summary "<要約>"` `[--detail "<詳細>"]` `[--source human\|hook\|agent]` `[--signal <context\|instruction\|workflow\|failure>]` | エントリを記録。`open` が3件以上で promote 候補の通知を出す。`--signal` は信号種（省略時は detail/category から推論）。`根因:` 行がある場合は、定義済み5分類のいずれか1件だけを許可する |
-| `list` | `[--status open\|promoted\|closed\|retired\|all]` `[--category <cat>]` `[--signal <context\|instruction\|workflow\|failure\|unknown>]` | エントリ一覧(既定は `open`)。`--signal unknown` は signal を持たない旧エントリを拾う |
-| `search` | `<キーワード>` | エントリの全文検索 |
-| `promote` | `<entry-id>` `--rule "<一般化ルール1行>"` | `rules.md` に**新規ルールを追記**し、対象エントリを `promoted` に更新 |
-| `merge` | `<entry-id>` `--into <既存ルールの出典id>` `[--rule "<更新後の本文>"]` | 既存ルールの**出典に追記**し(新規行を増やさない)、対象を `promoted` に更新。同じ原則の指摘が再発したとき用 |
-| `close` | `<entry-id>` `[--reason "<理由>"]` | 昇華せず `closed` に更新。一般化できない一回限りの指摘用 |
-| `retire` | `<出典entry-id>` `--reason "<退役理由>"` | 昇華済みルールを **rules.md から撤去**し、出典エントリ(merge済みの分も含む)を `retired` に更新。棚卸しで人間が裁定した後に使う |
-| `rules` | (なし) | 現在の `rules.md` を表示 |
-| `stats` | `[--since <日付>]` `[--days <N>]` | フック合否とログの集計。PostToolUse 初回通過率・平均再チェック回数・Stop 初回通過率・失敗上位・signal/根因別件数・**再発候補**(昇華後に同カテゴリの失敗系が再記録されたルール) |
-| `report` | `--since <日付\|yesterday>` または `--last`、`[--mark]` | 期間ダイジェスト(新規エントリ/昇華/close・retire/open 棚卸し/再発候補/数字)。`--last` は `.feedback/.last-retro` 基点。`--mark` で実施後に基点を更新 |
-
-- **category**: `style` / `architecture` / `testing` / `naming` / `workflow` / `domain`
-- **entry-id**: 記録時刻 `%Y%m%d-%H%M%S`。同一秒に複数記録した場合は `-2`, `-3` … を付けて一意にする(重複すると `promote` が先頭の1件しか掴めず、残りが昇華不能になるため)
-
-### `audit.sh` — オンデマンド脆弱性監査(明示実行専用)
+### `feedback_log.py` — feedback recording CLI
 
 ```bash
-bash scripts/audit.sh [プロジェクトルート]
+python3 scripts/feedback_log.py <subcommand> [arguments]
 ```
 
-`check.sh` と異なり**ネットワークを使う**(pip-audit / npm audit --audit-level=high / govulncheck / cargo audit)。Node は `package-lock.json` があるときだけ実行する — `npm audit` は他PMの lockfile を読めず ENOLOCK で落ちるため、`pnpm-lock.yaml` / `yarn.lock` しか無い場合は SKIP して `pnpm audit` / `yarn npm audit` の直接実行を案内する。Stop フックからは呼ばれず、`feedback-loop` スキル等からの明示実行専用。成功時のみ `.feedback/.last-audit` に日付を書き、`stats` / `report` が「最終監査日」を表示する — **7日を超過するか未実行なら推奨行が出る**(WARN と同じ「ブロックせず、溜まったら見える」哲学)。失敗時にスタンプを書かないため、脆弱性が残っている間は推奨が消えない。
+Entries are stored as Markdown with frontmatter under `.feedback/log/`; generalized rules are promoted into `.feedback/rules.md`. **Never create or edit log files directly; always use this CLI**, because inconsistent frontmatter breaks `list` and `promote`.
 
-### `hooks/` — Claude Code / Codex Hooks ラッパ
+| Subcommand | Arguments | Description |
+|---|---|---|
+| `add` | `--category <cat>` `--summary "<summary>"` `[--detail "<detail>"]` `[--source human\|hook\|agent]` `[--signal <context\|instruction\|workflow\|failure>]` | Records an entry. Notifies you when three or more entries are open and candidates for promotion. `--signal` identifies what happened and is inferred from detail/category when omitted. A `根因:` line must contain exactly one of the five defined classifications |
+| `list` | `[--status open\|promoted\|closed\|retired\|all]` `[--category <cat>]` `[--signal <context\|instruction\|workflow\|failure\|unknown>]` | Lists entries (default: `open`). `--signal unknown` selects legacy entries without a signal |
+| `search` | `<keyword>` | Full-text search over entries |
+| `promote` | `<entry-id>` `--rule "<one generalized rule>"` | **Adds a new rule** to `rules.md` and marks the entry `promoted` |
+| `merge` | `<entry-id>` `--into <existing-rule-source-id>` `[--rule "<updated-text>"]` | Adds provenance to an **existing rule** without creating a new line, then marks the entry `promoted`. Use for recurrence of the same principle |
+| `close` | `<entry-id>` `[--reason "<reason>"]` | Marks an entry `closed` without promotion. Use for one-off feedback that cannot be generalized |
+| `retire` | `<source-entry-id>` `--reason "<retirement-reason>"` | **Removes a promoted rule** from rules.md and marks its source entries, including merged ones, as `retired`. Use after a human decision during rule review |
+| `rules` | (none) | Prints the current `rules.md` |
+| `stats` | `[--since <date>]` `[--days <N>]` | Aggregates Hook results and logs: PostToolUse first-pass rate, average recheck count, Stop first-pass rate, top failures, counts by signal/root cause, and **recurrence candidates** (a new failure in the same category after promotion) |
+| `report` | `--since <date\|yesterday>` or `--last`, `[--mark]` | Period digest (new entries, promote/close/retire activity, open review, recurrence candidates, and numbers). `--last` starts at `.feedback/.last-retro`; `--mark` advances that marker after the review |
 
-Claude Code / Codex の Hooks から起動される薄いラッパ。判定・実行は `check_file.sh` / `check.sh` に委譲し、フック固有の処理(stdin JSONのパース、exit code 2 によるエージェントへの差し戻し、無限ループ防止)だけを担う。**`init.sh` 導入ではコピーされない**（プラグインから実行するため）。
+- **category:** `style` / `architecture` / `testing` / `naming` / `workflow` / `domain`
+- **entry-id:** Recording time in `%Y%m%d-%H%M%S` format. Multiple entries in the same second receive `-2`, `-3`, and so on to remain unique; duplicates would otherwise make `promote` capture only the first entry and leave the rest impossible to promote
 
-- **`on_session_start.sh`** (SessionStart): `.feedback/log/` と `rules.md` をテンプレートから初回シードする。プラグインだけで導入したプロジェクトでは `init.sh` を実行しないため、Hooks 側が初期化を担う。**既存の `.feedback/` には一切触れず**、失敗してもセッションをブロックしない。
-- **`post_edit.sh`** (PostToolUse: `Edit|Write|MultiEdit`): Claude Code では stdin の `tool_input.file_path`、Codex の `apply_patch` では `tool_input.command` のパッチヘッダーから対象ファイルを取り出し、`check_file.sh` でチェックする。問題があれば **`exit 2` + stderr** でエージェントにフィードバックし、自己修正ループを起動する。対象ファイルが取れないときは何も記録しない。
-  - 合否(成功・失敗の両方)を `.feedback/events.jsonl` に1行追記する(`stats` の初回通過率の原料。ローカル状態で共有しない)
-- **`on_stop.sh`** (Stop): 応答完了前に `check.sh` を実行。失敗すれば **`exit 2`** で完了をブロックし失敗内容を返す。`stop_hook_active` が `true`(2周目以降)のときは何もせず `exit 0` し、**無限ループを防止**する。
-  - **検査の実行条件**: 前回の成功検査(`.feedback/.last-check` のmtime)以降に作業ツリーが変わっているときだけ走る。無条件だと、ファイルを1つも編集しない質問応答のターンでも導入先のフルビルド(`mvn verify` / `npm run build` 等)が毎回動く。判定は mtime なので Edit/Write だけでなく Bash 経由の編集も拾い、判定できないときは必ず「実行する」側に倒す。
-  - スタンプを進めるのは**検査が成功したときだけ**。失敗を記録すると、直さないまま次のターンで「変更なし」と判定され壊れたまま完了できてしまう。
-  - 2周目で `check.sh` を再実行しないのは、`exit 0` で返す出力がエージェントに渡らず、重い導入先では最も待たされる場面で時間だけを失うため。
-  - `check.sh` を実行したときだけ合否を `events.jsonl` に記録する(スキップ時は無記録)
+### `audit.sh` — on-demand vulnerability audit (explicit invocation only)
+
+```bash
+bash scripts/audit.sh [project-root]
+```
+
+Unlike `check.sh`, this script **uses the network** through pip-audit, `npm audit --audit-level=high`, govulncheck, or cargo audit. Node auditing runs only when `package-lock.json` exists because npm audit cannot read another package manager's lockfile and fails with ENOLOCK. If only `pnpm-lock.yaml` or `yarn.lock` exists, the script reports SKIP and suggests running `pnpm audit` or `yarn npm audit` directly. Stop hooks never call it; it runs only after an explicit request, including through the `feedback-loop` skill. On success it writes the date to `.feedback/.last-audit`, and `stats` / `report` shows the last audit date. **When the audit is more than seven days old or has never run, a recommendation appears**, following the same non-blocking, visible-when-needed philosophy as WARNs. A failed audit does not update the marker, so the recommendation remains while vulnerabilities are unresolved.
+
+### `hooks/` — Claude Code / Codex Hook wrappers
+
+Thin wrappers started by Claude Code and Codex Hooks. They delegate decisions and execution to `check_file.sh` or `check.sh` and handle only Hook-specific concerns: parsing stdin JSON, returning failures to the agent with exit code 2, and preventing infinite loops. **They are not copied by `init.sh`**, because they run from the plugin.
+
+- **`on_session_start.sh` (SessionStart):** Seeds `.feedback/log/` and `rules.md` from the template on first use. Plugin-only target projects never run `init.sh`, so the Hook performs initialization. It **never touches an existing `.feedback/` directory** and does not block the session if initialization fails.
+- **`post_edit.sh` (PostToolUse: `Edit|Write|MultiEdit`):** For Claude Code, reads `tool_input.file_path` from stdin. For Codex `apply_patch`, extracts target files from patch headers in `tool_input.command`, then runs `check_file.sh`. A problem returns **exit 2 plus stderr** to the agent and starts the self-correction loop. If no target file can be identified, it records nothing.
+  - Appends one result line, successful or failed, to `.feedback/events.jsonl`, which supplies first-pass-rate data to `stats`. This is local state and is not shared.
+- **`on_stop.sh` (Stop):** Runs `check.sh` before response completion. A failure returns **exit 2**, blocks completion, and sends the failure details back. When `stop_hook_active` is `true` on the second or later pass, it exits 0 without doing anything, preventing an **infinite loop**.
+  - **Run condition:** Run only when the worktree changed after the previous successful check marker (`.feedback/.last-check` mtime). Running unconditionally would trigger a full build such as `mvn verify` or `npm run build` after question-only turns with no edits. The mtime check catches Bash edits as well as Edit/Write, and uncertainty always falls back to running the check.
+  - Advance the marker **only after a successful check**. Marking a failure would make the next turn appear unchanged and allow completion with broken code.
+  - The second pass does not rerun `check.sh` because successful exit output is not returned to the agent, and expensive targets would impose delay with no benefit.
+  - Append a result to `events.jsonl` only when `check.sh` actually runs; skipped runs are not recorded.
 
 ---
 
-## 使い方: プラグインと手動フォールバックの違い
+## Usage: plugin versus manual fallback
 
-スクリプトは同じだが、**プラグイン対応環境かどうか**で起動の主体が異なる。
+The scripts are identical, but **who starts them** depends on whether the environment supports plugins.
 
-### Claude Code / Codex app・CLI — Hooks 駆動（自動）
+### Claude Code / Codex app and CLI — Hook-driven (automatic)
 
-Claude Code と Codex app / CLI は、プラグインが提供する Hooks (`hooks/hooks.json`) を起動ドライバとするため、**エージェントが明示的にスクリプトを呼ぶ必要はない**。Codex は初回に `/hooks` で内容を確認して信頼する。
+Claude Code and the Codex app / CLI use the Hooks supplied by the plugin (`hooks/hooks.json`) as their driver, so **the agent does not need to invoke scripts explicitly**. In Codex, review and trust them through `/hooks` the first time.
 
-| タイミング | Hook | 実行チェイン | 効果 |
-|-----------|------|-------------|------|
-| ファイル編集直後 | `PostToolUse` (`Edit\|Write\|MultiEdit`) | `post_edit.sh` → `check_file.sh` | Claude の Edit/Write と Codex の `apply_patch` を検出。問題があれば `exit 2` で即時差し戻し → 自動修正 |
-| 応答完了前 | `Stop` | `on_stop.sh` → `check.sh` | FAILがあれば完了をブロック → 修正を継続(前回の成功検査以降に変更が無ければ検査自体を省略) |
+| Timing | Hook | Execution chain | Effect |
+|---|---|---|---|
+| Immediately after editing | `PostToolUse` (`Edit\|Write\|MultiEdit`) | `post_edit.sh` → `check_file.sh` | Detects Claude Edit/Write and Codex `apply_patch`. A problem returns exit 2 immediately, triggering automatic correction |
+| Before response completion | `Stop` | `on_stop.sh` → `check.sh` | A FAIL blocks completion and correction continues; the check itself is skipped when nothing changed after the previous successful run |
 
-- **ルールの反映**: `apply-feedback` スキルが `.feedback/rules.md` を読み込む。`init.sh` を併用している場合は、`CLAUDE.md` / `AGENTS.md` の規約が Hooks 無効時の手動手順も示す。
-- **指摘の記録**: `capture-feedback` / `feedback-loop` スキルが `feedback_log.py` を呼ぶ。
-- スキル・エージェントの起動条件と手順はプロジェクトルート README.md の「Skills / Agents / Commands の使い方（プラグイン導入時）」節を参照（`init.sh` 導入では配られず、下記の規約駆動が代替）。
-- **設定ファイル**: プラグインの `hooks/hooks.json` + `skills/`。Claude Code は `.claude-plugin/plugin.json`、Codex は `.codex-plugin/plugin.json` を読む。`CLAUDE.md` / `AGENTS.md` の規約は `init.sh` 併用時に追加される。
+- **Apply rules:** The `apply-feedback` skill reads `.feedback/rules.md`. When `init.sh` is also in use, CLAUDE.md / AGENTS.md describes the manual fallback for disabled Hooks.
+- **Record feedback:** The `capture-feedback` and `feedback-loop` skills call `feedback_log.py`.
+- See “Using Skills, Agents, and Commands (plugin installations)” in the project-root README.md for Skill and Agent triggers. That section is not distributed by `init.sh`; the rules-driven workflow below replaces it.
+- **Configuration:** The plugin uses `hooks/hooks.json` plus `skills/`. Claude Code reads `.claude-plugin/plugin.json`; Codex reads `.codex-plugin/plugin.json`. Rules in CLAUDE.md / AGENTS.md are added only when `init.sh` is also used.
 
-### Claude Code の init-only / Codex IDE 拡張 / 汎用エージェント — 規約駆動（手動）
+### Claude Code init-only / Codex IDE extension / general-purpose agent — rule-driven (manual)
 
-`init.sh` だけで導入した環境や Hooks が無効・未信頼の環境では、Claude Code は `CLAUDE.md`、Codex IDE 拡張と汎用エージェントは `AGENTS.md` の規約を自動ループの代替とする。エージェント自身が規約に従ってスクリプトを呼ぶ（自動ではない）。
+In an `init.sh`-only installation or when Hooks are disabled or untrusted, Claude Code uses CLAUDE.md, while the Codex IDE extension and general-purpose agents use AGENTS.md as the fallback loop. The agent follows the rules and invokes scripts itself; this is not automatic.
 
-| タイミング | 実行コマンド | 根拠 |
-|-----------|-------------|------|
-| セッション開始時 | `python3 scripts/feedback_log.py rules` | ルールを作業方針に反映 (§1) |
-| コード変更のたび | `bash scripts/check_file.sh <編集したファイル>` | 即時チェック、問題あれば修正 (§2) |
-| 完了前 | `bash scripts/check.sh` | `ALL PASS` を確認してから完了。FAILのまま報告してはならない (§3) |
-| 指摘を受けたら | `python3 scripts/feedback_log.py add --category … --summary … --source human` | その場で記録(引き継ぐ唯一の手段) (§4) |
-| 振り返り・朝会 | `python3 scripts/feedback_log.py report --last --mark` | 期間ダイジェストを議題にし、実施後に基点を更新 |
-| 監査を促されたら | `bash scripts/audit.sh` | `stats`/`report` が「監査を推奨」を出したとき(7日超過・未実行) |
+| Timing | Command | Basis |
+|---|---|---|
+| Session start | `python3 scripts/feedback_log.py rules` | Apply rules to the task (§1) |
+| After every code change | `bash scripts/check_file.sh <edited-file>` | Immediate check and correction (§2) |
+| Before completion | `bash scripts/check.sh` | Confirm `ALL PASS` before completion; never report completion while FAIL remains (§3) |
+| After feedback | `python3 scripts/feedback_log.py add --category … --summary … --source human` | Record immediately—the only persistence mechanism (§4) |
+| Retrospective / stand-up | `python3 scripts/feedback_log.py report --last --mark` | Discuss the period digest, then advance its marker |
+| When prompted to audit | `bash scripts/audit.sh` | Run when `stats` or `report` recommends an audit after seven days or when none has run |
 
-- **ルールの反映**: `CLAUDE.md` / `AGENTS.md` §1 で `.feedback/rules.md` の必読を規定。
-- **設定ファイル**: `CLAUDE.md` または `AGENTS.md`（Hooks 不要）。
+- **Apply rules:** CLAUDE.md / AGENTS.md §1 requires reading `.feedback/rules.md`.
+- **Configuration:** CLAUDE.md or AGENTS.md; Hooks are unnecessary.
 
-### 比較まとめ
+### Comparison
 
-| 観点 | プラグイン（Claude Code / Codex） | `init.sh`（Claude Code / Codex IDE 拡張 / 汎用） |
-|------|-------------|-------------|
-| 起動ドライバ | Hooks（自動） | CLAUDE.md / AGENTS.md 規約（エージェント自律） |
-| 編集直後チェック | `PostToolUse` で自動 | 都度 `check_file.sh` を手動実行 |
-| 完了前チェック | `Stop` で自動（ブロック付き） | 完了前に `check.sh` を手動実行 |
-| ルール反映 | `apply-feedback` スキル | `CLAUDE.md` / `AGENTS.md` §1 規約 |
-| 指摘記録 | `capture-feedback` / `feedback-loop` スキル | `CLAUDE.md` / `AGENTS.md` §4 手順で手動 |
-| 主な設定・指示ファイル | `hooks/hooks.json`、`.claude-plugin/plugin.json` / `.codex-plugin/plugin.json` | `CLAUDE.md` / `AGENTS.md` |
-| 共有スクリプト | `scripts/*`, `.feedback/` | ← 同じ |
+| Concern | Plugin (Claude Code / Codex) | `init.sh` (Claude Code / Codex IDE extension / general-purpose agent) |
+|---|---|---|
+| Driver | Hooks (automatic) | CLAUDE.md / AGENTS.md rules (agent-driven) |
+| Check after editing | Automatic through `PostToolUse` | Run `check_file.sh` manually each time |
+| Pre-completion check | Automatic through `Stop`, with blocking | Run `check.sh` manually before completion |
+| Apply rules | `apply-feedback` skill | CLAUDE.md / AGENTS.md §1 |
+| Record feedback | `capture-feedback` / `feedback-loop` skills | Manual CLAUDE.md / AGENTS.md §4 procedure |
+| Main configuration / instruction files | `hooks/hooks.json`, `.claude-plugin/plugin.json` / `.codex-plugin/plugin.json` | CLAUDE.md / AGENTS.md |
+| Shared scripts | `scripts/*`, `.feedback/` | Same |
 
 ---
 
-## 必要ツール
+## Required tools
 
-- **必須**: `bash`, `python3`(hooks内のJSONパース・`feedback_log.py`・json/yaml検証・内部リンク検証で使用)
-- **任意 — スタック標準**(自動検出・未インストールなら `SKIP`): `ruff`, `mypy`, `pytest` / `npm`/`pnpm`/`yarn`, `eslint`, `tsc` / `go`, `gofmt` / `cargo`, `rustfmt`, `clippy` / `mvn`, `gradle` / `shellcheck`
-- **任意 — 拡張検査**: `pytest-cov`(カバレッジ)/ `deptry`, `vulture`, `import-linter`(Python の依存・デッドコード・アーキ制約)/ `secretlint`, `dockerfilelint`, `knip`, `prettier`(npm 経由。このリポジトリの `package.json` が例)/ `gitleaks`, `actionlint`, `hadolint`, `oasdiff`, `cargo-semver-checks`(OS固有バイナリのため PATH にあれば使う)
-- **任意 — 監査専用**(`audit.sh` のみ・ネットワーク使用): `pip-audit` / `npm` / `govulncheck` / `cargo-audit`
+- **Required:** `bash`, `python3` (used for Hook JSON parsing, `feedback_log.py`, JSON/YAML validation, and internal-link validation)
+- **Optional — stack standards** (detected automatically; missing tools produce `SKIP`): `ruff`, `mypy`, `pytest` / `npm`/`pnpm`/`yarn`, `eslint`, `tsc` / `go`, `gofmt` / `cargo`, `rustfmt`, `clippy` / `mvn`, `gradle` / `shellcheck`
+- **Optional — extended checks:** `pytest-cov` (coverage) / `deptry`, `vulture`, `import-linter` (Python dependencies, dead code, architecture constraints) / `secretlint`, `dockerfilelint`, `knip`, `prettier` (through npm; this repository's `package.json` is an example) / `gitleaks`, `actionlint`, `hadolint`, `oasdiff`, `cargo-semver-checks` (used when OS-specific binaries are already on PATH)
+- **Optional — audit only** (`audit.sh`, networked): `pip-audit` / `npm` / `govulncheck` / `cargo-audit`
 
-いずれもハーネスが導入することはない。`npx --no-install` を使うのは、未導入時にネットワークから勝手に取得させないため。
+The harness never installs any of them. It uses `npx --no-install` so missing packages are not downloaded from the network without permission.
 
-## 他プロジェクトへの導入
+## Install in another project
 
-> このセクションは**ハーネス配布元リポジトリ**での操作を説明する。導入先には `scripts/init.sh` 自体と `docs/` はコピーされないため、再導入・更新は配布元から行う。
+> This section describes operations in the **source harness repository**. Because `scripts/init.sh` itself and `docs/` are not copied into target projects, rerun installation or update from the source repository.
 
-`scripts/init.sh` が `scripts/`(このファイルを含む)を対象プロジェクトへコピーする。`scripts/README.md` も導入先で参照できる。
+`scripts/init.sh` copies `scripts/`, including all three versions of this file, into the target project. `scripts/README.md`, `scripts/README.ja.md`, and `scripts/README.zh-CN.md` remain available there.
 
-導入先に持ち込むのは**ハーネスの仕組みだけ**で、このリポジトリ固有の内容は持ち込まない:
+Only the **harness mechanism** is transferred; source-repository-specific content is not:
 
-- `.feedback/rules.md` のシードは `.feedback/rules.template.md`(ヘッダのみ)。導入元の promote 済みルールと、導入先に存在しない出典IDは混入しない
-- `CLAUDE.md` / `AGENTS.md` へ追加するのは `docs/pointer_claude.md` / `docs/pointer_agents.md` の断片。`feedback-harness:pointer` 管理マーカー内だけを再実行時に置換し、マーカー外の利用者記述は保持する。マーカー導入前の旧ポインタは、既知の見出しと末尾を特定できる場合だけ管理ブロックへ移行する
+- `.feedback/rules.md` is seeded from `.feedback/rules.template.md`, which contains headers only. Promoted rules and source IDs from the source repository do not leak into the target
+- CLAUDE.md / AGENTS.md receives fragments from `docs/pointer_claude.md` / `docs/pointer_agents.md`. On rerun, only content inside `feedback-harness:pointer` management markers is replaced; user text outside the markers is preserved. A legacy pointer created before management markers is migrated only when its known heading and end can be identified safely
 
 ```bash
 bash scripts/init.sh /path/to/your-project
-cd /path/to/your-project && bash scripts/check.sh   # スタック検出の確認
+cd /path/to/your-project && bash scripts/check.sh   # Verify stack detection
 ```

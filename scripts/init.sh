@@ -9,7 +9,7 @@
 #
 # 動作:
 # - scripts/(check.sh / check_file.sh / lib.sh / audit.sh / harness_config.py /
-#   feedback_log.py)をコピー
+#   feedback_log.py / README.md / README.ja.md / README.zh-CN.md)をコピー
 # - .feedback/ のシードを作成(rules.md は既存なら触らない。config.example.yaml
 #   は毎回上書き — 雛形は本体側の更新を常に受け取るため。手元の config.yaml
 #   は別ファイルなので上書きされない)
@@ -29,7 +29,7 @@ echo "導入先: $DEST"
 
 # scripts/ — Codex 等がリポジトリ相対で叩くための実体
 mkdir -p "$DEST/scripts"
-# audit.sh も配る。scripts/README.md が使い方を載せ、feedback_log.py の stats/report が
+# audit.sh も配る。scripts/README.md / README.ja.md / README.zh-CN.md が使い方を載せ、feedback_log.py の stats/report が
 # 「bash scripts/audit.sh の実行を推奨」と案内するため、欠けると案内先が存在しなくなる
 # harness_config.py も配る。check.sh / check_file.sh / audit.sh / feedback_log.py が
 # 設定(.feedback/config.yaml)の読み込みに使う唯一のパーサのため、欠けると config が
@@ -37,6 +37,7 @@ mkdir -p "$DEST/scripts"
 cp "$SRC/scripts/check.sh" "$SRC/scripts/check_file.sh" "$SRC/scripts/lib.sh" \
    "$SRC/scripts/audit.sh" "$SRC/scripts/harness_config.py" \
    "$SRC/scripts/feedback_log.py" "$SRC/scripts/README.md" \
+   "$SRC/scripts/README.ja.md" "$SRC/scripts/README.zh-CN.md" \
    "$DEST/scripts/"
 
 # harness_config.py / feedback_log.py は導入元で管理・検査済みのベンダー

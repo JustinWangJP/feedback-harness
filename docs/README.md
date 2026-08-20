@@ -1,24 +1,26 @@
-# ドキュメント案内
+English | [日本語](README.ja.md) | [简体中文](README.zh-CN.md)
 
-このディレクトリには、現在の利用方法を説明する文書と、過去の設計判断を残す履歴資料があります。目的に応じて参照先を選んでください。
+# Documentation index
 
-## 現在の仕様を確認する
+This directory contains documentation for current usage and historical material that preserves past design decisions. Choose the appropriate source for your purpose.
 
-| 文書 | 内容 |
+## Current specification
+
+| Document | Contents |
 |---|---|
-| [プロジェクト概要](../README.md) | 機能、導入方法、日常の利用方法 |
-| [設定ガイド](configuration.md) | `.feedback/config.yaml` の設定方法とトラブルシューティング |
-| [スクリプト仕様](../scripts/README.md) | 各スクリプトの役割、実行内容、終了コード |
-| [Codex / 汎用エージェント向け規約](pointer_agents.md) | Codex Plugin Hooks と手動フォールバックを両立する、導入先 AGENTS.md 用の規約 |
-| [Claude Code 向け規約](pointer_claude.md) | Claude Code プラグインの Hooks と init-only の手動フォールバックを両立する、導入先 CLAUDE.md 用の規約 |
+| [Project overview](../README.md) | Features, installation, and daily usage |
+| [Configuration guide](configuration.md) | Configuration and troubleshooting for `.feedback/config.yaml` |
+| [Script reference](../scripts/README.md) | Responsibilities, behavior, and exit codes for each script |
+| [Rules for Codex and general-purpose agents](pointer_agents.md) | Rules inserted into target AGENTS.md files that support both Codex Plugin Hooks and the manual fallback |
+| [Rules for Claude Code](pointer_claude.md) | Rules inserted into target CLAUDE.md files that support both Claude Code plugin Hooks and the init-only manual fallback |
 
-## 履歴資料を確認する
+## Historical material
 
-| ディレクトリ | 位置づけ |
+| Directory | Purpose |
 |---|---|
-| `proposals/` | 実装前の提案。未採用案や、後から変更された案を含む |
-| `superpowers/specs/` | 設計時点の仕様と判断理由 |
-| `superpowers/plans/` | 実装時の作業計画と検証手順 |
-| `references/` | 設計の背景として参照した外部資料の翻訳・要約。現在収録している Feedback Flywheel は中国語訳（`zh-CN`） |
+| `proposals/` | Pre-implementation proposals, including rejected ideas and approaches that changed later |
+| `superpowers/specs/` | Specifications and rationale as they stood during design |
+| `superpowers/plans/` | Implementation plans and verification procedures |
+| `references/` | Translations and summaries of external sources consulted during design. The included Feedback Flywheel translation is in Simplified Chinese (`zh-CN`) |
 
-日付付きの履歴資料は、その時点の判断を保存することが目的です。現在の実装と異なる場合は、「現在の仕様を確認する」に挙げた文書と実装を優先してください。
+Dated historical material exists to preserve decisions made at that time. When it differs from the current implementation, prefer the documents listed under “Current specification” and the implementation itself.
