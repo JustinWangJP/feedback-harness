@@ -27,6 +27,9 @@ assert_file_exists "$WORK/target/scripts/audit.sh" "audit.sh"
 # harness_config.py は全スクリプトが config(.feedback/config.yaml)を読むための
 # 唯一のパーサ。欠けると config が効かないまま導入先が動く
 assert_file_exists "$WORK/target/scripts/harness_config.py" "harness_config.py"
+assert_file_exists "$WORK/target/scripts/README.md" "English scripts README"
+assert_file_exists "$WORK/target/scripts/README.ja.md" "Japanese scripts README"
+assert_file_exists "$WORK/target/scripts/README.zh-CN.md" "Simplified Chinese scripts README"
 assert_file_exists "$WORK/target/AGENTS.md" "AGENTS.md"
 assert_file_exists "$WORK/target/CLAUDE.md" "CLAUDE.md"
 assert_file_exists "$WORK/target/.feedback/rules.md" "rules.md"
