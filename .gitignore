@@ -33,6 +33,11 @@ _workspace/
 # 脆弱性監査の最終実行日(audit.sh が成功時に書く。マシンローカル)
 .feedback/.last-audit
 
+# feedback CLI のrepository-wide lockと中断transaction journal。
+# lockはinodeを共有し続けるため意図的に残し、journalは次回CLI実行で回復・削除する。
+.feedback/.state.lock
+.feedback/.transaction.json
+
 # 個人設定レイヤ(この端末だけの設定。共有設定 config.yaml に勝つ)。
 # 手元の事情(ツール未導入・重い検査の一時停止)を、チームの設定を
 # 書き換えずに反映するためのもの

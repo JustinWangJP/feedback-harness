@@ -1,0 +1,2 @@
+# Development-only check dependencies for this repository.
+PyYAML==6.0.3

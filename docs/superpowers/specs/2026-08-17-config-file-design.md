@@ -206,6 +206,8 @@ lib.sh: harness_load_config [root]   # 上記を eval する薄いラッパ
 
 ### 4.2 シェルへの受け渡し
 
+> **2026-08-22 追記:** 以下の単一 `HARNESS_CHECK_SEVERITY` マップは当時の設計記録であり、現在は区切り文字の曖昧性をなくすため `HARNESS_CHECK_<正規化ID>_SEVERITY` と `HARNESS_CHECK_<正規化ID>_SOURCE` のフィールド別変数へ置き換えられている。
+
 3層を bash 側で解決させると解決規則が2箇所(Python と bash)に散る。**解決はローダー側で済ませ、bash には解決済みの値だけを渡す**:
 
 ```

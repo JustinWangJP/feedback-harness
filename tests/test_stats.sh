@@ -90,6 +90,8 @@ cat > "$WORK/project/.feedback/rules.md" <<'EOF'
 EOF
 
 OUT="$(fb stats --since 2026-08-10)"
+assert_contains "$OUT" "scope: local" "stats はローカル集計であることを明示する"
+assert_contains "$OUT" ".feedback/events.jsonl" "stats はデータ元を明示する"
 
 # --- フック系(不正JSON行は読み飛ばされて数値が崩れない) ---
 assert_contains "$OUT" "PostToolUse 初回通過率: 1/3 (33%)" "初回通過率(a=fail,b=pass,c=fail → 1/3)"

@@ -14,6 +14,10 @@ Claude Code と Codex の両方で使えるフィードバックハーネスで�
 
 任意のツールは、すでに導入されているものだけを使います。見つからないツールは理由を示して `SKIP` し、ハーネスが自動でインストールすることはありません。
 
+### このリポジトリの開発
+
+このリポジトリ自身の検査依存は、ハーネスの実行要件とは分けてバージョン固定しています。`make install-dev-tools` を実行すると、`requirements-dev.txt` の PyYAML と `scripts/dev_tool_versions.sh` で宣言した actionlint を、リポジトリ内の `.venv` へ導入します。`scripts/check.sh` を直接実行する前は `source .venv/bin/activate` を実行してください。`make test` はこのローカルツールを自動的に優先します。Linux CI も同じ導入ターゲットを使いますが、導入先プロジェクトでハーネスがツールを自動インストールすることはありません。
+
 ## 仕組み
 
 | 環境 | 自動チェック | ルール反映 |
@@ -50,9 +54,11 @@ Claude Code と Codex の両方で使えるフィードバックハーネスで�
 |---|---|---|
 | 指摘の記録 | `feedback_log.py add` | 人間からの指摘や、うまくいった進め方をその場で記録（signal も保存） |
 | ルール化 | `promote` / `merge` / `close` / `retire` | `rules.md` へのルール追加・統合・処理済み化・廃止 |
-| 測定 | `stats` | 初回通過率・平均再チェック回数・よく出る WARN・**再発候補** |
-| 報告 | `report` | 朝会や振り返りに使う期間別の要約（前の期間との比較付き） |
-| 脆弱性監査 | `audit.sh` | 必要なときだけ実行（この処理だけがネットワークを使う） |
+| 測定 | `stats` | この作業コピー内だけの初回通過率・平均再チェック回数・よく出る WARN・**再発候補** |
+| 報告 | `report` | この作業コピー内だけの、朝会や振り返りに使う期間別の要約（前の期間との比較付き） |
+| 脆弱性監査 | `audit.sh` | 必要なときだけ実行（ハーネスが意図して通信する専用処理） |
+
+curator が `rules.md` 以外への自動化を提案するときは、`automation_candidates`（`candidate` / `evidence` / `recommended_check` / `human_decision`）という構造化契約を使い、人間が承認するまで保留にする。
 
 ## できること / できないこと
 
@@ -62,7 +68,7 @@ Claude Code と Codex の両方で使えるフィードバックハーネスで�
 |---|---|
 | 検査の失敗をエージェントへ自動で返し、問題を自分で修正できるようにする | **完了を強制しない** — WARN（設定で明示していない検査の指摘）は exit 0 のままとし、処理を止めるのは FAIL だけ |
 | ツールがあれば使い、なければ SKIP して理由を示す | **ツールを自動インストールしない**。環境を変更するかどうかはユーザーが決める |
-| オフラインで完結する検査を毎ターン走らせる | **`check.sh` はネットワークを使わない**。脆弱性監査だけは `audit.sh` に分離し、Stop フックからは呼ばない |
+| 依存取得やリモート参照をハーネス側から追加せず検査する | **`check.sh` 自身は意図的なネットワークアクセスを開始しない**。ただし、プロジェクト定義のコマンドや外部ツールは設定に応じて通信する場合がある。脆弱性監査は `audit.sh` に分離し、Stop フックからは呼ばない |
 | カバレッジを計測する | **テストを2回実行しない**。既存の test コマンドにカバレッジ計測を追加する（または `test:coverage` に切り替える）だけ |
 | 破壊的変更を git ベースラインとの差分で検出する | **リモートを参照しない**。比較元は `git merge-base HEAD <既定ブランチ>`、解決できなければ `HEAD` |
 | `apply-feedback` スキルが記録済みの指摘を読み、次の作業へ反映する | **共有ファイルを無断で書き換えない**。`rules.md` 以外への変更（CLAUDE.md への追記・lint の追加）は提案のみとし、人間が承認してから反映する |
@@ -85,12 +91,14 @@ hooks/
   hooks.json        # Claude Code / Codex 共通の配布用 Hooks 定義
 scripts/
   check.sh          # スタック自動検出 (Python/Node/Go/Rust/Java/Shell/Make) → 8ステージ + 横断チェック
+  checks/*.sh       # stack・横断runner（共通実行coreはcheck.shに残す）
   check_file.sh     # 単一ファイルの高速チェック (拡張子ベース)
-  audit.sh          # 必要なときに実行する脆弱性監査 (唯一のネットワーク検査・Stopフック対象外)
+  audit.sh          # 必要なときに実行する脆弱性監査 (意図的に通信する専用検査・Stopフック対象外)
   lib.sh            # 共有ユーティリティ (has / harness_project_root / harness_tree_changed /
                     #   harness_node_pm / harness_validate_json|yaml / harness_check_md_links /
                     #   harness_log_event|warn)
   harness_config.py # .feedback/config.yaml の読み込みと検査設定の解決
+  feedback_store.py # repository lock・atomic write・中断transaction回復
   feedback_log.py   # フィードバック記録CLI (add / list / search / promote / merge / close /
                     #   retire / rules / stats / report)
   init.sh           # 導入スクリプト (Hooks 非対応環境向け資産の展開)
@@ -107,6 +115,8 @@ scripts/
   .last-check       # Stop フックの検査記録 (更新日時の比較に使うローカル状態・Git 管理外)
   .last-retro       # 振り返り期間の開始点 (report --mark が更新・Git 管理外)
   .last-audit       # 脆弱性監査の最終実行日 (audit.sh が成功した場合のみ更新・Git 管理外)
+  .state.lock       # feedback CLIのrepository-wide lock (永続・Git管理外)
+  .transaction.json # 中断した更新を回復するjournal (通常完了時は存在しない・Git管理外)
   events.jsonl      # フックの実行結果と WARN のログ (stats/report 用のローカル状態・Git 管理外)
 package.json        # 検査ツール(secretlint 等)を npx --no-install で解決するためだけの宣言
 tests/              # bash テスト (make check → check.sh から自動実行される)
@@ -185,7 +195,7 @@ cd /path/to/your-project && bash scripts/check.sh   # スタック検出の確�
 
 | 資産 | プラグイン | `init.sh` |
 |---|---|---|
-| `scripts/check.sh` `check_file.sh` `audit.sh` `lib.sh` `harness_config.py` `feedback_log.py` `README.md` `README.ja.md` `README.zh-CN.md` | プラグイン側に置かれる。Codex は `PLUGIN_ROOT`（Hooks では互換用の変数 `CLAUDE_PLUGIN_ROOT` も設定）、Claude Code は `CLAUDE_PLUGIN_ROOT` を使って実行する | 導入先の `scripts/` にファイルをコピー |
+| `scripts/check.sh` `checks/*.sh` `check_file.sh` `audit.sh` `lib.sh` `harness_config.py` `feedback_store.py` `feedback_log.py` `README.md` `README.ja.md` `README.zh-CN.md` | プラグイン側に置かれる。Codex は `PLUGIN_ROOT`（Hooks では互換用の変数 `CLAUDE_PLUGIN_ROOT` も設定）、Claude Code は `CLAUDE_PLUGIN_ROOT` を使って実行する | 導入先の `scripts/` にファイルをコピー |
 | Hooks(`hooks.json`) | ○（有効化後に自動起動） | ✗（CLAUDE.md / AGENTS.md の規約が代替） |
 | skills | ○（Claude Code / Codex） | ✗（CLAUDE.md / AGENTS.md の規約が代替） |
 | agents / commands | Claude Code のみ | ✗ |
@@ -416,3 +426,7 @@ bash scripts/check.sh --list-checks --json    # 同じ内容を機械可読な J
 測定は、Feedback Flywheel における「変化の測定」に当たります。ダッシュボードは作りません。`stats` は求められたときだけテキストを出力し、数値は `report` の「数字」セクションにのみ表示します。`events.jsonl`（フックの実行結果）と `.last-retro`（振り返り期間の開始点）は、端末内だけで使う状態ファイルであり、Git では共有しません。
 
 反映先を rules.md だけに限定しないのは、シグナルの種類によって改善すべき共有ファイルが異なるためです。知識の不足は、前提情報を示す文書（CLAUDE.md）で補います。機械的に検出できる失敗は lint やテストに組み込む方が、文章のルールだけで防ぐよりも確実です（参考: [Feedback Flywheel](docs/references/fowler-feedback-flywheel-translation.md)）。
+
+## ライセンス
+
+[MIT License](LICENSE) で公開しています。

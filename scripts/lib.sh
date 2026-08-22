@@ -72,7 +72,6 @@ harness_load_config() {
     # 黙って挙動を変えず HARNESS_CONFIG_ERROR で可視化する(既存の
     # 「config壊れているがFAILを立てて続行する」経路に乗せる)
     HARNESS_CONFIG_ERROR="設定ローダー(harness_config.py)を起動できませんでした(python3 を確認してください)。既定値で続行します — FEEDBACK_CHECK_SKIP 等の環境変数による上書きは適用されません。"
-    HARNESS_CHECK_SEVERITY=""
     HARNESS_EXCLUDE=""
     HARNESS_LOG_TAIL_LINES=40
     HARNESS_SHELLCHECK_MIN_SEVERITY=warning
@@ -81,6 +80,7 @@ harness_load_config() {
     HARNESS_AUDIT_INTERVAL_DAYS=7
     HARNESS_AUDIT_NPM_LEVEL=high
     HARNESS_FEEDBACK_OPEN_THRESHOLD=3
+    HARNESS_FEEDBACK_LOCK_TIMEOUT_SECONDS=10
   else
     eval "$shell_out"
   fi
@@ -90,27 +90,18 @@ harness_load_config() {
 # harness_check_severity <検査ID> <呼び出し側の既定> — 実効判定(fail/warn/skip)。
 # config が触っていない検査は、呼び出し側が宣言ゲートで決めた既定をそのまま返す。
 harness_check_severity() {
-  local id="$1" default="$2" entry
-  for entry in ${HARNESS_CHECK_SEVERITY:-}; do
-    if [[ "${entry%%:*}" == "$id" ]]; then
-      entry="${entry#*:}"
-      printf '%s\n' "${entry%%:*}"
-      return
-    fi
-  done
-  printf '%s\n' "$default"
+  local id="$1" default="$2" key value
+  key="HARNESS_CHECK_${id//-/_}_SEVERITY"
+  value="${!key:-}"
+  printf '%s\n' "${value:-$default}"
 }
 
 # harness_check_source <検査ID> — 判定がどこで決まったか(--list-checks 用)。
 harness_check_source() {
-  local id="$1" entry
-  for entry in ${HARNESS_CHECK_SEVERITY:-}; do
-    if [[ "${entry%%:*}" == "$id" ]]; then
-      printf '%s\n' "${entry##*:}"
-      return
-    fi
-  done
-  printf '%s\n' "既定"
+  local id="$1" key value
+  key="HARNESS_CHECK_${id//-/_}_SOURCE"
+  value="${!key:-}"
+  printf '%s\n' "${value:-既定}"
 }
 
 # harness_excluded <パス> — config の exclude に一致するか。
@@ -222,25 +213,22 @@ harness_log_event() {
   local root="$1" hook="$2" result="$3" file="${4:-}"
   # 同一 local 文で直前の変数を参照すると未定義になる(set -u で落ちる)ため分けて宣言する
   local dir="$root/.feedback"
-  local ev="$dir/events.jsonl"
   mkdir -p "$dir" 2>/dev/null || return 0
   local ts
   local rel
   ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)" || return 0
+  local event_json
   if [[ -n "$file" ]]; then
     rel="${file#"$root"/}"
-    printf '{"ts":"%s","hook":"%s","file":"%s","result":"%s"}\n' \
-      "$ts" "$hook" "$(harness_json_escape "$rel")" "$result" >>"$ev" 2>/dev/null || return 0
+    event_json="$(printf '{"ts":"%s","hook":"%s","file":"%s","result":"%s"}' \
+      "$ts" "$hook" "$(harness_json_escape "$rel")" "$result")" || return 0
   else
-    printf '{"ts":"%s","hook":"%s","result":"%s"}\n' \
-      "$ts" "$hook" "$result" >>"$ev" 2>/dev/null || return 0
+    event_json="$(printf '{"ts":"%s","hook":"%s","result":"%s"}' \
+      "$ts" "$hook" "$result")" || return 0
   fi
-  local size
-  size="$(wc -c <"$ev" 2>/dev/null | tr -d ' ')"
-  if [[ "$size" =~ ^[0-9]+$ ]] && (( size > 524288 )); then
-    tail -n 2000 "$ev" >"$ev.tmp" 2>/dev/null && mv "$ev.tmp" "$ev" 2>/dev/null \
-      || rm -f "$ev.tmp" 2>/dev/null
-  fi
+  local libdir="${BASH_SOURCE[0]%/*}"
+  python3 "$libdir/feedback_store.py" append-event "$root" "$event_json" \
+    --lock-timeout "${HARNESS_FEEDBACK_LOCK_TIMEOUT_SECONDS:-10}" >/dev/null 2>&1 || true
   return 0
 }
 
@@ -252,12 +240,15 @@ harness_log_event() {
 harness_log_warn() {
   local root="$1" label="$2"
   local dir="$root/.feedback"
-  local ev="$dir/events.jsonl"
   mkdir -p "$dir" 2>/dev/null || return 0
   local ts
   ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)" || return 0
-  printf '{"ts":"%s","hook":"stop","result":"warn","check":"%s"}\n' \
-    "$ts" "$(harness_json_escape "$label")" >>"$ev" 2>/dev/null || return 0
+  local event_json
+  event_json="$(printf '{"ts":"%s","hook":"stop","result":"warn","check":"%s"}' \
+    "$ts" "$(harness_json_escape "$label")")" || return 0
+  local libdir="${BASH_SOURCE[0]%/*}"
+  python3 "$libdir/feedback_store.py" append-event "$root" "$event_json" \
+    --lock-timeout "${HARNESS_FEEDBACK_LOCK_TIMEOUT_SECONDS:-10}" >/dev/null 2>&1 || true
   return 0
 }
 

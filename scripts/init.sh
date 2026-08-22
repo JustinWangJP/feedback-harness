@@ -8,8 +8,8 @@
 # プラグインを利用できない環境が必要とする実ファイルと、各環境で共有する状態だけである。
 #
 # 動作:
-# - scripts/(check.sh / check_file.sh / lib.sh / audit.sh / harness_config.py /
-#   feedback_log.py / README.md / README.ja.md / README.zh-CN.md)をコピー
+# - scripts/(check.sh / checks/*.sh / check_file.sh / lib.sh / audit.sh / harness_config.py /
+#   feedback_store.py / feedback_log.py / README.md / README.ja.md / README.zh-CN.md)をコピー
 # - .feedback/ のシードを作成(rules.md は既存なら触らない。config.example.yaml
 #   は毎回上書き — 雛形は本体側の更新を常に受け取るため。手元の config.yaml
 #   は別ファイルなので上書きされない)
@@ -48,7 +48,7 @@ DEST="$(cd "$DEST" && pwd)"
 echo "導入先: $DEST"
 
 # scripts/ — Codex 等がリポジトリ相対で叩くための実体
-mkdir -p "$DEST/scripts"
+mkdir -p "$DEST/scripts/checks"
 # audit.sh も配る。scripts/README.md / README.ja.md / README.zh-CN.md が使い方を載せ、feedback_log.py の stats/report が
 # 「bash scripts/audit.sh の実行を推奨」と案内するため、欠けると案内先が存在しなくなる
 # harness_config.py も配る。check.sh / check_file.sh / audit.sh / feedback_log.py が
@@ -56,9 +56,10 @@ mkdir -p "$DEST/scripts"
 # 読めないまま動く
 cp "$SRC/scripts/check.sh" "$SRC/scripts/check_file.sh" "$SRC/scripts/lib.sh" \
    "$SRC/scripts/audit.sh" "$SRC/scripts/harness_config.py" \
-   "$SRC/scripts/feedback_log.py" "$SRC/scripts/README.md" \
+   "$SRC/scripts/feedback_store.py" "$SRC/scripts/feedback_log.py" "$SRC/scripts/README.md" \
    "$SRC/scripts/README.ja.md" "$SRC/scripts/README.zh-CN.md" \
    "$DEST/scripts/"
+cp "$SRC/scripts/checks/"*.sh "$DEST/scripts/checks/"
 
 # harness_config.py / feedback_log.py は導入元で管理・検査済みのベンダー
 # ファイルで、導入先の pyproject.toml [tool.ruff] の対象ではない。導入先の
@@ -67,7 +68,7 @@ cp "$SRC/scripts/check.sh" "$SRC/scripts/check_file.sh" "$SRC/scripts/lib.sh" \
 # `fmt: off`/`fmt: on` は format を丸ごと無効化する)。導入元(このリポジトリ)
 # の同名ファイルには入れない — 自己ドッグフーディングの検査対象から外れるため、
 # コピー後の $DEST 側だけに後挿入する
-for f in harness_config.py feedback_log.py; do
+for f in harness_config.py feedback_store.py feedback_log.py; do
   tmp="$(mktemp)"
   {
     head -n1 "$DEST/scripts/$f"
@@ -81,7 +82,7 @@ done
 
 # 755(+x ではなく明示指定)。シェルスクリプトの実行には読み取り権限が必要で、
 # 導入元が 711 の場合に +x だと所有者以外が実行できない権限のまま複製される
-chmod 755 "$DEST/scripts/"*.sh "$DEST/scripts/feedback_log.py"
+chmod 755 "$DEST/scripts/"*.sh "$DEST/scripts/checks/"*.sh "$DEST/scripts/feedback_log.py"
 echo "  scripts/ ... OK"
 
 # Claude Code 向けの skills / agents / hooks はプラグインが提供する
@@ -200,6 +201,8 @@ IGNORE_ENTRIES=(
   ".feedback/events.jsonl|フック合否のイベントログ(マシン固有のノイズを共有しない)"
   ".feedback/.last-retro|棚卸しの基点(個人の運用リズム)"
   ".feedback/.last-audit|脆弱性監査の最終実行日(マシンローカル)"
+  ".feedback/.state.lock|feedback CLI のrepository-wide lock(ローカル状態)"
+  ".feedback/.transaction.json|中断されたfeedback更新の回復journal(ローカル状態)"
   ".feedback/local/|個人設定レイヤ(この端末だけの設定。共有設定に勝つ)"
 )
 ADDED=()

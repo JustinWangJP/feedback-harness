@@ -20,6 +20,10 @@ assert_file_exists "$WORK/target/scripts/check.sh" "check.sh"
 assert_file_exists "$WORK/target/scripts/check_file.sh" "check_file.sh"
 assert_file_exists "$WORK/target/scripts/lib.sh" "lib.sh"
 assert_file_exists "$WORK/target/scripts/feedback_log.py" "feedback_log.py"
+assert_file_exists "$WORK/target/scripts/feedback_store.py" "feedback_store.py"
+for runner in python node go rust java shell cross_cutting; do
+  assert_file_exists "$WORK/target/scripts/checks/$runner.sh" "$runner runner"
+done
 # audit.sh は導入先に必要。scripts/README.md が使い方を載せ、feedback_log.py の
 # stats/report が「bash scripts/audit.sh の実行を推奨」と案内するため、
 # 配り漏れると案内先が存在しないコマンドになる

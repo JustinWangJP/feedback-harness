@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Linux checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.x"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install repository check tools
+        shell: bash
+        run: |
+          set -eu
+          make install-dev-tools
+          npm ci --ignore-scripts
+          echo "$GITHUB_WORKSPACE/.venv/bin" >> "$GITHUB_PATH"
+
+      - name: Validate shell syntax
+        run: bash -n scripts/*.sh scripts/checks/*.sh scripts/hooks/*.sh tests/*.sh
+
+      - name: Validate Python syntax
+        run: python3 -m py_compile scripts/*.py
+
+      - name: Run regression tests
+        run: bash tests/run_tests.sh
+
+      - name: Run the harness against itself
+        run: bash scripts/check.sh

@@ -11,11 +11,13 @@
 ```text
 scripts/
 ├── check.sh          # フルチェック: スタック自動検出 → 8ステージと横断検査、要約出力
+├── checks/*.sh       # stack・横断runner(共通実行coreはcheck.shに残す)
 ├── check_file.sh     # 単一ファイル高速チェック: 拡張子ベースの静的チェック
 ├── lib.sh            # check.sh / check_file.sh の共有ユーティリティ(has() ほか)
 ├── harness_config.py # 設定(.feedback/config.yaml)の唯一のパーサ(YAMLサブセット・スキーマ検証・3層解決)
+├── feedback_store.py # repository lock・atomic write・中断transaction回復
 ├── feedback_log.py   # フィードバック記録CLI: 記録・昇華・棚卸し・集計・期間レポート
-├── audit.sh          # オンデマンド脆弱性監査(唯一のネットワーク検査。Stopフックからは呼ばれない)
+├── audit.sh          # オンデマンド脆弱性監査(ハーネスが意図して通信する専用検査。Stopフックからは呼ばれない)
 ├── init.sh           # 導入スクリプト(Hooks 非対応環境向け資産の展開。導入先にはコピーされない)
 └── hooks/
     ├── on_session_start.sh  # Claude Code / Codex SessionStart → .feedback/ の初回シード
@@ -27,11 +29,11 @@ scripts/
 
 | 系統 | スクリプト | 役割 |
 |------|-----------|------|
-| 自動チェック(オフライン) | `check.sh`, `check_file.sh`, `hooks/*` | lint/test/build 結果をエージェントに返し、自己修正させる |
+| 自動チェック | `check.sh`, `check_file.sh`, `hooks/*` | 依存取得やリモート参照を追加せず lint/test/build 結果をエージェントに返し、自己修正させる |
 | フィードバック蓄積・測定 | `feedback_log.py` | 人間の指摘を記録・一般化し、次セッションに引き継ぐ。数字と期間ダイジェストを出す |
 | オンデマンド監査(ネットワーク) | `audit.sh` | 依存の脆弱性を調べる。フックからは呼ばれない |
 
-配布のされ方が2通りある。**プラグイン導入**では全ファイルがプラグイン側に置かれる。Codex は `PLUGIN_ROOT`（Hooks では互換変数 `CLAUDE_PLUGIN_ROOT` も設定）、Claude Code は `CLAUDE_PLUGIN_ROOT` を使う。**`init.sh` 導入**では `check.sh` / `check_file.sh` / `lib.sh` / `audit.sh` / `harness_config.py` / `feedback_log.py` / このREADMEの英語版・日本語版・簡体字中国語版が導入先の `scripts/` にコピーされる（`hooks/` と `init.sh` 自身はコピーされない — 前者はプラグイン専用、後者は配布元から実行するもの）。
+配布のされ方が2通りある。**プラグイン導入**では全ファイルがプラグイン側に置かれる。Codex は `PLUGIN_ROOT`（Hooks では互換変数 `CLAUDE_PLUGIN_ROOT` も設定）、Claude Code は `CLAUDE_PLUGIN_ROOT` を使う。**`init.sh` 導入**では `check.sh` / `checks/*.sh` / `check_file.sh` / `lib.sh` / `audit.sh` / `harness_config.py` / `feedback_store.py` / `feedback_log.py` / このREADMEの英語版・日本語版・簡体字中国語版が導入先の `scripts/` にコピーされる（`hooks/` と `init.sh` 自身はコピーされない — 前者はプラグイン専用、後者は配布元から実行するもの）。
 
 ## 設計思想(共通)
 
@@ -40,7 +42,7 @@ scripts/
 3. **宣言の有無で強度を決める**: プロジェクトが設定ファイルで宣言した検査は `FAIL`(完了をブロック)、ハーネスが推測で走らせる検査は `WARN`(報告のみ・exit 0)。宣言していない検査で完了不能にすると、導入初日の既存プロジェクトが作業できなくなる。WARN は `events.jsonl` に記録され `stats` / `report` の「頻出WARN」に現れる。
 4. **ツールを自動インストールしない**: 未導入は `SKIP` と理由表示に留める。インストールは環境を変える行為であり、導入の判断はユーザーが行う。
 5. **スタック非依存**: プロジェクト種別をマニフェスト(`pyproject.toml`/`package.json`/…)から自動検出。設定不要。
-6. **状態を分離する**: スクリプト自身には状態を埋め込まず、すべて `.feedback/` 配下のファイルへ保存する。`rules.md` や `log/` などの共有データは Git で追跡できる。一方、`events.jsonl`、`.last-check`、`.last-retro`、`.last-audit` などの実行時状態は `.gitignore` の対象であり、端末間では共有しない。
+6. **状態を分離する**: スクリプト自身には状態を埋め込まず、すべて `.feedback/` 配下のファイルへ保存する。`rules.md` や `log/` などの共有データは Git で追跡できる。一方、`events.jsonl`、`.last-check`、`.last-retro`、`.last-audit`、`.state.lock`、`.transaction.json` などの実行時状態は `.gitignore` の対象であり、端末間では共有しない。lockは全processが同じinodeを使うため意図的に残し、中断transactionのjournalは次回CLI実行時に再適用する。
 
 ---
 
@@ -75,7 +77,7 @@ bash scripts/check.sh --help          # 使い方を表示(exit 0)
 
 **このスクリプトがしないこと:**
 
-- **ネットワークを使わない** — 脆弱性監査は `audit.sh` に分離。`npx` は必ず `--no-install` を付け、未導入なら取得せず `SKIP`
+- **ハーネス自身からネットワークアクセスを開始しない** — 脆弱性監査は `audit.sh` に分離。`npx` は必ず `--no-install` を付け、未導入なら取得せず `SKIP`。ただし、プロジェクト定義のコマンドや外部ツールは自身の設定に応じて通信する場合がある
 - **ツールを導入しない** — 未導入は `SKIP` と理由表示に留める
 - **テストを2回走らせない** — カバレッジは既存 test コマンドへの計装(または `test:coverage` への差し替え)で賄う
 - **宣言していない検査で完了をブロックしない** — 該当する失敗は `WARN`(exit 0)
@@ -150,8 +152,8 @@ python3 scripts/feedback_log.py <サブコマンド> [引数]
 | `close` | `<entry-id>` `[--reason "<理由>"]` | 昇華せず `closed` に更新。一般化できない一回限りの指摘用 |
 | `retire` | `<出典entry-id>` `--reason "<退役理由>"` | 昇華済みルールを **rules.md から撤去**し、出典エントリ(merge済みの分も含む)を `retired` に更新。棚卸しで人間が裁定した後に使う |
 | `rules` | (なし) | 現在の `rules.md` を表示 |
-| `stats` | `[--since <日付>]` `[--days <N>]` | フック合否とログの集計。PostToolUse 初回通過率・平均再チェック回数・Stop 初回通過率・失敗上位・signal/根因別件数・**再発候補**(昇華後に同カテゴリの失敗系が記録されたルール — これは**判定結果ではなく調査対象**で、同じ原則の再発かどうかは本文を読むエージェントが判断する。各候補に添う数値は表面的な文字の重なりで、読む順のヒントに過ぎない)。頻出WARN と失敗上位には**最終発生日**が付き、`feedback.stale_days`(既定7日)以上再発していない項目には注記が出る。スクラッチパッド等の一時ファイルは集計対象外。**最終監査日**と**最終棚卸し日**も表示し、それぞれ `audit.interval_days`(既定7日)・`feedback.retro_interval_days`(既定90日 = 四半期の目安)を超過すると推奨行が出る |
-| `report` | `--since <日付\|yesterday>` または `--last`、`[--mark]` | 期間ダイジェスト(新規エントリ/昇華/close・retire/open 棚卸し/再発候補/数字)。`--last` は `.feedback/.last-retro` 基点。`--mark` で実施後に基点を更新 |
+| `stats` | `[--since <日付>]` `[--days <N>]` | この作業コピー内のローカルデータだけを集計する。PostToolUse 初回通過率・平均再チェック回数・Stop 初回通過率・失敗上位・signal/根因別件数・**再発候補**(昇華後に同カテゴリの失敗系が記録されたルール — これは**判定結果ではなく調査対象**で、同じ原則の再発かどうかは本文を読むエージェントが判断する。各候補に添う数値は表面的な文字の重なりで、読む順のヒントに過ぎない)。頻出WARN と失敗上位には**最終発生日**が付き、`feedback.stale_days`(既定7日)以上再発していない項目には注記が出る。スクラッチパッド等の一時ファイルは集計対象外。**最終監査日**と**最終棚卸し日**も表示し、それぞれ `audit.interval_days`(既定7日)・`feedback.retro_interval_days`(既定90日 = 四半期の目安)を超過すると推奨行が出る |
+| `report` | `--since <日付\|yesterday>` または `--last`、`[--mark]` | この作業コピー内だけの期間ダイジェスト(新規エントリ/昇華/close・retire/open 棚卸し/再発候補/数字)。`--last` は `.feedback/.last-retro` 基点。`--mark` で実施後に基点を更新 |
 
 - **category**: `style` / `architecture` / `testing` / `naming` / `workflow` / `domain`
 - **entry-id**: 記録時刻 `%Y%m%d-%H%M%S`。同一秒に複数記録した場合は `-2`, `-3` … を付けて一意にする(重複すると `promote` が先頭の1件しか掴めず、残りが昇華不能になるため)

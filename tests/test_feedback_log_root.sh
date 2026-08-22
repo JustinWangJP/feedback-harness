@@ -15,6 +15,7 @@ WORK="$(cd "$WORK" && pwd)"
 # プラグインキャッシュを模した場所へスクリプトとバンドル資産を配置する
 mkdir -p "$WORK/cache/scripts" "$WORK/cache/.feedback"
 cp "$REPO/scripts/feedback_log.py" "$WORK/cache/scripts/"
+cp "$REPO/scripts/feedback_store.py" "$WORK/cache/scripts/"
 cp "$REPO/.feedback/rules.template.md" "$WORK/cache/.feedback/"
 
 # 本物の rules.template.md は DEFAULT_RULES_HEADER (埋め込みフォールバック) と
