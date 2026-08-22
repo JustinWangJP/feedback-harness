@@ -16,6 +16,24 @@ LIBDIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib.sh
 . "$LIBDIR/lib.sh"
 
+usage() {
+  cat <<'USAGE'
+使い方: audit.sh [プロジェクトルート]
+
+  (引数なし)      プロジェクトを自動検出して脆弱性監査を実行する
+  -h, --help      この使い方を表示する
+
+ネットワークを使うため Stop フックからは呼ばれない。
+exit 0 = 脆弱性なし(または全SKIP) / 1 = 脆弱性あり / 2 = 引数・環境の誤り
+USAGE
+}
+case "${1:-}" in
+  -h|--help) usage; exit 0 ;;
+  # 未知のオプションをプロジェクトルート扱いすると「ディレクトリが
+  # 見つかりません」になり、原因が引数だと気づけない
+  -*) echo "ERROR: 不明なオプション: $1" >&2; usage >&2; exit 2 ;;
+esac
+
 ROOT="$(harness_project_root "${1:-}")" \
   || { echo "ERROR: ディレクトリが見つかりません: ${1:-}"; exit 2; }
 cd "$ROOT" || { echo "ERROR: ディレクトリへ移動できません: $ROOT"; exit 2; }
@@ -59,11 +77,19 @@ fi
 # ただし npm audit が読めるのは package-lock.json だけで、pnpm-lock.yaml や
 # yarn.lock しか無いと ENOLOCK で exit 1 になる(実測)。そのまま走らせると
 # 脆弱性ゼロのプロジェクトが「脆弱性あり」と誤報告されるため、npm 以外の
-# lockfile は理由付き SKIP に留める(check.sh の npm ls を npm 限定にしたのと同じ判断)
-if [[ -f package-lock.json ]]; then
-  run_audit "npm" "node: npm audit" npm audit "--audit-level=$HARNESS_AUDIT_NPM_LEVEL"
-elif [[ -f pnpm-lock.yaml || -f yarn.lock ]]; then
-  RESULTS+=("SKIP  node: npm audit (npm 以外の lockfile — pnpm audit / yarn npm audit を直接実行してください)")
+# lockfile は理由付き SKIP に留める(check.sh の npm ls を npm 限定にしたのと同じ判断)。
+#
+# PM の判定は harness_node_pm に一本化する。package-lock.json の有無だけで
+# 判定すると、lockfile 併存時に check.sh が pnpm と見なすプロジェクトを
+# npm audit で監査してしまい、実際の依存解決と違うツリーを見ることになる
+if [[ -f package.json ]]; then
+  NODE_PM="$(harness_node_pm)"
+  if [[ "$NODE_PM" == "npm" ]]; then
+    [[ -f package-lock.json ]] \
+      && run_audit "npm" "node: npm audit" npm audit "--audit-level=$HARNESS_AUDIT_NPM_LEVEL"
+  else
+    RESULTS+=("SKIP  node: npm audit ($NODE_PM の lockfile — $([[ "$NODE_PM" == "pnpm" ]] && echo "pnpm audit" || echo "yarn npm audit") を直接実行してください)")
+  fi
 fi
 
 # ---------- Go ----------

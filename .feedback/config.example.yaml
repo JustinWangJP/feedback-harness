@@ -6,6 +6,11 @@
 # 書かなかった項目はすべて既定値。全部書く必要はない。
 # 現在の実効値は `bash scripts/check.sh --list-checks` で確認できる。
 # 優先順位: 環境変数 > checks.<検査> > check.<スタック> > check(全体) > 既定値
+#
+# 設定ファイルは2層ある。config.yaml は commit して共有する「チームの設定」。
+# .feedback/local/config.yaml は .gitignore 済みの「この端末だけの設定」で、
+# 共有設定より優先される。書ける項目は同じ。使っていないツールの検査を切る等、
+# 共有設定を書き換えずに手元の事情を反映したいときは後者を使う。
 version: 1
 
 check:
@@ -52,3 +57,10 @@ audit:
 feedback:
   # promote を促す open エントリ件数
   open_threshold: 3
+  # stats / report の頻出WARN・失敗上位で「しばらく再発していない」と注記するまでの日数。
+  # 累積件数だけで並べると、解消済みの指摘が上位に居座って対処すべき項目を隠すため
+  stale_days: 7
+  # ルールの棚卸し(定期審査)を促すまでの経過日数。既定は四半期に1回の目安。
+  # 更新されないルールは安定するのではなく負債になるため、監査と同じく
+  # 「ブロックせず、溜まったら見える」形で stats / report に推奨行を出す
+  retro_interval_days: 90

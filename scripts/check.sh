@@ -22,10 +22,26 @@ LIBDIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LIST_MODE=0
 LIST_JSON=0
 ARGS=()
+usage() {
+  cat <<'USAGE'
+使い方: check.sh [プロジェクトルート] [--list-checks [--json]]
+
+  (引数なし)      プロジェクトを自動検出してフル検査を実行する
+  --list-checks   検査を実行せず、実効設定(判定と出所)を一覧する
+  --json          --list-checks の出力を JSON にする(単独では使えない)
+  -h, --help      この使い方を表示する
+
+exit 0 = 全PASS(SKIP含む) / 1 = FAILあり / 2 = 引数・環境の誤り
+USAGE
+}
 for arg in "$@"; do
   case "$arg" in
     --list-checks) LIST_MODE=1 ;;
     --json) LIST_JSON=1 ;;
+    -h|--help) usage; exit 0 ;;
+    # 未知のオプションはプロジェクトルートとして扱わない。打ち間違いが
+    # 「ディレクトリが見つかりません」になると、原因が引数だと気づけない
+    -*) echo "ERROR: 不明なオプション: $arg" >&2; usage >&2; exit 2 ;;
     *) ARGS+=("$arg") ;;
   esac
 done
@@ -96,6 +112,10 @@ run_stage() {
       RESULTS+=("SKIP  $label")
     elif [[ "$src" == env.* ]]; then
       RESULTS+=("SKIP  $label (${src})")
+    elif [[ "$src" == local.* ]]; then
+      # 個人設定は .gitignore 済みで他の人からは見えない。共有設定と同じ
+      # "config:" で出すと、チーム設定を読んでも理由が見つからず混乱するため区別する
+      RESULTS+=("SKIP  $label (個人設定: ${src#local.})")
     else
       RESULTS+=("SKIP  $label (config: $src)")
     fi
@@ -268,7 +288,7 @@ fi
 # ---------- Node / TypeScript ----------
 if [[ -f package.json ]]; then
   STACK_FOUND=1
-  PM="npm"; [[ -f pnpm-lock.yaml ]] && PM="pnpm"; [[ -f yarn.lock ]] && PM="yarn"
+  PM="$(harness_node_pm)"
   if ! has node; then
     # npm_script_exists が node に依存するため、node 不在では全ステージを判定できない。
     # --list-checks では対象IDごとに記録する(通常実行は1行にまとめたまま)

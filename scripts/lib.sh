@@ -131,6 +131,27 @@ harness_excluded() {
   return 1
 }
 
+# harness_node_pm — カレントディレクトリの lockfile から Node のパッケージ
+# マネージャ名(npm / pnpm / yarn)を1つ返す。
+#
+# 判定をスクリプト毎に書くと、同じプロジェクトに対して check.sh と audit.sh が
+# 別の PM だと判断する。実際、移行中などで package-lock.json と pnpm-lock.yaml が
+# 併存すると、テストは pnpm で走るのに監査は npm audit が動き、実際の依存解決
+# (pnpm-lock.yaml)と違うツリーを監査する状態になっていた(出典 20260817-142537)。
+#
+# npm 以外の lockfile があれば npm ではないと判定する(併存時は npm 以外を優先)。
+# npm 系コマンド(npm ls --all / npm audit)は他 PM の lockfile を読めず ENOLOCK で
+# 落ちるため、呼び出し側はこの戻り値が npm のときだけ実行し、他は理由付き SKIP とする。
+harness_node_pm() {
+  if [[ -f yarn.lock ]]; then
+    printf 'yarn\n'
+  elif [[ -f pnpm-lock.yaml ]]; then
+    printf 'pnpm\n'
+  else
+    printf 'npm\n'
+  fi
+}
+
 # harness_relpath <パス> <ルート> — ルート相対パスへ正規化(先頭の ./ や / を除く)。
 # check.sh の list_files は git ls-files / find 由来で自然にこの形になるが、
 # check_file.sh が受け取るのは Hooks からの絶対パスなので、harness_excluded に

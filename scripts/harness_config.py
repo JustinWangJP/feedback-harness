@@ -116,6 +116,11 @@ def _scalar(s, path, lineno):
         return None
     if re.fullmatch(r"-?\d+", s):
         return int(s)
+    # 小数だけ文字列のまま返すと、PyYAML がある環境と無い環境で同じ config が
+    # 別の型になる。整数キーに 7.5 と書いた場合のエラーも「実際: '7.5'」という
+    # クォート付きの紛らわしい表示になるため、ここで数値へ寄せる
+    if re.fullmatch(r"-?\d+\.\d+", s):
+        return float(s)
     return s
 
 
@@ -289,7 +294,14 @@ SECTIONS = {
         "interval_days": ("int", 7, None),
         "npm_audit_level": ("enum", "high", ["low", "moderate", "high", "critical"]),
     },
-    "feedback": {"open_threshold": ("int", 3, None)},
+    "feedback": {
+        "open_threshold": ("int", 3, None),
+        "stale_days": ("int", 7, None),
+        # 棚卸し(ルールの定期審査)の間隔。既定 90 日は feedback-loop スキルの
+        # 「目安は四半期に1回」に合わせている。監査(audit.interval_days)より
+        # 桁が大きいのは、ルールの陳腐化が脆弱性より緩やかに進むため
+        "retro_interval_days": ("int", 90, None),
+    },
 }
 
 # スタック層で使えるキー(全体層の一部)
@@ -410,6 +422,10 @@ def validate(cfg, path):
 # ---------- 解決 ----------
 
 CONFIG_RELPATH = ".feedback/config.yaml"
+# 個人設定レイヤ。config.yaml が commit して共有する「チームの設定」なのに対し、
+# こちらは .gitignore 済みの「この端末だけの設定」。共有設定を書き換えずに
+# 手元の事情(ツール未導入・重い検査を一時的に外す等)を反映するために使う
+LOCAL_CONFIG_RELPATH = ".feedback/local/config.yaml"
 
 # 環境変数 -> 何を上書きするか
 ENV_STAGE_SKIP = "FEEDBACK_CHECK_SKIP"
@@ -419,8 +435,8 @@ ENV_PARAM_OVERRIDES = {
 }
 
 
-def load(root):
-    """<root>/.feedback/config.yaml を読んで検証する。
+def load(root, relpath=CONFIG_RELPATH):
+    """<root>/<relpath> を読んで検証する(既定は共有設定 config.yaml)。
 
     戻り値は (cfg, error)。ファイルが無ければ ({}, None)。
     壊れていれば ({}, メッセージ) — 呼び出し側が FAIL を立てたうえで
@@ -428,16 +444,16 @@ def load(root):
     """
     import os
 
-    path = os.path.join(root, CONFIG_RELPATH)
+    path = os.path.join(root, relpath)
     if not os.path.isfile(path):
         return {}, None
     try:
         with open(path, encoding="utf-8") as fh:
-            return validate(parse_yaml(fh.read(), CONFIG_RELPATH), CONFIG_RELPATH), None
+            return validate(parse_yaml(fh.read(), relpath), relpath), None
     except ConfigError as exc:
         return {}, str(exc)
     except OSError as exc:
-        return {}, f"{CONFIG_RELPATH}: 読み取れません({exc})"
+        return {}, f"{relpath}: 読み取れません({exc})"
 
 
 def _stage_verdicts(scope, body, prefix, out, only_stack=None):
@@ -463,10 +479,13 @@ def _stage_verdicts(scope, body, prefix, out, only_stack=None):
 def resolve(layers, env):
     """設定レイヤの列と環境変数から、実効値と出所を決める。
 
-    レイヤは「先に来たものが勝つ」。v1 ではレイヤは1つだが、個人設定
-    (.feedback/local/config.yaml)を後から足すときに、この関数を書き直さず
-    呼び出し側の1行で済ませられるよう最初から列で受ける。
+    layers は (レイヤ名, cfg) のタプル列。レイヤは「先に来たものが勝つ」ため、
+    個人設定(local)を共有設定(config)より前に並べる。
     レイヤ内の優先は 検査 > スタック > 全体。環境変数はすべてに優先する。
+
+    出所にはレイヤ名を前置する(例 "local:check.skip")。個人設定を足すと
+    「チーム設定のつもりが手元の設定に上書きされていた」が起こりうるが、
+    出所がキー名だけだとどちらの層で決まったのか追えなくなるため。
     """
     severity = {}
     # values はフルパス "section.key" / "checks.<id>.key" を1本のキーとして持つ
@@ -484,24 +503,35 @@ def resolve(layers, env):
             values[f"checks.{cid}.{key}"] = (default, "既定")
 
     # レイヤは後ろから適用する(先頭のレイヤが最後に上書きして勝つ)
-    for layer in reversed(layers):
+    for name, layer in reversed(layers):
+        # 共有設定(config)は従来どおり出所をキー名だけで出し、個人設定だけ
+        # "local." を前置する。既存の出所表示・テスト・文書を変えずに、
+        # 手元の上書きが起きた箇所だけを見分けられるようにするため。
+        #
+        # 区切りにコロンを使ってはいけない: 出所は HARNESS_CHECK_SEVERITY へ
+        # "id:severity:出所" の形で詰められ、読み出しは ${entry##*:}(最後の
+        # コロン以降)。出所にコロンがあるとレイヤ名が黙って落ちる。
+        # 環境変数由来の "env.FEEDBACK_CHECK_SKIP" と同じドット形式に揃える
+        tag = "" if name == "config" else f"{name}."
         check = layer.get("check") or {}
-        _stage_verdicts("global", check, "check", severity)
+        _stage_verdicts("global", check, f"{tag}check", severity)
         for stack in STACKS:
             body = check.get(stack) or {}
             if body:
-                _stage_verdicts(stack, body, f"check.{stack}", severity, only_stack=stack)
+                _stage_verdicts(
+                    stack, body, f"{tag}check.{stack}", severity, only_stack=stack
+                )
         for cid, body in (layer.get("checks") or {}).items():
             if "severity" in body:
-                severity[cid] = (body["severity"], f"checks.{cid}")
+                severity[cid] = (body["severity"], f"{tag}checks.{cid}")
             for key, val in body.items():
                 if key != "severity":
-                    values[f"checks.{cid}.{key}"] = (val, f"checks.{cid}.{key}")
+                    values[f"checks.{cid}.{key}"] = (val, f"{tag}checks.{cid}.{key}")
         for section, keys in SECTIONS.items():
             body = layer.get(section) or {}
             for key in keys:
                 if key in body:
-                    values[f"{section}.{key}"] = (body[key], f"{section}.{key}")
+                    values[f"{section}.{key}"] = (body[key], f"{tag}{section}.{key}")
 
     # 環境変数(最優先)
     raw = env.get(ENV_STAGE_SKIP, "").strip()
@@ -518,10 +548,25 @@ def resolve(layers, env):
 
 
 def effective(root, env):
-    """load + resolve をまとめた入口。error は呼び出し側が FAIL に使う。"""
+    """load + resolve をまとめた入口。error は呼び出し側が FAIL に使う。
+
+    レイヤは個人設定(local)が共有設定(config)に勝つ。個人設定は
+    .gitignore 済みで、共有設定を書き換えずに手元の事情を反映するためのもの。
+    """
     cfg, error = load(root)
-    out = resolve([cfg] if cfg else [], env)
-    out["error"] = error
+    local, local_error = load(root, LOCAL_CONFIG_RELPATH)
+
+    layers = []
+    if local:
+        layers.append(("local", local))
+    if cfg:
+        layers.append(("config", cfg))
+    out = resolve(layers, env)
+
+    # どちらの層が壊れていても FAIL は立てる。両方壊れていれば両方見せる —
+    # 片方だけ直して「まだ落ちる」となる往復を避けるため
+    errors = [e for e in (error, local_error) if e]
+    out["error"] = "\n".join(errors) if errors else None
     return out
 
 
@@ -611,6 +656,21 @@ if __name__ == "__main__":
     import os
 
     args = sys.argv[1:]
+    _USAGE = (
+        "使い方: python3 harness_config.py [--keys | --json [root] "
+        "| --shell [root] | --format-table]\n"
+        "\n"
+        "  --keys          設定できるキーの一覧を出す\n"
+        "  --json [root]   実効設定を JSON で出す(既定 root: カレントディレクトリ)\n"
+        "  --shell [root]  bash が eval する KEY=VALUE を出す(check.sh 等が使う)\n"
+        "  --format-table  標準入力の検査一覧を表へ整形する(check.sh --list-checks 用)\n"
+        "  -h, --help      この使い方を表示する\n"
+        "\n"
+        "exit 0 = 成功 / 1 = 引数の誤り"
+    )
+    if "-h" in args or "--help" in args:
+        print(_USAGE)
+        sys.exit(0)
     if "--keys" in args:
         _cmd_keys()
         sys.exit(0)
@@ -626,8 +686,5 @@ if __name__ == "__main__":
         root = rest[0] if rest else os.getcwd()
         print(json.dumps(effective(root, os.environ), ensure_ascii=False, sort_keys=True))
         sys.exit(0)
-    sys.exit(
-        "usage: harness_config.py "
-        "[--keys | --json [root] | --shell [root] | --format-table]"
-    )
+    sys.exit(_USAGE)
 # fmt: on

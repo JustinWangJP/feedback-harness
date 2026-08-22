@@ -87,7 +87,7 @@ assert_not_contains "$OUT" "20260701-000001)" "期間前のエントリは新規
 assert_contains "$OUT" "## close・retire" "close・retire セクションがある"
 assert_contains "$OUT" "[closed] 20260720-000001 (2026-07-21)" "status_changed 日付で close が出る"
 assert_contains "$OUT" "## 再発候補" "再発候補セクションがある"
-assert_contains "$OUT" "以降の同カテゴリ: 20260715-000001" "再発候補の本文"
+assert_contains "$OUT" "20260715-000001(参考 " "再発候補の本文(読む順のヒントつき)"
 # 昇華セクション: 期間前の昇華(2026-07-01)は出ない(「出典 」プレフィックスは
 # 昇華セクションだけで、再発候補行はプレフィックス無し — こちらで区別して照合する)
 assert_not_contains "$OUT" "出典 20260701-000001" "期間前の昇華は載らない"
@@ -95,6 +95,9 @@ assert_not_contains "$OUT" "出典 20260701-000001" "期間前の昇華は載ら
 assert_contains "$OUT" "PostToolUse 初回通過率:" "イベント数字が出る"
 assert_contains "$OUT" "## WARN" "WARN セクションがある"
 assert_contains "$OUT" "python: ruff format: 1件" "WARN の件数が出る"
+# 件数だけでは、直った指摘と今も出ている指摘が同じ見た目になる
+assert_contains "$OUT" "最終 " "WARN に最終発生日が併記される"
+assert_contains "$OUT" "日以上再発なし" "古いWARNには鮮度の注記が付く"
 
 # --- status_changed が CLI 経由で書かれる ---
 CID="$(fb add --category style --summary "close確認用" --detail "" | extract_id)"

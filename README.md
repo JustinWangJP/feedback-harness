@@ -88,7 +88,8 @@ scripts/
   check_file.sh     # Fast single-file checks based on file extension
   audit.sh          # On-demand vulnerability audit (only networked check; excluded from Stop hooks)
   lib.sh            # Shared utilities (has / harness_project_root / harness_tree_changed /
-                    #   harness_validate_json|yaml / harness_check_md_links / harness_log_event|warn)
+                    #   harness_node_pm / harness_validate_json|yaml / harness_check_md_links /
+                    #   harness_log_event|warn)
   harness_config.py # Loads .feedback/config.yaml and resolves check settings
   feedback_log.py   # Feedback CLI (add / list / search / promote / merge / close /
                     #   retire / rules / stats / report)

@@ -161,6 +161,19 @@ checks:
 
 最も具体的な指定が勝つ。使い分けの指針: **commit したい設定は config、その場限りの一時上書きは環境変数**。CI の workflow に書く環境変数はむしろ commit されるが、それは「CI という環境の既定値」を表している。
 
+### 設定ファイルは2層ある
+
+| ファイル | 追跡 | 用途 |
+|---|---|---|
+| `.feedback/config.yaml` | commit して共有 | チームの設定。全員に同じ判定を効かせる |
+| `.feedback/local/config.yaml` | `.gitignore` 済み | この端末だけの設定。**共有設定より優先される** |
+
+書ける項目は両方とも同じ。個人設定は、共有設定を書き換えずに手元の事情を反映したいときに使う — 使っていないツールの検査を切る、重い検査を一時的に外す、といった用途である。チームの判定を変えたいなら共有設定を直す。
+
+個人設定で決まった項目は、`--list-checks` の出所が `local.` で始まる(例 `local.checks.ruff`)。SKIP の理由表示も `(config: …)` ではなく `(個人設定: …)` になる。個人設定は他の人からは見えないため、共有設定を読んでも理由が見つからない状況を避けるための区別である。
+
+どちらのファイルが壊れていても、そのファイル名付きでエラーになり検査は既定値のまま続行する。
+
 同じ層で同じステージを複数のキーに指定した場合は、`fail_on` > `warn_on` > `skip` の順で優先される。検査を誤って無効化しないよう、より厳しい判定を優先するためである。
 
 ## 項目リファレンス
@@ -201,6 +214,8 @@ checks:
 | `audit.interval_days` | 整数 | `7` | `stats` / `report` が「監査を推奨」を出すまでの経過日数 |
 | `audit.npm_audit_level` | 文字列 | `high` | `npm audit --audit-level=<値>`(`low` / `moderate` / `high` / `critical`) |
 | `feedback.open_threshold` | 整数 | `3` | `add` / `stats` / `report` が promote を促す open エントリ件数 |
+| `feedback.stale_days` | 整数 | `7` | `stats` / `report` が頻出WARN・失敗上位に「これだけ再発していない」と注記するまでの日数 |
+| `feedback.retro_interval_days` | 整数 | `90` | `stats` / `report` が「ルールの棚卸しを推奨」を出すまでの経過日数(基点は `.feedback/.last-retro`) |
 
 ### 検査ID一覧(41件)
 

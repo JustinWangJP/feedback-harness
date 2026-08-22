@@ -53,7 +53,10 @@ bash scripts/check.sh [プロジェクトルート]          # 省略時はカ�
 FEEDBACK_CHECK_SKIP="test build" bash scripts/check.sh   # 特定ステージをスキップ
 bash scripts/check.sh --list-checks   # 検査ID・実効判定・「出所」を一覧(検査コマンドは実行しない)
 bash scripts/check.sh --list-checks --json   # 同じ内容を JSON で出力
+bash scripts/check.sh --help          # 使い方を表示(exit 0)
 ```
+
+配布する各スクリプト(`check.sh` / `check_file.sh` / `audit.sh` / `init.sh` / `harness_config.py` / `feedback_log.py`)は `--help` / `-h` で使い方を表示して `exit 0` する。`check.sh` / `audit.sh` / `init.sh` は不明なオプションを **`exit 2`** で拒否する — 未知のオプションをプロジェクトルート扱いすると「ディレクトリが見つかりません」となり、原因が引数だと気づけないため。`check_file.sh` だけは例外で、`--help` 以外の `-` 始まりもファイル名として扱う(このスクリプトの非0は PostToolUse の差し戻しに直結するため)。
 
 **動作:** 検出したスタックごとにステージを走らせ、スタック非依存の横断チェックも実行して、`PASS`/`FAIL`/`WARN`/`SKIP` の要約を出す。
 
@@ -86,7 +89,7 @@ bash scripts/check.sh --list-checks --json   # 同じ内容を JSON で出力
 - **依存の実在性**(ネットワーク不使用): Node は `npm ls --all`(npm のときのみ。`node_modules` があるときのみ)、Go は `go mod verify`、Rust は `cargo metadata --offline`、Python は `deptry`。「存在しないパッケージ名」「宣言と実体のずれ」を検出する
 - **API契約・破壊的変更**(`contract` ステージ): `openapi.yaml`/`openapi.json`(ルートまたは `api/`)があれば `oasdiff breaking` をベースライン(`git merge-base HEAD <FEEDBACK_CONTRACT_BASE:-main>`、解決不能なら `HEAD`)との差分で実行する。Rust は `[lib]` を持つ crate で `cargo semver-checks check-release --baseline-rev <git由来のSHA>` を実行する。どちらもリモートやレジストリを参照せず、オフラインで完結する
 - **カバレッジ相乗り**: テストを2回走らせず計装フラグを足すだけ — Python は pytest-cov 検出時に `--cov --cov-report=term-missing`(設定の `--cov-fail-under` が自動的に FAIL ゲートになる)、Go は `go test -cover`、Node は `test:coverage` スクリプトがあればそれを `test` の**代わりに**実行する(両方走らせるとテストが2回動くため)
-- **設定ファイル**: `.feedback/config.yaml`(commit して共有)でステージの skip / FAIL・WARN の切替、検査対象の除外(`exclude`)、ログ行数、ツールの閾値(shellcheck の重大度・vulture の confidence・oasdiff のベースライン)、監査間隔等を調整できる。優先順位は**環境変数 > 検査単位(`checks.<id>`) > スタック単位(`check.<stack>`) > 全体(`check`) > 既定値** — `FEEDBACK_CHECK_SKIP` 等の環境変数は config より優先される一時上書き。全項目の一覧は配布元プラグインの設定ガイド `docs/configuration.md` を参照(この scripts/ は docs/ 無しで配布されるため、ここにはリンクを張らない)
+- **設定ファイル**: `.feedback/config.yaml`(commit して共有)でステージの skip / FAIL・WARN の切替、検査対象の除外(`exclude`)、ログ行数、ツールの閾値(shellcheck の重大度・vulture の confidence・oasdiff のベースライン)、監査間隔等を調整できる。優先順位は**環境変数 > 検査単位(`checks.<id>`) > スタック単位(`check.<stack>`) > 全体(`check`) > 既定値** — `FEEDBACK_CHECK_SKIP` 等の環境変数は config より優先される一時上書き。設定ファイルは2層あり、`.feedback/local/config.yaml`(`.gitignore` 済み・この端末だけの設定)は共有設定より優先される — 共有設定を書き換えずに手元の事情(未使用ツールの検査を切る等)を反映するためのもの。個人設定で決まった項目は出所が `local.` で始まる。全項目の一覧は配布元プラグインの設定ガイド `docs/configuration.md` を参照(この scripts/ は docs/ 無しで配布されるため、ここにはリンクを張らない)
 - **`--list-checks`**: 検査ID・ラベル・ステージ・実効判定・**出所**(どの層で判定が決まったか)を一覧する。検査コマンドは実行しない。適用対象になった検査は、ツール未導入でも `skip` と理由を表示する。左端の検査IDはそのまま `checks:` のキーとして利用できる。`--json` を併用すると機械可読な形式で出力する。壊れた config では表を既定値で出した後に stderr へエラーを出し exit 1 する
 - **ステージスキップ**: `FEEDBACK_CHECK_SKIP` に指定できるステージ名は `lint` / `typecheck` / `test` / `build` / `format` / `security` / `docs` / `contract`。空白区切りで複数指定できる(config の `check.skip` と同じ語彙)
 - **make再帰ガード**: `make check` 実行時のみ `FEEDBACK_CHECK_RECURSION_GUARD` を子孫に伝え、その中で起動された check.sh は make フォールバックを `SKIP` する。フック実行時に `CLAUDE_PROJECT_DIR` が伝播し、テスト内の check.sh がルートを本リポジトリに解決し直して make check がテストを再実行する無限再帰(Stop フックの timeout を食い潰す)を断つためのもの。**通常の make 実行・直接ステージ(lint/test/build)には影響しない**
@@ -147,7 +150,7 @@ python3 scripts/feedback_log.py <サブコマンド> [引数]
 | `close` | `<entry-id>` `[--reason "<理由>"]` | 昇華せず `closed` に更新。一般化できない一回限りの指摘用 |
 | `retire` | `<出典entry-id>` `--reason "<退役理由>"` | 昇華済みルールを **rules.md から撤去**し、出典エントリ(merge済みの分も含む)を `retired` に更新。棚卸しで人間が裁定した後に使う |
 | `rules` | (なし) | 現在の `rules.md` を表示 |
-| `stats` | `[--since <日付>]` `[--days <N>]` | フック合否とログの集計。PostToolUse 初回通過率・平均再チェック回数・Stop 初回通過率・失敗上位・signal/根因別件数・**再発候補**(昇華後に同カテゴリの失敗系が再記録されたルール) |
+| `stats` | `[--since <日付>]` `[--days <N>]` | フック合否とログの集計。PostToolUse 初回通過率・平均再チェック回数・Stop 初回通過率・失敗上位・signal/根因別件数・**再発候補**(昇華後に同カテゴリの失敗系が記録されたルール — これは**判定結果ではなく調査対象**で、同じ原則の再発かどうかは本文を読むエージェントが判断する。各候補に添う数値は表面的な文字の重なりで、読む順のヒントに過ぎない)。頻出WARN と失敗上位には**最終発生日**が付き、`feedback.stale_days`(既定7日)以上再発していない項目には注記が出る。スクラッチパッド等の一時ファイルは集計対象外。**最終監査日**と**最終棚卸し日**も表示し、それぞれ `audit.interval_days`(既定7日)・`feedback.retro_interval_days`(既定90日 = 四半期の目安)を超過すると推奨行が出る |
 | `report` | `--since <日付\|yesterday>` または `--last`、`[--mark]` | 期間ダイジェスト(新規エントリ/昇華/close・retire/open 棚卸し/再発候補/数字)。`--last` は `.feedback/.last-retro` 基点。`--mark` で実施後に基点を更新 |
 
 - **category**: `style` / `architecture` / `testing` / `naming` / `workflow` / `domain`
@@ -159,7 +162,7 @@ python3 scripts/feedback_log.py <サブコマンド> [引数]
 bash scripts/audit.sh [プロジェクトルート]
 ```
 
-`check.sh` と異なり**ネットワークを使う**(pip-audit / npm audit --audit-level=high / govulncheck / cargo audit)。Node は `package-lock.json` があるときだけ実行する — `npm audit` は他PMの lockfile を読めず ENOLOCK で落ちるため、`pnpm-lock.yaml` / `yarn.lock` しか無い場合は SKIP して `pnpm audit` / `yarn npm audit` の直接実行を案内する。Stop フックからは呼ばれず、`feedback-loop` スキル等からの明示実行専用。成功時のみ `.feedback/.last-audit` に日付を書き、`stats` / `report` が「最終監査日」を表示する — **7日を超過するか未実行なら推奨行が出る**(WARN と同じ「ブロックせず、溜まったら見える」哲学)。失敗時にスタンプを書かないため、脆弱性が残っている間は推奨が消えない。
+`check.sh` と異なり**ネットワークを使う**(pip-audit / npm audit --audit-level=high / govulncheck / cargo audit)。Node は PM 判定(`lib.sh` の `harness_node_pm` — `check.sh` と共通)が npm を返し、かつ `package-lock.json` があるときだけ実行する — `npm audit` は他PMの lockfile を読めず ENOLOCK で落ちるため、`pnpm-lock.yaml` / `yarn.lock` がある場合は SKIP して `pnpm audit` / `yarn npm audit` の直接実行を案内する。移行中などで `package-lock.json` が併存していても npm 以外と判定する(テストが pnpm で走るのに監査だけ npm audit が動くと、実際の依存解決と違うツリーを監査するため)。Stop フックからは呼ばれず、`feedback-loop` スキル等からの明示実行専用。成功時のみ `.feedback/.last-audit` に日付を書き、`stats` / `report` が「最終監査日」を表示する — **7日を超過するか未実行なら推奨行が出る**(WARN と同じ「ブロックせず、溜まったら見える」哲学)。失敗時にスタンプを書かないため、脆弱性が残っている間は推奨が消えない。
 
 ### `hooks/` — Claude Code / Codex Hooks ラッパ
 

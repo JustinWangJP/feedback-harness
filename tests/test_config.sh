@@ -313,4 +313,48 @@ PY
 )"
 assert_eq "" "$DRIFT" "check.sh の呼び出し検査ID・ステージが CHECKS と一致する"
 
+# --- 個人設定レイヤ(.feedback/local/config.yaml) ---
+# config.yaml は commit して共有する「チームの設定」、local/config.yaml は
+# .gitignore 済みの「この端末だけの設定」。共有設定を書き換えずに手元の事情
+# (ツール未導入・重い検査の一時停止)を反映するためのもの
+LP="$WORK/localproj"
+mkdir -p "$LP/.feedback/local"
+
+eff() { # eff <root> — 実効設定を JSON で返す
+  python3 "$CFG" --json "$1"
+}
+src_of() { # src_of <JSON> <検査ID> — その検査の判定と出所を "sev|src" で返す
+  python3 -c '
+import json, sys
+d = json.loads(sys.stdin.read())
+sev, src = d["severity"].get(sys.argv[1], ("(なし)", "(なし)"))
+print(f"{sev}|{src}")
+' "$2"
+}
+
+printf 'checks:\n  ruff:\n    severity: warn\n' > "$LP/.feedback/config.yaml"
+assert_eq "warn|checks.ruff" "$(eff "$LP" | src_of - ruff)" \
+  "共有設定だけなら出所はキー名のまま(既存表示を変えない)"
+
+# 個人設定は共有設定に勝つ
+printf 'checks:\n  ruff:\n    severity: skip\n' > "$LP/.feedback/local/config.yaml"
+assert_eq "skip|local.checks.ruff" "$(eff "$LP" | src_of - ruff)" \
+  "個人設定が共有設定を上書きし、出所に local. が付く"
+
+# 出所にコロンを使うと HARNESS_CHECK_SEVERITY("id:sev:出所" を ${entry##*:} で
+# 読む)でレイヤ名が黙って落ちる。ドット形式であることを固定する
+assert_not_contains "$(eff "$LP" | src_of - ruff)" "local:" \
+  "出所の区切りにコロンを使わない(シェル側のパースで落ちるため)"
+
+# 個人設定が触れていない検査は共有設定のまま
+printf 'checks:\n  ruff:\n    severity: warn\n  shellcheck:\n    severity: skip\n' \
+  > "$LP/.feedback/config.yaml"
+assert_eq "skip|checks.shellcheck" "$(eff "$LP" | src_of - shellcheck)" \
+  "個人設定が触れていない検査は共有設定の判定と出所を保つ"
+
+# 壊れた個人設定も FAIL として見えること(黙って無視しない)
+printf 'checks:\n  ruff:\n    severity: nonsense\n' > "$LP/.feedback/local/config.yaml"
+ERR="$(eff "$LP" | python3 -c 'import json,sys; print(json.loads(sys.stdin.read())["error"] or "")')"
+assert_contains "$ERR" "local" "壊れた個人設定はどのファイルか分かる形でエラーになる"
+
 assert_summary

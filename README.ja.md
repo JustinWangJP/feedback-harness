@@ -88,12 +88,15 @@ scripts/
   check_file.sh     # 単一ファイルの高速チェック (拡張子ベース)
   audit.sh          # 必要なときに実行する脆弱性監査 (唯一のネットワーク検査・Stopフック対象外)
   lib.sh            # 共有ユーティリティ (has / harness_project_root / harness_tree_changed /
-                    #   harness_validate_json|yaml / harness_check_md_links / harness_log_event|warn)
+                    #   harness_node_pm / harness_validate_json|yaml / harness_check_md_links /
+                    #   harness_log_event|warn)
   harness_config.py # .feedback/config.yaml の読み込みと検査設定の解決
   feedback_log.py   # フィードバック記録CLI (add / list / search / promote / merge / close /
                     #   retire / rules / stats / report)
   init.sh           # 導入スクリプト (Hooks 非対応環境向け資産の展開)
   README.md         # 各スクリプトの詳しい仕様と必要ツール
+  README.ja.md      # スクリプト仕様の日本語版
+  README.zh-CN.md   # スクリプト仕様の簡体字中国語版
   hooks/            # Claude Code / Codex Hooks ラッパー (SessionStart / PostToolUse / Stop)
 .feedback/
   rules.md          # 一般化された恒久ルール (エージェント必読・失敗由来/成功由来の2セクション)

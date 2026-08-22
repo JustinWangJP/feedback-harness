@@ -21,7 +21,7 @@ description: 人間のレビュー指摘・修正・ダメ出しをフィード�
 5. 記録する:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/feedback_log.py" add \
+python3 "${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-}}/scripts/feedback_log.py" add \
   --category <cat> \
   --summary "<1文要約>" \
   --detail "<文脈: どのファイル/作業で、何を指摘されたか>" \

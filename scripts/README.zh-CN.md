@@ -53,7 +53,10 @@ bash scripts/check.sh [项目根目录]          # 省略时使用当前目录
 FEEDBACK_CHECK_SKIP="test build" bash scripts/check.sh   # 跳过指定阶段
 bash scripts/check.sh --list-checks   # 不执行检查，列出检查 ID、实际判定和来源
 bash scripts/check.sh --list-checks --json   # 以 JSON 输出相同信息
+bash scripts/check.sh --help          # 显示用法（exit 0）
 ```
+
+分发的各脚本（`check.sh` / `check_file.sh` / `audit.sh` / `init.sh` / `harness_config.py` / `feedback_log.py`）在收到 `--help` / `-h` 时显示用法并 `exit 0`。`check.sh` / `audit.sh` / `init.sh` 会以 **`exit 2`** 拒绝未知选项——若把未知选项当作项目根目录，就会显示“找不到目录”，从而掩盖问题其实出在参数上。`check_file.sh` 是例外：除 `--help` 外，以 `-` 开头的参数一律按文件名处理，因为该脚本的非零退出码会直接导致 PostToolUse 拒绝本次编辑。
 
 **行为：** 对每个检测到的技术栈运行相应阶段，同时执行与技术栈无关的横向检查，并输出 `PASS`/`FAIL`/`WARN`/`SKIP` 摘要。
 
@@ -86,7 +89,7 @@ bash scripts/check.sh --list-checks --json   # 以 JSON 输出相同信息
 - **依赖项存在性（离线）：** Node 仅在使用 npm 且存在 `node_modules` 时运行 `npm ls --all`；Go 使用 `go mod verify`；Rust 使用 `cargo metadata --offline`；Python 使用 `deptry`。这些检查可发现不存在的包名以及声明与实际安装内容不一致的问题
 - **API 契约和破坏性变更（`contract` 阶段）：** 根目录或 `api/` 中存在 `openapi.yaml` / `openapi.json` 时，使用 `oasdiff breaking` 与 Git 基线（`git merge-base HEAD <FEEDBACK_CONTRACT_BASE:-main>`，无法解析时使用 `HEAD`）比较。含有 `[lib]` 的 Rust crate 运行 `cargo semver-checks check-release --baseline-rev <Git生成的SHA>`。两者都不访问远程仓库或 registry，完全离线运行
 - **复用现有测试测量覆盖率：** 不运行两次测试，只添加测量参数。检测到 pytest-cov 时，Python 添加 `--cov --cov-report=term-missing`（配置的 `--cov-fail-under` 会自动成为 FAIL gate）；Go 使用 `go test -cover`；Node 如果存在 `test:coverage` script，则用它**替代** `test`，避免运行两次
-- **配置文件：** 通过提交并共享 `.feedback/config.yaml`，可调整阶段 skip、FAIL/WARN 切换、检查对象排除（`exclude`）、日志行数、工具阈值（shellcheck 严重程度、vulture confidence、oasdiff 基线）、审计间隔等。优先级为**环境变量 > 单项检查（`checks.<id>`）> 技术栈（`check.<stack>`）> 全局（`check`）> 默认值**。`FEEDBACK_CHECK_SKIP` 等环境变量用于临时覆盖配置。全部项目请参阅分发源插件的配置指南 `docs/configuration.md`；分发的 `scripts/` 不包含 `docs/`，因此此处不添加链接
+- **配置文件：** 通过提交并共享 `.feedback/config.yaml`，可调整阶段 skip、FAIL/WARN 切换、检查对象排除（`exclude`）、日志行数、工具阈值（shellcheck 严重程度、vulture confidence、oasdiff 基线）、审计间隔等。优先级为**环境变量 > 单项检查（`checks.<id>`）> 技术栈（`check.<stack>`）> 全局（`check`）> 默认值**。`FEEDBACK_CHECK_SKIP` 等环境变量用于临时覆盖配置。配置分为两层：`.feedback/local/config.yaml`（已被 `.gitignore`，仅对本机生效）优先于共享的 `config.yaml`，可在不修改团队设置的前提下反映本地情况（例如关闭未使用工具的检查）。由个人层决定的项目，其来源以 `local.` 开头。全部项目请参阅分发源插件的配置指南 `docs/configuration.md`；分发的 `scripts/` 不包含 `docs/`，因此此处不添加链接
 - **`--list-checks`：** 不执行检查命令，只列出检查 ID、标签、阶段、实际判定和**来源**（由哪一层决定）。适用的检查即使未安装工具，也会显示 `skip` 和原因。最左侧的检查 ID 可直接用作 `checks:` 的 key。结合 `--json` 可输出机器可读格式。配置损坏时，先使用默认值显示表格，再向 stderr 输出错误并以 1 退出
 - **跳过阶段：** `FEEDBACK_CHECK_SKIP` 可指定 `lint`、`typecheck`、`test`、`build`、`format`、`security`、`docs` 和 `contract`，多个名称以空格分隔；与配置中的 `check.skip` 使用相同词汇
 - **Make 递归防护：** 仅在运行 `make check` 时将 `FEEDBACK_CHECK_RECURSION_GUARD` 传给后代进程，使其中启动的 check.sh 跳过 Make 回退。这样可阻止以下无限递归：Hook 执行时传播的 `CLAUDE_PROJECT_DIR` 让测试中的 check.sh 将根目录重新解析为本仓库，随后 make check 再次执行测试，最终耗尽 Stop hook 的 timeout。**普通 Make 命令和直接运行的 lint/test/build 阶段不受影响**
@@ -147,7 +150,7 @@ python3 scripts/feedback_log.py <子命令> [参数]
 | `close` | `<entry-id>` `[--reason "<原因>"]` | 不整理为规则，直接标记为 `closed`。用于无法通用化的一次性反馈 |
 | `retire` | `<来源entry-id>` `--reason "<停用原因>"` | 从 rules.md **移除已整理的规则**，并将其来源条目（包括已经 merge 的条目）标记为 `retired`。在规则盘点并由人工裁定后使用 |
 | `rules` | （无） | 显示当前 `rules.md` |
-| `stats` | `[--since <日期>]` `[--days <N>]` | 汇总 Hook 结果和日志：PostToolUse 首次通过率、平均重新检查次数、Stop 首次通过率、常见失败、按 signal/根因统计的数量，以及**复发候选**（整理后同类别又记录了失败类反馈的规则） |
+| `stats` | `[--since <日期>]` `[--days <N>]` | 汇总 Hook 结果和日志：PostToolUse 首次通过率、平均重新检查次数、Stop 首次通过率、常见失败、按 signal/根因统计的数量，以及**复发候选**（整理后同类别又记录了失败类反馈的规则——这是**待调查的线索而非判定结果**，是否属于同一原则的复发由阅读正文的 Agent 判断。每条候选旁的数值只是表层字符重合度，仅用于决定阅读顺序）。常见 WARN 与常见失败会附带**最近发生日期**，超过 `feedback.stale_days`（默认 7 天）未再出现的项目会加注说明。草稿目录等临时文件不计入统计。同时显示**最近审计日期**与**最近盘点日期**，分别超过 `audit.interval_days`（默认 7 天）与 `feedback.retro_interval_days`（默认 90 天，约一个季度）时会显示建议 |
 | `report` | `--since <日期\|yesterday>` 或 `--last`、`[--mark]` | 周期摘要（新条目、promote/close/retire、open 盘点、复发候选和数值）。`--last` 以 `.feedback/.last-retro` 为起点；`--mark` 在复盘后更新起点 |
 
 - **category：** `style` / `architecture` / `testing` / `naming` / `workflow` / `domain`
@@ -159,7 +162,7 @@ python3 scripts/feedback_log.py <子命令> [参数]
 bash scripts/audit.sh [项目根目录]
 ```
 
-与 `check.sh` 不同，本脚本通过 pip-audit、`npm audit --audit-level=high`、govulncheck 或 cargo audit **使用网络**。Node 仅在存在 `package-lock.json` 时执行，因为 npm audit 无法读取其他包管理器的 lockfile，会以 ENOLOCK 失败。如果只有 `pnpm-lock.yaml` 或 `yarn.lock`，则标记为 SKIP，并提示直接运行 `pnpm audit` 或 `yarn npm audit`。Stop hook 不会调用它；仅在收到明确请求时执行，包括通过 `feedback-loop` skill 调用。成功时才会将日期写入 `.feedback/.last-audit`，`stats` / `report` 会显示“最近审计日期”。**如果超过 7 天未审计，或从未执行过审计，就会显示建议**，遵循与 WARN 相同的“不阻塞、积累后可见”原则。失败时不写入标记，因此在漏洞未解决期间建议不会消失。
+与 `check.sh` 不同，本脚本通过 pip-audit、`npm audit --audit-level=high`、govulncheck 或 cargo audit **使用网络**。Node 仅在包管理器判定（`lib.sh` 的 `harness_node_pm`，与 `check.sh` 共用）返回 npm 且存在 `package-lock.json` 时执行，因为 npm audit 无法读取其他包管理器的 lockfile，会以 ENOLOCK 失败。存在 `pnpm-lock.yaml` 或 `yarn.lock` 时标记为 SKIP，并提示直接运行 `pnpm audit` 或 `yarn npm audit`。即使迁移过程中残留了 `package-lock.json`，也仍判定为非 npm——否则测试在 pnpm 下运行而审计走 npm audit，审计的依赖树与实际解析结果不一致。Stop hook 不会调用它；仅在收到明确请求时执行，包括通过 `feedback-loop` skill 调用。成功时才会将日期写入 `.feedback/.last-audit`，`stats` / `report` 会显示“最近审计日期”。**如果超过 7 天未审计，或从未执行过审计，就会显示建议**，遵循与 WARN 相同的“不阻塞、积累后可见”原则。失败时不写入标记，因此在漏洞未解决期间建议不会消失。
 
 ### `hooks/` — Claude Code / Codex Hook 包装脚本
 

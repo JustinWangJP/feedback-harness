@@ -6,6 +6,26 @@
 # 出力: 問題があれば内容を表示して exit 1、なければ exit 0(無出力)。
 set -u
 
+usage() {
+  cat <<'USAGE'
+使い方: bash scripts/check_file.sh <ファイルパス>
+
+  <ファイルパス>  検査する単一ファイル(PostToolUse フックが編集直後に渡す)
+  -h, --help      この使い方を表示する
+
+exit 0 = 問題なし(無出力)/ 1 = 問題あり(内容を表示)。
+存在しないファイルは exit 0 で通す — 削除直後のファイルを渡されても
+完了をブロックしないため。
+USAGE
+}
+# --help だけを特別扱いし、他の "-" 始まりは従来どおりファイル名として扱う。
+# 不明オプションを exit 2 にすると、post_edit.sh がファイル名を渡す経路で
+# "-" 始まりのファイルが誤ブロックになる(このスクリプトの非0は
+# PostToolUse の差し戻しに直結する)
+case "${1:-}" in
+  -h|--help) usage; exit 0 ;;
+esac
+
 LIBDIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib.sh
 . "$LIBDIR/lib.sh"
@@ -70,7 +90,13 @@ case "$FILE" in
     sev="$(harness_check_severity node-lint fail)"
     if [[ "$sev" != "skip" ]]; then
       cur=""
-      if has npx && [[ -f .eslintrc.json || -f .eslintrc.js || -f eslint.config.js || -f eslint.config.mjs ]]; then
+      # npx --no-install は「未インストール」も「lint 違反」も非0で返すため、
+      # 設定ファイルの有無だけをゲートにすると eslint 未導入のプロジェクトで
+      # npm の内部エラー(missing packages)がそのまま差し戻される。check.sh の
+      # prettier / knip / secretlint と同じく --version で事前プローブし、
+      # 未導入は検査せず素通しする(単一ファイル検査に SKIP の出口は無いため)
+      if has npx && [[ -f .eslintrc.json || -f .eslintrc.js || -f eslint.config.js || -f eslint.config.mjs ]] \
+         && npx --no-install eslint --version >/dev/null 2>&1; then
         cur="$(npx --no-install eslint --format unix "$FILE" 2>&1)" && cur=""
       elif has node && [[ "$FILE" == *.js || "$FILE" == *.mjs || "$FILE" == *.cjs ]]; then
         cur="$(node --check "$FILE" 2>&1)" && cur=""

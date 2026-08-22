@@ -18,9 +18,29 @@
 set -euo pipefail
 
 SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+usage() {
+  cat <<'USAGE'
+使い方: bash scripts/init.sh <対象プロジェクトパス>
+
+  <対象プロジェクトパス>  ハーネスを導入するプロジェクトのディレクトリ
+  -h, --help              この使い方を表示する
+
+Claude Code / Codex app・CLI でプラグインとして使う場合、このスクリプトは不要。
+Codex IDE 拡張や他の汎用エージェントを併用する場合にだけ実行する。
+exit 0 = 導入成功 / 2 = 引数・環境の誤り
+USAGE
+}
+case "${1:-}" in
+  -h|--help) usage; exit 0 ;;
+  # 未知のオプションを対象パス扱いすると「対象が存在しません: --dry-run」に
+  # なり、原因が引数だと気づけない
+  -*) echo "ERROR: 不明なオプション: $1" >&2; usage >&2; exit 2 ;;
+esac
+
 DEST="${1:-}"
 
-[[ -z "$DEST" ]] && { echo "使い方: bash scripts/init.sh <対象プロジェクトパス>"; exit 2; }
+[[ -z "$DEST" ]] && { usage; exit 2; }
 [[ -d "$DEST" ]] || { echo "ERROR: 対象が存在しません: $DEST"; exit 2; }
 DEST="$(cd "$DEST" && pwd)"
 [[ "$DEST" == "$SRC" ]] && { echo "ERROR: 自分自身には導入できません"; exit 2; }
@@ -136,7 +156,9 @@ elif heading in content:
     match = re.search(legacy_end, content[start:], re.MULTILINE)
     if match is None:
         print(
-            "ERROR: 旧ポインタの末尾を特定できません。既存ポインタを手動で削除して再実行してください",
+            "ERROR: 旧ポインタの末尾を特定できません。既存ポインタを手動で削除して再実行してください。\n"
+            "  この整理が要るのは init.sh が必要な環境(Codex IDE 拡張や他の汎用エージェントを併用する場合)だけです。\n"
+            "  Claude Code または Codex app / CLI のプラグインだけで使うなら init.sh 自体が不要なため、この作業は不要です。",
             file=sys.stderr,
         )
         raise SystemExit(3)
@@ -169,17 +191,31 @@ update_pointer "AGENTS.md" \
 # .gitignore — 中間生成物とローカル状態は追跡しない。
 # .feedback/.last-check は Stop フックの検査スタンプ(mtime比較用)。共有すると
 # 他マシンの時刻で「検査済み」と誤判定され、検査が飛ばされる。
-if [[ -f "$DEST/.gitignore" ]] && grep -q '^_workspace/' "$DEST/.gitignore"; then
+# 判定は「ファイル全体に1行でもあればスキップ」ではなくエントリ単位で行う。
+# 一括スキップだと、後から足したエントリ(.feedback/local/ など)が既存導入へ
+# 永久に届かない。特に .feedback/local/ は個人設定で、共有されると事故になる。
+IGNORE_ENTRIES=(
+  "_workspace/|Harness working area (QAレポート等の中間生成物)"
+  ".feedback/.last-check|Stop フックの検査スタンプ(ローカル状態)"
+  ".feedback/events.jsonl|フック合否のイベントログ(マシン固有のノイズを共有しない)"
+  ".feedback/.last-retro|棚卸しの基点(個人の運用リズム)"
+  ".feedback/.last-audit|脆弱性監査の最終実行日(マシンローカル)"
+  ".feedback/local/|個人設定レイヤ(この端末だけの設定。共有設定に勝つ)"
+)
+ADDED=()
+for entry in "${IGNORE_ENTRIES[@]}"; do
+  pattern="${entry%%|*}"
+  comment="${entry#*|}"
+  if [[ -f "$DEST/.gitignore" ]] && grep -qxF "$pattern" "$DEST/.gitignore"; then
+    continue
+  fi
+  { echo; echo "# $comment"; echo "$pattern"; } >> "$DEST/.gitignore"
+  ADDED+=("$pattern")
+done
+if [[ ${#ADDED[@]} -eq 0 ]]; then
   echo "  .gitignore ... 記載済みのためスキップ"
 else
-  {
-    echo
-    echo "# Harness working area (QAレポート等の中間生成物)"
-    echo "_workspace/"
-    echo "# Stop フックの検査スタンプ(ローカル状態)"
-    echo ".feedback/.last-check"
-  } >> "$DEST/.gitignore"
-  echo "  .gitignore ... _workspace/ と .feedback/.last-check を追記"
+  echo "  .gitignore ... ${ADDED[*]} を追記"
 fi
 
 echo

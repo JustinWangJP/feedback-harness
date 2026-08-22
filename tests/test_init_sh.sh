@@ -163,4 +163,25 @@ if bash "$REPO/scripts/init.sh" "$REPO" >/dev/null 2>&1; then
   fail "自分自身への導入が拒否されなかった"
 fi
 
+# --- .gitignore はエントリ単位で追記する ---
+# 「1行でもあれば全体をスキップ」だと、後から足したエントリが既存導入へ
+# 永久に届かない。特に .feedback/local/(個人設定)は共有されると事故になる
+GI="$WORK/gitignore_proj"
+mkdir -p "$GI"
+( cd "$GI" && git init -q . )
+# 旧バージョンの init.sh が書いた2行だけがある既存導入を模す
+printf 'node_modules/\n\n# Harness working area\n_workspace/\n.feedback/.last-check\n' \
+  > "$GI/.gitignore"
+bash "$REPO/scripts/init.sh" "$GI" >/dev/null 2>&1
+GI_BODY="$(cat "$GI/.gitignore")"
+assert_contains "$GI_BODY" ".feedback/local/" "既存導入にも個人設定の除外が届く"
+assert_contains "$GI_BODY" ".feedback/events.jsonl" "既存導入にも後から足したエントリが届く"
+
+# 2回目の実行で行が重複しない(init.sh は繰り返し実行される)
+bash "$REPO/scripts/init.sh" "$GI" >/dev/null 2>&1
+assert_eq "1" "$(grep -cxF '.feedback/local/' "$GI/.gitignore")" \
+  "再実行しても .gitignore の行が重複しない"
+assert_eq "1" "$(grep -cxF '_workspace/' "$GI/.gitignore")" \
+  "既存エントリを二重に書かない"
+
 assert_summary
