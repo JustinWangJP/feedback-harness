@@ -68,7 +68,7 @@ bash scripts/check.sh --help          # 显示用法（exit 0）
 |---|---|---|---|---|---|---|
 | `lint` | `ruff check` | `run lint` / `npm ls --all` | `go vet` / `go mod verify` | `clippy` / `cargo metadata --offline` | — | `bash -n` / `shellcheck` |
 | `typecheck` | `mypy`（声明时） | `run typecheck` / `tsc --noEmit` | — | — | — | — |
-| `test` | `pytest`（+`--cov`） | `test` 或 `test:coverage` | `go test -cover` | `cargo test` | `mvn verify` / `gradle check` | — |
+| `test` | `pytest`（+`--cov`） | `test` 或 `test:coverage` | `go test -cover` | `cargo test` | `./mvnw` 或 `mvn verify` / `gradle check` | — |
 | `build` | — | `run build` | `go build` | `cargo check`（没有 clippy 时） | — | — |
 | `format` | `ruff format` | `prettier`（声明时） | `gofmt -l` | `cargo fmt` | — | — |
 | `contract` | — | — | — | `cargo semver-checks`（`[lib]`） | — | — |
@@ -84,6 +84,7 @@ bash scripts/check.sh --help          # 显示用法（exit 0）
 - **访问远程仓库** — 契约差异基线为 `git merge-base HEAD <FEEDBACK_CONTRACT_BASE:-main>`；无法解析时使用 `HEAD`
 
 - **检测对象：** Python（`pyproject.toml` / `setup.py` / `requirements.txt`；即使没有这些文件，只要存在 `*.py` 也会仅运行 `ruff`）/ Node（`package.json`）/ Go（`go.mod`）/ Rust（`Cargo.toml`）/ Java（`pom.xml` / `build.gradle`）/ Shell（`*.sh`）/ 通用（`Makefile` 的 `check` target）
+- **Maven 项目：** 根目录存在 `pom.xml` 时，将其作为 reactor 入口，只运行一次 `verify`。没有根 POM 时，对检测到的每个 `pom.xml` 使用 `-f` 独立运行。每个 POM 依次优先使用同目录的 `mvnw`、仓库根目录的 `mvnw`，最后才使用全局 `mvn`。wrapper 存在但不可执行时会标记为 `SKIP`，不会静默回退。Maven `verify` 包含项目配置的编译、测试、打包和 integration-test 生命周期阶段；Maven 可能会按照项目设置从仓库解析依赖项和插件
 - **横向检查（与技术栈无关）：** 验证 `*.json`、`*.yaml` 和 `*.yml` 的语法。`tsconfig*.json`、`jsconfig*.json`、`devcontainer.json` 以及 `.vscode/` 下的文件通常允许注释（JSONC），因此不检查。YAML 支持由 `---` 分隔的多文档格式，`!Ref` 等未知自定义标签不视为语法错误。未安装 PyYAML 时，YAML 检查标记为 `SKIP` 并说明原因
 - **文档一致性：** 在 `docs` 阶段检测 Markdown 内部链接失效。为保持离线运行，不检查外部 URL、`mailto:`、仅锚点链接和绝对路径。代码块和行内代码中的链接状文本不参与验证
 - **密钥（`security` 阶段）：** 存在 `.secretlintrc.*` 时运行 `secretlint`。**未配置时标记为 SKIP**，因为 secretlint 无法在没有配置的情况下启动。值默认会被屏蔽，不会出现在失败日志中。PATH 中存在 `gitleaks` 时也会运行，但仅支持带有 `--no-git --redact` 的版本
@@ -97,7 +98,7 @@ bash scripts/check.sh --help          # 显示用法（exit 0）
 - **Make 递归防护：** 仅在运行 `make check` 时将 `FEEDBACK_CHECK_RECURSION_GUARD` 传给后代进程，使其中启动的 check.sh 跳过 Make 回退。这样可阻止以下无限递归：Hook 执行时传播的 `CLAUDE_PROJECT_DIR` 让测试中的 check.sh 将根目录重新解析为本仓库，随后 make check 再次执行测试，最终耗尽 Stop hook 的 timeout。**普通 Make 命令和直接运行的 lint/test/build 阶段不受影响**
 - **SKIP 原因：** 输出一定包含原因，例如 `(<tool> 未インストール)` / `(<tool> 起動不可 — 環境を確認してください)` / `(実行不可)`；由环境变量造成的跳过显示 `(env.FEEDBACK_CHECK_SKIP)`，由配置造成的跳过显示 `(config: <キーのパス>)`，按技术栈统一跳过时显示 `(<stack>: 全ステージ …)`。**仅因工具缺失或损坏不会成为 `FAIL`**，因为这不是用户代码的问题
 - **检查文件：** 在 Git 仓库中使用 `git ls-files --cached --others --exclude-standard`。这会检查**尚未提交的新文件**，并排除已由 `.gitignore` 忽略的文件
-- **不使用网络：** Node 类型检查的回退命令为 `npx --no-install tsc`。未安装 `typescript` 时不会尝试下载，只标记为 `SKIP`
+- **不隐式下载工具：** Node 类型检查的回退命令为 `npx --no-install tsc`。未安装 `typescript` 时不会尝试下载，只标记为 `SKIP`。但 Maven `verify` 等项目定义的命令仍可能解析已声明的依赖项和插件
 - **shellcheck 严重程度：** 默认为 `warning`（`-S warning`）。如果连 `style` / `info` 也检查，已有项目可能在引入工具链的第一天就无法继续工作。设置 `FEEDBACK_SHELLCHECK_SEVERITY=style` 可提高严格程度
 - **失败输出：** 失败阶段的日志末尾 40 行会汇总到 `failures.txt`，最后统一显示
 - **最终行**（FAIL 时除外；以下情况退出码均为 0）：

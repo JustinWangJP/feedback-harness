@@ -37,7 +37,7 @@ Checks **detect the project's technology stack automatically**. No advance confi
 |---|---|---|
 | `lint` | Static analysis | ruff / eslint / go vet / clippy / shellcheck and bash -n |
 | `typecheck` | Type checking | mypy (when `[tool.mypy]` is declared) / tsc |
-| `test` | Tests (**adds coverage measurement** to the existing test run) | pytest (`--cov`) / go test `-cover` / npm `test:coverage` / cargo test / mvn verify |
+| `test` | Tests (**adds coverage measurement** to the existing test run) | pytest (`--cov`) / go test `-cover` / npm `test:coverage` / cargo test / `./mvnw` or `mvn verify` |
 | `build` | Build | go build / npm run build / cargo check |
 | `format` | Formatting drift | ruff format / prettier / gofmt / cargo fmt |
 | `security` | Committed secrets | secretlint (when `.secretlintrc.*` is declared) / gitleaks |

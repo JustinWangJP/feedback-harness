@@ -68,7 +68,7 @@ bash scripts/check.sh --help          # 使い方を表示(exit 0)
 |---|---|---|---|---|---|---|
 | `lint` | `ruff check` | `run lint` / `npm ls --all` | `go vet` / `go mod verify` | `clippy` / `cargo metadata --offline` | — | `bash -n` / `shellcheck` |
 | `typecheck` | `mypy`(宣言時) | `run typecheck` / `tsc --noEmit` | — | — | — | — |
-| `test` | `pytest`(+`--cov`) | `test` または `test:coverage` | `go test -cover` | `cargo test` | `mvn verify` / `gradle check` | — |
+| `test` | `pytest`(+`--cov`) | `test` または `test:coverage` | `go test -cover` | `cargo test` | `./mvnw` または `mvn verify` / `gradle check` | — |
 | `build` | — | `run build` | `go build` | `cargo check`(clippy 不在時) | — | — |
 | `format` | `ruff format` | `prettier`(宣言時) | `gofmt -l` | `cargo fmt` | — | — |
 | `contract` | — | — | — | `cargo semver-checks`(`[lib]`) | — | — |
@@ -84,6 +84,7 @@ bash scripts/check.sh --help          # 使い方を表示(exit 0)
 - **リモートを参照しない** — 契約差分のベースラインは `git merge-base HEAD <FEEDBACK_CONTRACT_BASE:-main>`、解決不能なら `HEAD`
 
 - **検出対象**: Python(`pyproject.toml`/`setup.py`/`requirements.txt`、無くても `*.py` があれば `ruff` のみ実行) / Node(`package.json`) / Go(`go.mod`) / Rust(`Cargo.toml`) / Java(`pom.xml`/`build.gradle`) / Shell(`*.sh`) / 汎用(`Makefile` の `check` ターゲット)
+- **Maven project**: ルートに `pom.xml` があれば reactor の入口として `verify` を1回だけ実行する。ルート POM が無ければ、検出した各 `pom.xml` を `-f` で個別実行する。POM ごとに、同じディレクトリの `mvnw`、リポジトリルートの `mvnw`、グローバル `mvn` の順で選ぶ。wrapper が存在しても実行不可なら、黙ってフォールバックせず `SKIP` と表示する。Maven の `verify` は、プロジェクトで設定されたコンパイル・テスト・パッケージング・integration-test lifecycle を含み、プロジェクト設定に従って依存や plugin をリポジトリから解決する場合がある
 - **横断チェック(スタック非依存)**: `*.json` / `*.yaml` / `*.yml` の構文検証。`tsconfig*.json` / `jsconfig*.json` / `devcontainer.json` / `.vscode/` 配下はコメント付き(JSONC)が慣例のため対象外。YAML は複数文書(`---` 区切り)に対応し、未知のカスタムタグ(`!Ref` 等)は構文エラーとして扱わない。PyYAML 未導入なら YAML は理由付き `SKIP`
 - **ドキュメント整合性**: Markdown の内部リンク切れを検出する(`docs` ステージ)。外部URL・`mailto:`・アンカーのみ・絶対パスは対象外(ネットワークを使わない原則)。コードブロック・コードスパン内のリンク風記述は検証しない
 - **秘密情報**(`security` ステージ): `.secretlintrc.*` があれば `secretlint` を実行する。**設定が無ければ SKIP** — secretlint は設定なしでは起動できないため。値は既定でマスクされ、失敗ログに秘密が出ることはない。`gitleaks` が PATH にあれば併用する(`--no-git --redact` に対応する版のみ)
@@ -97,7 +98,7 @@ bash scripts/check.sh --help          # 使い方を表示(exit 0)
 - **make再帰ガード**: `make check` 実行時のみ `FEEDBACK_CHECK_RECURSION_GUARD` を子孫に伝え、その中で起動された check.sh は make フォールバックを `SKIP` する。フック実行時に `CLAUDE_PROJECT_DIR` が伝播し、テスト内の check.sh がルートを本リポジトリに解決し直して make check がテストを再実行する無限再帰(Stop フックの timeout を食い潰す)を断つためのもの。**通常の make 実行・直接ステージ(lint/test/build)には影響しない**
 - **SKIPの理由**: 出力に必ず理由が付く — `(<tool> 未インストール)` / `(<tool> 起動不可 — 環境を確認してください)` / `(実行不可)` / 環境変数由来のスキップは `(env.FEEDBACK_CHECK_SKIP)`、config 由来は `(config: <キーのパス>)`、およびスタック単位でまとめた `(<stack>: 全ステージ …)`。**ツールが無い・壊れているだけの状態を `FAIL` にしない**(ユーザーのコードの問題ではないため)
 - **検査対象ファイル**: Gitリポジトリなら `git ls-files --cached --others --exclude-standard`。**未コミットの新規ファイルも検査し**、`.gitignore` 済みは除外する
-- **ネットワークを使わない**: Node の typecheck フォールバックは `npx --no-install tsc`。`typescript` が未導入なら取得を試みず `SKIP` にする
+- **ツールを暗黙に取得しない**: Node の typecheck フォールバックは `npx --no-install tsc`。`typescript` が未導入なら取得を試みず `SKIP` にする。ただし Maven の `verify` などプロジェクト定義のコマンドは、宣言済みの依存や plugin を解決する場合がある
 - **shellcheck の重大度**: 既定は `warning`(`-S warning`)。`style`/`info` まで拾うと導入初日のプロジェクトが既存コードで詰まるため。`FEEDBACK_SHELLCHECK_SEVERITY=style` で引き上げられる
 - **失敗出力**: `FAIL` したステージは末尾40行のログを `failures.txt` に集約し、最後にまとめて表示する
 - **最終行**(FAIL時を除く。いずれも exit 0):

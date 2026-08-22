@@ -68,7 +68,7 @@ Every distributed script (`check.sh`, `check_file.sh`, `audit.sh`, `init.sh`, `h
 |---|---|---|---|---|---|---|
 | `lint` | `ruff check` | `run lint` / `npm ls --all` | `go vet` / `go mod verify` | `clippy` / `cargo metadata --offline` | — | `bash -n` / `shellcheck` |
 | `typecheck` | `mypy` (when declared) | `run typecheck` / `tsc --noEmit` | — | — | — | — |
-| `test` | `pytest` (+`--cov`) | `test` or `test:coverage` | `go test -cover` | `cargo test` | `mvn verify` / `gradle check` | — |
+| `test` | `pytest` (+`--cov`) | `test` or `test:coverage` | `go test -cover` | `cargo test` | `./mvnw` or `mvn verify` / `gradle check` | — |
 | `build` | — | `run build` | `go build` | `cargo check` (when clippy is absent) | — | — |
 | `format` | `ruff format` | `prettier` (when declared) | `gofmt -l` | `cargo fmt` | — | — |
 | `contract` | — | — | — | `cargo semver-checks` (`[lib]`) | — | — |
@@ -84,6 +84,7 @@ Every distributed script (`check.sh`, `check_file.sh`, `audit.sh`, `init.sh`, `h
 - **Consult a remote** — the contract baseline is `git merge-base HEAD <FEEDBACK_CONTRACT_BASE:-main>`, falling back to `HEAD` when it cannot be resolved
 
 - **Detected targets:** Python (`pyproject.toml` / `setup.py` / `requirements.txt`; when absent but `*.py` exists, only `ruff` runs) / Node (`package.json`) / Go (`go.mod`) / Rust (`Cargo.toml`) / Java (`pom.xml` / `build.gradle`) / Shell (`*.sh`) / generic (`check` target in a `Makefile`)
+- **Maven projects:** For a root `pom.xml`, run `verify` once through the reactor entry point. Without a root POM, run every discovered `pom.xml` independently with `-f`. For each POM, prefer its adjacent `mvnw`, then the repository-root `mvnw`, then the global `mvn`. A present but non-executable wrapper is reported as `SKIP` instead of silently falling back. Maven `verify` includes compilation, tests, packaging, and integration-test lifecycle phases configured by the project; Maven may resolve dependencies and plugins from repositories according to that project's settings
 - **Cross-cutting checks (stack-independent):** Validate `*.json`, `*.yaml`, and `*.yml`. `tsconfig*.json`, `jsconfig*.json`, `devcontainer.json`, and files below `.vscode/` are excluded because comments (JSONC) are conventional there. YAML supports multiple documents separated by `---`, and unknown custom tags such as `!Ref` are not treated as syntax errors. If PyYAML is missing, YAML validation produces `SKIP` with a reason
 - **Documentation consistency:** Detect broken internal Markdown links in the `docs` stage. External URLs, `mailto:`, fragment-only links, and absolute paths are excluded to preserve offline operation. Link-like text inside code blocks and inline code is not validated
 - **Secrets (`security` stage):** Run `secretlint` when `.secretlintrc.*` exists. **Without configuration it produces SKIP**, because secretlint cannot run unconfigured. Values are masked by default and never appear in failure logs. Also run `gitleaks` when it is on PATH, but only versions that support `--no-git --redact`
@@ -97,7 +98,7 @@ Every distributed script (`check.sh`, `check_file.sh`, `audit.sh`, `init.sh`, `h
 - **Make recursion guard:** Only when running `make check`, pass `FEEDBACK_CHECK_RECURSION_GUARD` to descendants so a nested check.sh skips the Make fallback. This prevents an infinite loop where `CLAUDE_PROJECT_DIR` propagates into tests, a nested check.sh resolves the root back to this repository, and Make reruns the tests until the Stop hook times out. **Normal Make commands and direct lint/test/build stages are unaffected**
 - **SKIP reasons:** Output always includes a reason: `(<tool> not installed)`, `(<tool> cannot start — check the environment)`, `(not executable)`, `(env.FEEDBACK_CHECK_SKIP)` for environment-driven skipping, `(config: <key-path>)` for config-driven skipping, or a stack-level `(<stack>: all stages …)`. A missing or broken tool alone is **never a FAIL**, because it is not a problem in the user's code
 - **Files checked:** In a Git repository, use `git ls-files --cached --others --exclude-standard`. This includes **new uncommitted files** and excludes ignored files
-- **No network access:** The Node type-check fallback is `npx --no-install tsc`. If TypeScript is missing, it produces `SKIP` without trying to download it
+- **No implicit tool download:** The Node type-check fallback is `npx --no-install tsc`. If TypeScript is missing, it produces `SKIP` without trying to download it. Project commands such as Maven `verify` may still resolve their declared dependencies and plugins
 - **shellcheck severity:** Defaults to `warning` (`-S warning`). Including `style` and `info` findings would block existing projects on the first day. Set `FEEDBACK_SHELLCHECK_SEVERITY=style` for stricter checking
 - **Failure output:** Collect the final 40 log lines from every failed stage in `failures.txt`, then print them together at the end
 - **Final line** (except on FAIL; all of these exit 0):

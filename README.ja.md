@@ -37,7 +37,7 @@ Claude Code と Codex の両方で使えるフィードバックハーネスで�
 |---|---|---|
 | `lint` | 静的解析 | ruff / eslint / go vet / clippy / shellcheck・bash -n |
 | `typecheck` | 型検査 | mypy(`[tool.mypy]` 宣言時)/ tsc |
-| `test` | テスト（既存のテスト実行に**カバレッジ計測を追加**） | pytest(`--cov`)/ go test `-cover` / npm `test:coverage` / cargo test / mvn verify |
+| `test` | テスト（既存のテスト実行に**カバレッジ計測を追加**） | pytest(`--cov`)/ go test `-cover` / npm `test:coverage` / cargo test / `./mvnw` または `mvn verify` |
 | `build` | ビルド | go build / npm run build / cargo check |
 | `format` | コード整形のずれ | ruff format / prettier / gofmt / cargo fmt |
 | `security` | 秘密情報の混入 | secretlint(`.secretlintrc.*` 宣言時)/ gitleaks |

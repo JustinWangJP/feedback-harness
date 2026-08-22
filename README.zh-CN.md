@@ -37,7 +37,7 @@
 |---|---|---|
 | `lint` | 静态分析 | ruff / eslint / go vet / clippy / shellcheck 和 bash -n |
 | `typecheck` | 类型检查 | mypy（声明 `[tool.mypy]` 时）/ tsc |
-| `test` | 测试（在现有测试执行中**加入覆盖率测量**） | pytest（`--cov`）/ go test `-cover` / npm `test:coverage` / cargo test / mvn verify |
+| `test` | 测试（在现有测试执行中**加入覆盖率测量**） | pytest（`--cov`）/ go test `-cover` / npm `test:coverage` / cargo test / `./mvnw` 或 `mvn verify` |
 | `build` | 构建 | go build / npm run build / cargo check |
 | `format` | 格式偏差 | ruff format / prettier / gofmt / cargo fmt |
 | `security` | 混入的密钥 | secretlint（声明 `.secretlintrc.*` 时）/ gitleaks |
