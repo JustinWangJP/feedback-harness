@@ -93,6 +93,9 @@ OPEN_THRESHOLD = _cfg("feedback.open_threshold", 3)
 # この日数だけ再発していない頻出項目は「解消済みかもしれない」と注記する。
 # 累積件数だけで並べると直った問題が上位に居座り、対処すべき項目を隠すため
 STALE_DAYS = _cfg("feedback.stale_days", 7)
+# 棚卸し(ルールの定期審査)の間隔。更新されないルールは安定するのではなく
+# 負債になるため、監査と同じく「ブロックせず、溜まったら見える」形で促す
+RETRO_INTERVAL_DAYS = _cfg("feedback.retro_interval_days", 90)
 # バンドル資産は状態と違い、スクリプトに同梱されて配られる読み取り専用のファイル。
 # 導入先が rules.template.md を持たない(プラグインのみで導入した)場合の供給元。
 BUNDLED_TEMPLATE = Path(__file__).resolve().parent.parent / ".feedback" / "rules.template.md"
@@ -655,6 +658,29 @@ def audit_status_lines() -> list:
     return [line]
 
 
+def retro_status_lines() -> list:
+    """最終棚卸し日と期限切れ推奨の行を返す(audit_status_lines と対称)。
+
+    .last-retro は report --mark が書く「前回の振り返り」の基点。棚卸しの
+    期限そのものは今まで誰も見ておらず、実施忘れに気づく手段が無かった。
+    """
+    if not LAST_RETRO.exists():
+        return ["最終棚卸し: 未実行 — feedback-loop スキルの棚卸し(Phase 4)を推奨"]
+    raw = LAST_RETRO.read_text(encoding="utf-8").strip()
+    try:
+        d = datetime.date.fromisoformat(raw)
+    except ValueError:
+        return [f"最終棚卸し: {raw} (日付不明)"]
+    days = (datetime.date.today() - d).days
+    line = f"最終棚卸し: {raw} ({days}日前)"
+    if days > RETRO_INTERVAL_DAYS:
+        line += (
+            f" — {RETRO_INTERVAL_DAYS}日超過、ルールの棚卸しを推奨"
+            "(feedback-loop スキルの Phase 4)"
+        )
+    return [line]
+
+
 def cmd_stats(args):
     since = resolve_since(args)
     print(f"# feedback stats(イベント集計: {since} 以降 / ログ集計: 全期間)")
@@ -738,8 +764,10 @@ def cmd_stats(args):
             print(f"NOTE: openが{OPEN_THRESHOLD}件以上 — promote/close を検討してください")
 
     print()
-    print("[監査]")
+    print("[監査・棚卸し]")
     for line in audit_status_lines():
+        print(line)
+    for line in retro_status_lines():
         print(line)
 
     print()
@@ -813,8 +841,10 @@ def cmd_report(args):
         print(line)
 
     print()
-    print("## 監査")
+    print("## 監査・棚卸し")
     for line in audit_status_lines():
+        print(line)
+    for line in retro_status_lines():
         print(line)
 
     print()

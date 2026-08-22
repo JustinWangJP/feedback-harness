@@ -180,6 +180,24 @@ assert_contains "$OUT" "最終監査: 2026-01-01 (" "最終監査日が表示さ
 assert_contains "$OUT" "日前)" "経過日数が表示される"
 assert_contains "$OUT" "監査を推奨" "7日超過なら推奨行が出る"
 
+# --- 最終棚卸し日(.last-retro)の表示と期限切れ推奨 ---
+# 更新されないルールは安定するのではなく負債になる。.last-retro は
+# report --mark の基点としてしか使われておらず、棚卸しの期限そのものを
+# 誰も見ていなかったため、監査と同じ形(ブロックせず、溜まったら見える)で促す
+assert_contains "$OUT" "最終棚卸し: 未実行" ".last-retro が無ければ未実行と出る"
+assert_contains "$OUT" "Phase 4" "未実行なら棚卸し手順の在り処を案内する"
+
+printf '2026-01-01\n' > "$WORK/project/.feedback/.last-retro"
+OUT="$(fb stats)"
+assert_contains "$OUT" "最終棚卸し: 2026-01-01 (" "最終棚卸し日が表示される"
+assert_contains "$OUT" "棚卸しを推奨" "90日超過なら推奨行が出る"
+
+# 期限内なら推奨行を出さない(常時表示だと警告として無視されるようになる)
+printf '%s\n' "$(date +%F)" > "$WORK/project/.feedback/.last-retro"
+OUT="$(fb stats)"
+assert_contains "$OUT" "最終棚卸し: " "期限内でも最終棚卸し日は表示する"
+assert_not_contains "$OUT" "棚卸しを推奨" "期限内なら推奨行は出ない"
+
 printf '%s\n' "$(python3 -c 'import datetime; print(datetime.date.today().isoformat())')" \
   > "$WORK/project/.feedback/.last-audit"
 OUT="$(fb stats)"

@@ -150,7 +150,7 @@ python3 scripts/feedback_log.py <子命令> [参数]
 | `close` | `<entry-id>` `[--reason "<原因>"]` | 不整理为规则，直接标记为 `closed`。用于无法通用化的一次性反馈 |
 | `retire` | `<来源entry-id>` `--reason "<停用原因>"` | 从 rules.md **移除已整理的规则**，并将其来源条目（包括已经 merge 的条目）标记为 `retired`。在规则盘点并由人工裁定后使用 |
 | `rules` | （无） | 显示当前 `rules.md` |
-| `stats` | `[--since <日期>]` `[--days <N>]` | 汇总 Hook 结果和日志：PostToolUse 首次通过率、平均重新检查次数、Stop 首次通过率、常见失败、按 signal/根因统计的数量，以及**复发候选**（整理后同类别又记录了失败类反馈的规则——这是**待调查的线索而非判定结果**，是否属于同一原则的复发由阅读正文的 Agent 判断。每条候选旁的数值只是表层字符重合度，仅用于决定阅读顺序）。常见 WARN 与常见失败会附带**最近发生日期**，超过 `feedback.stale_days`（默认 7 天）未再出现的项目会加注说明。草稿目录等临时文件不计入统计 |
+| `stats` | `[--since <日期>]` `[--days <N>]` | 汇总 Hook 结果和日志：PostToolUse 首次通过率、平均重新检查次数、Stop 首次通过率、常见失败、按 signal/根因统计的数量，以及**复发候选**（整理后同类别又记录了失败类反馈的规则——这是**待调查的线索而非判定结果**，是否属于同一原则的复发由阅读正文的 Agent 判断。每条候选旁的数值只是表层字符重合度，仅用于决定阅读顺序）。常见 WARN 与常见失败会附带**最近发生日期**，超过 `feedback.stale_days`（默认 7 天）未再出现的项目会加注说明。草稿目录等临时文件不计入统计。同时显示**最近审计日期**与**最近盘点日期**，分别超过 `audit.interval_days`（默认 7 天）与 `feedback.retro_interval_days`（默认 90 天，约一个季度）时会显示建议 |
 | `report` | `--since <日期\|yesterday>` 或 `--last`、`[--mark]` | 周期摘要（新条目、promote/close/retire、open 盘点、复发候选和数值）。`--last` 以 `.feedback/.last-retro` 为起点；`--mark` 在复盘后更新起点 |
 
 - **category：** `style` / `architecture` / `testing` / `naming` / `workflow` / `domain`

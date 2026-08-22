@@ -202,6 +202,7 @@ checks:
 | `audit.npm_audit_level` | 文字列 | `high` | `npm audit --audit-level=<値>`(`low` / `moderate` / `high` / `critical`) |
 | `feedback.open_threshold` | 整数 | `3` | `add` / `stats` / `report` が promote を促す open エントリ件数 |
 | `feedback.stale_days` | 整数 | `7` | `stats` / `report` が頻出WARN・失敗上位に「これだけ再発していない」と注記するまでの日数 |
+| `feedback.retro_interval_days` | 整数 | `90` | `stats` / `report` が「ルールの棚卸しを推奨」を出すまでの経過日数(基点は `.feedback/.last-retro`) |
 
 ### 検査ID一覧(41件)
 

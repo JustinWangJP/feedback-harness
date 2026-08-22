@@ -297,6 +297,10 @@ SECTIONS = {
     "feedback": {
         "open_threshold": ("int", 3, None),
         "stale_days": ("int", 7, None),
+        # 棚卸し(ルールの定期審査)の間隔。既定 90 日は feedback-loop スキルの
+        # 「目安は四半期に1回」に合わせている。監査(audit.interval_days)より
+        # 桁が大きいのは、ルールの陳腐化が脆弱性より緩やかに進むため
+        "retro_interval_days": ("int", 90, None),
     },
 }
 
