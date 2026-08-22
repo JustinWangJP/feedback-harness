@@ -18,9 +18,29 @@
 set -euo pipefail
 
 SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+usage() {
+  cat <<'USAGE'
+使い方: bash scripts/init.sh <対象プロジェクトパス>
+
+  <対象プロジェクトパス>  ハーネスを導入するプロジェクトのディレクトリ
+  -h, --help              この使い方を表示する
+
+Claude Code / Codex app・CLI でプラグインとして使う場合、このスクリプトは不要。
+Codex IDE 拡張や他の汎用エージェントを併用する場合にだけ実行する。
+exit 0 = 導入成功 / 2 = 引数・環境の誤り
+USAGE
+}
+case "${1:-}" in
+  -h|--help) usage; exit 0 ;;
+  # 未知のオプションを対象パス扱いすると「対象が存在しません: --dry-run」に
+  # なり、原因が引数だと気づけない
+  -*) echo "ERROR: 不明なオプション: $1" >&2; usage >&2; exit 2 ;;
+esac
+
 DEST="${1:-}"
 
-[[ -z "$DEST" ]] && { echo "使い方: bash scripts/init.sh <対象プロジェクトパス>"; exit 2; }
+[[ -z "$DEST" ]] && { usage; exit 2; }
 [[ -d "$DEST" ]] || { echo "ERROR: 対象が存在しません: $DEST"; exit 2; }
 DEST="$(cd "$DEST" && pwd)"
 [[ "$DEST" == "$SRC" ]] && { echo "ERROR: 自分自身には導入できません"; exit 2; }

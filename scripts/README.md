@@ -53,7 +53,10 @@ bash scripts/check.sh [project-root]          # Defaults to the current director
 FEEDBACK_CHECK_SKIP="test build" bash scripts/check.sh   # Skip selected stages
 bash scripts/check.sh --list-checks           # List check IDs, effective decisions, and sources without running checks
 bash scripts/check.sh --list-checks --json    # Print the same information as JSON
+bash scripts/check.sh --help                  # Print usage (exit 0)
 ```
+
+Every distributed script (`check.sh`, `check_file.sh`, `audit.sh`, `init.sh`, `harness_config.py`, `feedback_log.py`) prints usage and exits 0 for `--help` / `-h`. `check.sh`, `audit.sh`, and `init.sh` reject unknown options with **`exit 2`**, because treating an unknown option as a project root produces "directory not found" and hides the fact that the argument was the problem. `check_file.sh` is the exception: apart from `--help`, it treats a leading `-` as a filename, since a non-zero exit from this script feeds straight into a PostToolUse rejection.
 
 **Behavior:** Runs stages for every detected stack, runs stack-independent cross-cutting checks, and prints a `PASS`/`FAIL`/`WARN`/`SKIP` summary.
 

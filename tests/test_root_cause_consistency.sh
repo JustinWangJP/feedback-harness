@@ -6,8 +6,13 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO="$(cd "$HERE/.." && pwd)"
 
 CAUSES=("文脈欠落" "指示欠陥" "実行誤り" "モデル限界" "未判定")
+# CLAUDE.md の規約「分類語彙は参照している全ファイルを同一コミットで更新する」の
+# 対象には README の各言語版も含まれる。README.md だけを見ていると、翻訳版だけが
+# 旧分類のまま取り残されてもテストは緑のままになる(語彙は訳さず原語のまま載せる方針)
 FILES=(
   "README.md"
+  "README.ja.md"
+  "README.zh-CN.md"
   "AGENTS.md"
   "docs/pointer_agents.md"
   "docs/pointer_claude.md"

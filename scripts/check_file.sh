@@ -6,6 +6,26 @@
 # 出力: 問題があれば内容を表示して exit 1、なければ exit 0(無出力)。
 set -u
 
+usage() {
+  cat <<'USAGE'
+使い方: bash scripts/check_file.sh <ファイルパス>
+
+  <ファイルパス>  検査する単一ファイル(PostToolUse フックが編集直後に渡す)
+  -h, --help      この使い方を表示する
+
+exit 0 = 問題なし(無出力)/ 1 = 問題あり(内容を表示)。
+存在しないファイルは exit 0 で通す — 削除直後のファイルを渡されても
+完了をブロックしないため。
+USAGE
+}
+# --help だけを特別扱いし、他の "-" 始まりは従来どおりファイル名として扱う。
+# 不明オプションを exit 2 にすると、post_edit.sh がファイル名を渡す経路で
+# "-" 始まりのファイルが誤ブロックになる(このスクリプトの非0は
+# PostToolUse の差し戻しに直結する)
+case "${1:-}" in
+  -h|--help) usage; exit 0 ;;
+esac
+
 LIBDIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib.sh
 . "$LIBDIR/lib.sh"

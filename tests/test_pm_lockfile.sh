@@ -76,4 +76,25 @@ printf '{"lockfileVersion":3}\n' > "$NP/package-lock.json"
 OUT="$(PATH="$FAKEBIN:$PATH" bash "$AUDIT" "$NP" 2>&1)"
 assert_contains "$(cat "$NPM_ARGS")" "audit" "npm プロジェクトでは npm audit が起動する"
 
+# --- 判定の書き漏れを構造で捕まえる ---
+# 上のケースは check.sh / audit.sh という既知2箇所の回帰テストであり、
+# 3つ目のスクリプトが npm 系コマンドを PM 判定なしで足しても緑のままだった。
+# 冒頭が「判定の書き漏れを機械的に捕まえる護欄」と宣言している以上、
+# 宣言どおり全スクリプトを走査する検査をここに置く
+#
+# npm ls --all / npm audit を実行しているスクリプトは harness_node_pm を
+# 参照していること。参照せずに呼べば、pnpm/yarn プロジェクトで ENOLOCK の
+# 誤FAIL(出典 20260817-142537 の欠陥そのもの)を再発させる
+for script in "$REPO"/scripts/*.sh; do
+  name="$(basename "$script")"
+  [[ "$name" == "lib.sh" ]] && continue # 判定関数の定義元(参照側ではない)
+
+  # コメント行を除いて、npm ls / npm audit を実際に起動している行を探す
+  invocations="$(grep -vE '^\s*#' "$script" | grep -E 'npm (ls|audit)' || true)"
+  [[ -z "$invocations" ]] && continue
+
+  assert_contains "$(cat "$script")" "harness_node_pm" \
+    "$name は npm 系コマンドを呼ぶため harness_node_pm で PM を判定している"
+done
+
 assert_summary

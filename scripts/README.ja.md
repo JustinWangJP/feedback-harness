@@ -53,7 +53,10 @@ bash scripts/check.sh [プロジェクトルート]          # 省略時はカ�
 FEEDBACK_CHECK_SKIP="test build" bash scripts/check.sh   # 特定ステージをスキップ
 bash scripts/check.sh --list-checks   # 検査ID・実効判定・「出所」を一覧(検査コマンドは実行しない)
 bash scripts/check.sh --list-checks --json   # 同じ内容を JSON で出力
+bash scripts/check.sh --help          # 使い方を表示(exit 0)
 ```
+
+配布する各スクリプト(`check.sh` / `check_file.sh` / `audit.sh` / `init.sh` / `harness_config.py` / `feedback_log.py`)は `--help` / `-h` で使い方を表示して `exit 0` する。`check.sh` / `audit.sh` / `init.sh` は不明なオプションを **`exit 2`** で拒否する — 未知のオプションをプロジェクトルート扱いすると「ディレクトリが見つかりません」となり、原因が引数だと気づけないため。`check_file.sh` だけは例外で、`--help` 以外の `-` 始まりもファイル名として扱う(このスクリプトの非0は PostToolUse の差し戻しに直結するため)。
 
 **動作:** 検出したスタックごとにステージを走らせ、スタック非依存の横断チェックも実行して、`PASS`/`FAIL`/`WARN`/`SKIP` の要約を出す。
 

@@ -53,7 +53,10 @@ bash scripts/check.sh [项目根目录]          # 省略时使用当前目录
 FEEDBACK_CHECK_SKIP="test build" bash scripts/check.sh   # 跳过指定阶段
 bash scripts/check.sh --list-checks   # 不执行检查，列出检查 ID、实际判定和来源
 bash scripts/check.sh --list-checks --json   # 以 JSON 输出相同信息
+bash scripts/check.sh --help          # 显示用法（exit 0）
 ```
+
+分发的各脚本（`check.sh` / `check_file.sh` / `audit.sh` / `init.sh` / `harness_config.py` / `feedback_log.py`）在收到 `--help` / `-h` 时显示用法并 `exit 0`。`check.sh` / `audit.sh` / `init.sh` 会以 **`exit 2`** 拒绝未知选项——若把未知选项当作项目根目录，就会显示“找不到目录”，从而掩盖问题其实出在参数上。`check_file.sh` 是例外：除 `--help` 外，以 `-` 开头的参数一律按文件名处理，因为该脚本的非零退出码会直接导致 PostToolUse 拒绝本次编辑。
 
 **行为：** 对每个检测到的技术栈运行相应阶段，同时执行与技术栈无关的横向检查，并输出 `PASS`/`FAIL`/`WARN`/`SKIP` 摘要。
 

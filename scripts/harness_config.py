@@ -619,6 +619,21 @@ if __name__ == "__main__":
     import os
 
     args = sys.argv[1:]
+    _USAGE = (
+        "使い方: python3 harness_config.py [--keys | --json [root] "
+        "| --shell [root] | --format-table]\n"
+        "\n"
+        "  --keys          設定できるキーの一覧を出す\n"
+        "  --json [root]   実効設定を JSON で出す(既定 root: カレントディレクトリ)\n"
+        "  --shell [root]  bash が eval する KEY=VALUE を出す(check.sh 等が使う)\n"
+        "  --format-table  標準入力の検査一覧を表へ整形する(check.sh --list-checks 用)\n"
+        "  -h, --help      この使い方を表示する\n"
+        "\n"
+        "exit 0 = 成功 / 1 = 引数の誤り"
+    )
+    if "-h" in args or "--help" in args:
+        print(_USAGE)
+        sys.exit(0)
     if "--keys" in args:
         _cmd_keys()
         sys.exit(0)
@@ -634,8 +649,5 @@ if __name__ == "__main__":
         root = rest[0] if rest else os.getcwd()
         print(json.dumps(effective(root, os.environ), ensure_ascii=False, sort_keys=True))
         sys.exit(0)
-    sys.exit(
-        "usage: harness_config.py "
-        "[--keys | --json [root] | --shell [root] | --format-table]"
-    )
+    sys.exit(_USAGE)
 # fmt: on
