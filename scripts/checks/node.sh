@@ -56,7 +56,7 @@ run_node_checks() {
       else
         run_stage lint "npm-ls" "npm" "node: npm ls" npm ls --all
       fi
-  
+
       # フォーマット。設定が無い prettier は既定スタイルの押し付けになるため
       # 走らせない(WARN でもノイズになる)。
       # 設定ファイル名は prettier が探索する主要な形を網羅する(.prettierrc / .prettierrc.*
@@ -70,7 +70,7 @@ run_node_checks() {
           record_skip "prettier" format "node: prettier" "prettier 未インストール"
         fi
       fi
-  
+
       # デッドコード。設定なしの knip はエントリポイント推定を誤り、実測では
       # 検査ツールとして入れた devDependencies まで「未使用」と報告する。
       # 設定を書いた=対象を宣言した、というときだけ走らせる
@@ -85,5 +85,5 @@ run_node_checks() {
       fi
     fi
   fi
-  
+
 }

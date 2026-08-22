@@ -60,6 +60,8 @@ RULE_COUNT="$(grep -c '^- \*\*\[' "$PROMOTE_PROJECT/.feedback/rules.md")"
 PROMOTED_COUNT="$(grep -l '^status: promoted$' "$PROMOTE_PROJECT"/.feedback/log/*.md | wc -l | tr -d ' ')"
 assert_eq "8" "$RULE_COUNT" "8並列promoteでruleが消失しない"
 assert_eq "8" "$PROMOTED_COUNT" "rulesとentry statusが同じ件数になる"
+RULE_BREAK_COUNT="$(grep -c '^- \*\*\[.*<br>$' "$PROMOTE_PROJECT/.feedback/rules.md")"
+assert_eq "8" "$RULE_BREAK_COUNT" "promoteが行末空白ではなく明示的なMarkdown改行を生成する"
 
 # 2ファイルtransactionの1件目直後に例外を起こし、journalからroll-forwardする。
 python3 - "$REPO/scripts" "$WORK/recovery" <<'PY'
@@ -117,6 +119,19 @@ assert b.read_text(encoding="utf-8") == "new-b"
 assert not (feedback / JOURNAL_NAME).exists()
 assert (feedback / ".state.lock").exists()
 assert not list(feedback.glob(".*.tmp"))
+
+# JSONとしては有効でもschemaが壊れたjournalはtracebackにせず、安全停止して残す。
+journal_path = feedback / JOURNAL_NAME
+journal_path.write_text("[]\n", encoding="utf-8")
+with state_lock(root, 2):
+    try:
+        recover_transaction(root)
+    except StoreError as exc:
+        assert "schemaを解釈できません" in str(exc)
+    else:
+        raise AssertionError("invalid journal schema must block recovery")
+assert journal_path.exists()
+journal_path.unlink()
 
 with state_lock(root, 2):
     blocked = subprocess.run(

@@ -486,7 +486,7 @@ def cmd_promote(args):
         RULES.read_text(encoding="utf-8") if RULES.exists() else rules_seed()
     )
     date = datetime.date.today().isoformat()
-    rule_line = f"- **[{target.get('category','-')}]** {args.rule}  "
+    rule_line = f"- **[{target.get('category','-')}]** {args.rule}<br>"
     source_line = f"  <sub>出典: {target.get('id')} ({date} 昇華)</sub>"
     # instruction/workflow(成功系)は成功セクションの末尾へ、それ以外
     # (failure/context/unknown)は失敗セクションの末尾(=成功マーカーの直前)へ
@@ -605,7 +605,7 @@ def cmd_merge(args):
         category = re.match(r"^(\s*- \*\*\[[^\]]+\]\*\* )", lines[i - 1])
         if not category:
             sys.exit(f"ERROR: ルール本文行の形式を解釈できません: {lines[i - 1]}")
-        lines[i - 1] = f"{category.group(1)}{args.rule}  "
+        lines[i - 1] = f"{category.group(1)}{args.rule}<br>"
 
     transaction(
         ROOT,

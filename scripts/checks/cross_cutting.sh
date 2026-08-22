@@ -15,7 +15,7 @@ run_cross_cutting_checks() {
   if [[ ${#JSON_FILES[@]} -gt 0 ]]; then
     run_stage lint "json-syntax" "-" "config: json 構文" harness_validate_json "${JSON_FILES[@]}"
   fi
-  
+
   YAML_FILES=()
   while IFS= read -r f; do
     [[ -n "$f" && -f "$f" ]] && YAML_FILES+=("$f")
@@ -30,7 +30,7 @@ run_cross_cutting_checks() {
       record_skip "yaml-syntax" lint "config: yaml 構文" "PyYAML 未インストール"
     fi
   fi
-  
+
   # ドキュメントの内部リンク。外部URLは検証しない(ネットワークを使わない原則)。
   # リンク先が実在しないのは好みの問題ではなく事実誤りなので、常に FAIL とする
   MD_FILES=()
@@ -40,12 +40,12 @@ run_cross_cutting_checks() {
   if [[ ${#MD_FILES[@]} -gt 0 ]]; then
     run_stage docs "md-links" "-" "docs: 内部リンク" harness_check_md_links "${MD_FILES[@]}"
   fi
-  
+
   # 検査対象を何か検出できたか。ここまでの全ステージの結果を見て判断する。
   # 何も検出できていないディレクトリに「設定すれば有効になる」と案内しても
   # 相手がいない上に、案内行が残ることで「スタック未検出」の報告を潰してしまう
   anything_detected() { [[ $STACK_FOUND -eq 1 || ${#RESULTS[@]} -gt 0 ]]; }
-  
+
   # 秘密情報スキャン。secretlint は .secretlintrc.* が無いと exit 2 で実行できない
   # (実測)ため、設定の有無をゲートにする。設定を書いた=チームが検査を選んだ、
   # という宣言なので FAIL でよい。マスクは既定で有効 — 無効化する引数は渡さない
@@ -61,7 +61,7 @@ run_cross_cutting_checks() {
   elif anything_detected; then
     record_skip "secretlint" security "security: secretlint" ".secretlintrc.* が無い — 設定すると検査が有効になります"
   fi
-  
+
   # gitleaks があれば併用する(OS固有バイナリのため任意扱い)。バージョン差が
   # 大きく v8.19 で detect が再編されたため、必要なフラグがヘルプに出ることを
   # 確認してから使う。--redact は省略不可(秘密の値を出力に出さない)。
@@ -75,7 +75,7 @@ run_cross_cutting_checks() {
       record_skip "gitleaks" security "security: gitleaks" "この版は detect --no-git/--redact に非対応"
     fi
   fi
-  
+
   # GitHub Actions のワークフロー。YAML構文は上で検証済みなので、ここで見るのは
   # アクションの使い方(存在しない入力・シェルの誤り等)。actionlint は Go 製
   # バイナリのため任意扱い(あれば使う)
@@ -86,7 +86,7 @@ run_cross_cutting_checks() {
       record_skip "actionlint" lint "ci: actionlint" "actionlint 未インストール"
     fi
   fi
-  
+
   # Dockerfile。git pathspec の * は / を跨ぐため 'Dockerfile*' 単独では
   # ルート直下しか当たらない(*.py が全階層に当たるのとは非対称)
   DOCKER_FILES=()
@@ -116,7 +116,7 @@ run_cross_cutting_checks() {
       fi
     fi
   fi
-  
+
   # ---------- API契約・破壊的変更 ----------
   # ベースラインは git から取る(ネットワーク不要・自己完結)。merge-base が
   # 解決できなければ HEAD(=未コミット変更のみ)と比較する。spec ファイルの
@@ -141,7 +141,7 @@ run_cross_cutting_checks() {
   elif [[ -n "$OPENAPI_SPEC" ]]; then
     record_skip "oasdiff" contract "contract: oasdiff" "oasdiff 未インストール"
   fi
-  
+
   # Rust ライブラリの破壊的変更。cargo-semver-checks の導入自体が宣言
   # (ビルドを伴い重いため、入れたプロジェクトだけがコストを払う)。
   # --baseline-rev を指定しない既定動作は crates.io レジストリから公開済みの
@@ -161,7 +161,7 @@ run_cross_cutting_checks() {
         "ベースライン取得不能(git merge-base 解決不可)"
     fi
   fi
-  
+
   # ---------- 汎用フォールバック ----------
   # 再帰ガード: make check のテストが check.sh を呼び返す循環を断つ。フック実行時は
   # CLAUDE_PROJECT_DIR が子孫まで伝播し、テスト内の check.sh がルートを本リポジトリに
@@ -178,7 +178,7 @@ run_cross_cutting_checks() {
       run_stage test "make-check" "make" "make check" env FEEDBACK_CHECK_RECURSION_GUARD=1 make check
     fi
   fi
-  
+
   if [[ "$LIST_MODE" == "1" ]]; then
     if [[ "$LIST_JSON" == "1" ]]; then
       python3 -c '
@@ -205,5 +205,5 @@ print(json.dumps(rows, ensure_ascii=False, indent=2))
     fi
     exit 0
   fi
-  
+
 }

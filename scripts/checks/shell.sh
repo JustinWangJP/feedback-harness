@@ -17,5 +17,5 @@ run_shell_checks() {
     run_stage lint "shellcheck" "shellcheck" "shell: shellcheck" \
       shellcheck -x -S "$SHELLCHECK_SEVERITY" "${SH_FILES[@]}"
   fi
-  
+
 }

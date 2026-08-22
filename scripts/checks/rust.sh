@@ -27,7 +27,7 @@ run_rust_checks() {
         run_stage lint "cargo-metadata" "-" "rust: metadata" \
           cargo metadata --offline --format-version 1
       fi
-  
+
       # rustfmt.toml があれば FAIL、無ければ WARN(既定スタイルの押し付けを避ける)
       if [[ -f rustfmt.toml || -f .rustfmt.toml ]]; then
         run_stage format "cargo-fmt" "-" "rust: cargo fmt" cargo fmt --check
@@ -36,5 +36,5 @@ run_rust_checks() {
       fi
     fi
   fi
-  
+
 }

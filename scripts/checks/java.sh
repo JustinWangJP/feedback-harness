@@ -14,5 +14,5 @@ run_java_checks() {
       run_stage test "gradle" "gradle" "java: gradle check" gradle -q check
     fi
   fi
-  
+
 }

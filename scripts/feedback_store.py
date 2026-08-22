@@ -200,8 +200,12 @@ def _journal_payload(
 def _apply_payload(
     root: Path, payload: dict, after_write: Callable[[int], None] | None = None
 ) -> None:
-    if payload.get("version") != JOURNAL_VERSION or not isinstance(
-        payload.get("writes"), list
+    if (
+        not isinstance(payload, dict)
+        or payload.get("version") != JOURNAL_VERSION
+        or not isinstance(payload.get("operation"), str)
+        or not isinstance(payload.get("writes"), list)
+        or not payload["writes"]
     ):
         raise StoreError("transaction journalのschemaを解釈できません")
     for index, item in enumerate(payload["writes"], start=1):
@@ -209,12 +213,21 @@ def _apply_payload(
             k in item for k in ("path", "content", "sha256", "before_sha256")
         ):
             raise StoreError("transaction journalのwrite項目が不正です")
-        path = root / item["path"]
-        expected = hashlib.sha256(item["content"].encode("utf-8")).hexdigest()
-        if expected != item["sha256"]:
-            raise StoreError(
-                f"transaction journalの内容hashが一致しません: {item['path']}"
-            )
+        relative = item["path"]
+        content = item["content"]
+        content_hash = item["sha256"]
+        before_hash = item["before_sha256"]
+        if (
+            not isinstance(relative, str)
+            or not isinstance(content, str)
+            or not isinstance(content_hash, str)
+            or (before_hash is not None and not isinstance(before_hash, str))
+        ):
+            raise StoreError("transaction journalのwrite項目の型が不正です")
+        path = root / relative
+        expected = hashlib.sha256(content.encode("utf-8")).hexdigest()
+        if expected != content_hash:
+            raise StoreError(f"transaction journalの内容hashが一致しません: {relative}")
         _feedback_relative(root, path)
         try:
             current = (
@@ -222,11 +235,11 @@ def _apply_payload(
             )
         except OSError as exc:
             raise StoreError(f"transaction対象を読み取れません: {path}") from exc
-        if current not in (item["before_sha256"], expected):
+        if current not in (before_hash, expected):
             raise StoreError(
-                f"transaction開始後に対象が別内容へ変更されています: {item['path']}"
+                f"transaction開始後に対象が別内容へ変更されています: {relative}"
             )
-        atomic_write_text(path, item["content"])
+        atomic_write_text(path, content)
         if after_write:
             after_write(index)
 

@@ -14,7 +14,7 @@ run_go_checks() {
     if [[ -f go.sum ]]; then
       run_stage lint "go-mod-verify" "go" "go: mod verify" go mod verify
     fi
-  
+
     # gofmt は言語標準であり「宣言しないと従わない」性質のものではないため、
     # 宣言ゲートを設けず常に FAIL とする(Goコミュニティの普遍的合意)
     GO_FILES=()
@@ -28,5 +28,5 @@ run_go_checks() {
         bash -c 'out="$(gofmt -l "$@")"; [[ -z "$out" ]] || { echo "未フォーマット:"; echo "$out"; exit 1; }' _ "${GO_FILES[@]}"
     fi
   fi
-  
+
 }
