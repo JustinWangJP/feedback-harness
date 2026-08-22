@@ -112,6 +112,10 @@ run_stage() {
       RESULTS+=("SKIP  $label")
     elif [[ "$src" == env.* ]]; then
       RESULTS+=("SKIP  $label (${src})")
+    elif [[ "$src" == local.* ]]; then
+      # 個人設定は .gitignore 済みで他の人からは見えない。共有設定と同じ
+      # "config:" で出すと、チーム設定を読んでも理由が見つからず混乱するため区別する
+      RESULTS+=("SKIP  $label (個人設定: ${src#local.})")
     else
       RESULTS+=("SKIP  $label (config: $src)")
     fi
