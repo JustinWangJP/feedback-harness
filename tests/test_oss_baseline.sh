@@ -24,7 +24,10 @@ assert_not_contains "$CI_BODY" "windows-" "Windows runnerを必須にしない"
 assert_contains "$CI_BODY" "bash tests/run_tests.sh" "回帰テストをCIで実行する"
 assert_contains "$CI_BODY" "bash scripts/check.sh" "ハーネス自身をCIで検査する"
 assert_contains "$CI_BODY" "scripts/checks/*.sh" "抽出したstack runnerもCIで構文検査する"
-assert_contains "$CI_BODY" "actions/setup-go@v5" "actionlint導入用のGoをCIでセットアップする"
+assert_contains "$CI_BODY" "actions/checkout@v6" "Node 24対応のcheckoutをCIで使う"
+assert_contains "$CI_BODY" "actions/setup-python@v6" "Node 24対応のPython setupをCIで使う"
+assert_contains "$CI_BODY" "actions/setup-go@v7" "Node 24対応のGo setupをCIで使う"
+assert_contains "$CI_BODY" "actions/setup-node@v6" "Node 24対応のNode setupをCIで使う"
 assert_contains "$CI_BODY" "make install-dev-tools" \
   "PyYAMLとactionlintを共通ターゲットからCIへ導入する"
 assert_contains "$CI_BODY" '.venv/bin" >> "$GITHUB_PATH"' \
