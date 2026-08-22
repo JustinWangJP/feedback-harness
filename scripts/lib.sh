@@ -38,6 +38,7 @@ SHELLCHECK_SEVERITY="${FEEDBACK_SHELLCHECK_SEVERITY:-warning}"
 # スクリプト自身の位置($BASH_SOURCE 起点)は使わない。プラグインとして配布されると
 # スクリプトはプラグインキャッシュに置かれ、そこは導入先ではないうえ更新のたびに
 # 消える領域だからである(状態を書くと失われる)。
+# shellcheck disable=SC2120 # source先では引数あり・なしの両方で呼ばれる
 harness_project_root() {
   local explicit="${1:-}"
   if [[ -n "$explicit" ]]; then
