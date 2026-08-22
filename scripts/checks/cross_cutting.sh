@@ -182,13 +182,13 @@ run_cross_cutting_checks() {
   if [[ "$LIST_MODE" == "1" ]]; then
     if [[ "$LIST_JSON" == "1" ]]; then
       python3 -c '
-  import json, sys
-  rows = []
-  for line in sys.stdin:
-      parts = line.rstrip("\n").split("\t")
-      if len(parts) == 5:
-          rows.append(dict(zip(["id", "label", "stage", "severity", "source"], parts)))
-  print(json.dumps(rows, ensure_ascii=False, indent=2))
+import json, sys
+rows = []
+for line in sys.stdin:
+    parts = line.rstrip("\n").split("\t")
+    if len(parts) == 5:
+        rows.append(dict(zip(["id", "label", "stage", "severity", "source"], parts)))
+print(json.dumps(rows, ensure_ascii=False, indent=2))
   ' < "$LOGDIR/list.txt"
     else
       python3 "$LIBDIR/harness_config.py" --format-table < "$LOGDIR/list.txt"

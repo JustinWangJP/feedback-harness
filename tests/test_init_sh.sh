@@ -70,10 +70,10 @@ if [[ -x "$WORK/target/scripts/check.sh" ]]; then :; else fail "check.sh に実�
 # いた — docs/ は配布対象外のため、scripts/README.md から docs/ への
 # リンクを足すと必ず壊れる(2026-08-18 のレビューで発見)
 printf '# Target README\n' > "$WORK/target/README.md"
-( cd "$WORK/target" && bash scripts/check.sh >/dev/null 2>&1 )
+CHECK_OUT="$(cd "$WORK/target" && bash scripts/check.sh 2>&1)"
 RC=$?
 if [[ "$RC" != "0" ]]; then
-  fail "ベンダリングした check.sh が exit 0 にならない (exit=$RC) — 配布物のリンク切れ等の可能性"
+  fail "ベンダリングした check.sh が exit 0 にならない (exit=$RC) — 出力: [$CHECK_OUT]"
 fi
 
 # 冪等性と更新: 2回目で管理ブロックを置換し、利用者の記述を保持する
