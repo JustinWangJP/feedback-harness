@@ -147,7 +147,7 @@ python3 scripts/feedback_log.py <サブコマンド> [引数]
 | `close` | `<entry-id>` `[--reason "<理由>"]` | 昇華せず `closed` に更新。一般化できない一回限りの指摘用 |
 | `retire` | `<出典entry-id>` `--reason "<退役理由>"` | 昇華済みルールを **rules.md から撤去**し、出典エントリ(merge済みの分も含む)を `retired` に更新。棚卸しで人間が裁定した後に使う |
 | `rules` | (なし) | 現在の `rules.md` を表示 |
-| `stats` | `[--since <日付>]` `[--days <N>]` | フック合否とログの集計。PostToolUse 初回通過率・平均再チェック回数・Stop 初回通過率・失敗上位・signal/根因別件数・**再発候補**(昇華後に同カテゴリの失敗系が再記録されたルール) |
+| `stats` | `[--since <日付>]` `[--days <N>]` | フック合否とログの集計。PostToolUse 初回通過率・平均再チェック回数・Stop 初回通過率・失敗上位・signal/根因別件数・**再発候補**(昇華後に同カテゴリの失敗系が記録されたルール — これは**判定結果ではなく調査対象**で、同じ原則の再発かどうかは本文を読むエージェントが判断する。各候補に添う数値は表面的な文字の重なりで、読む順のヒントに過ぎない)。頻出WARN と失敗上位には**最終発生日**が付き、`feedback.stale_days`(既定7日)以上再発していない項目には注記が出る。スクラッチパッド等の一時ファイルは集計対象外 |
 | `report` | `--since <日付\|yesterday>` または `--last`、`[--mark]` | 期間ダイジェスト(新規エントリ/昇華/close・retire/open 棚卸し/再発候補/数字)。`--last` は `.feedback/.last-retro` 基点。`--mark` で実施後に基点を更新 |
 
 - **category**: `style` / `architecture` / `testing` / `naming` / `workflow` / `domain`
@@ -159,7 +159,7 @@ python3 scripts/feedback_log.py <サブコマンド> [引数]
 bash scripts/audit.sh [プロジェクトルート]
 ```
 
-`check.sh` と異なり**ネットワークを使う**(pip-audit / npm audit --audit-level=high / govulncheck / cargo audit)。Node は `package-lock.json` があるときだけ実行する — `npm audit` は他PMの lockfile を読めず ENOLOCK で落ちるため、`pnpm-lock.yaml` / `yarn.lock` しか無い場合は SKIP して `pnpm audit` / `yarn npm audit` の直接実行を案内する。Stop フックからは呼ばれず、`feedback-loop` スキル等からの明示実行専用。成功時のみ `.feedback/.last-audit` に日付を書き、`stats` / `report` が「最終監査日」を表示する — **7日を超過するか未実行なら推奨行が出る**(WARN と同じ「ブロックせず、溜まったら見える」哲学)。失敗時にスタンプを書かないため、脆弱性が残っている間は推奨が消えない。
+`check.sh` と異なり**ネットワークを使う**(pip-audit / npm audit --audit-level=high / govulncheck / cargo audit)。Node は PM 判定(`lib.sh` の `harness_node_pm` — `check.sh` と共通)が npm を返し、かつ `package-lock.json` があるときだけ実行する — `npm audit` は他PMの lockfile を読めず ENOLOCK で落ちるため、`pnpm-lock.yaml` / `yarn.lock` がある場合は SKIP して `pnpm audit` / `yarn npm audit` の直接実行を案内する。移行中などで `package-lock.json` が併存していても npm 以外と判定する(テストが pnpm で走るのに監査だけ npm audit が動くと、実際の依存解決と違うツリーを監査するため)。Stop フックからは呼ばれず、`feedback-loop` スキル等からの明示実行専用。成功時のみ `.feedback/.last-audit` に日付を書き、`stats` / `report` が「最終監査日」を表示する — **7日を超過するか未実行なら推奨行が出る**(WARN と同じ「ブロックせず、溜まったら見える」哲学)。失敗時にスタンプを書かないため、脆弱性が残っている間は推奨が消えない。
 
 ### `hooks/` — Claude Code / Codex Hooks ラッパ
 

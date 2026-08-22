@@ -44,7 +44,36 @@ assert_not_contains "$(cat "$NPM_ARGS")" "ls --all" "npm ls --all は起動さ�
 # --- audit.sh: npm audit は lockfile 判定で理由付き SKIP ---
 OUT="$(PATH="$FAKEBIN:$PATH" bash "$AUDIT" "$P" 2>&1)"; RC=$?
 assert_eq "0" "$RC" "pnpm プロジェクトで audit.sh は exit 0(誤FAILしない)"
-assert_contains "$OUT" "npm 以外の lockfile" "npm audit は理由付き SKIP になる"
+assert_contains "$OUT" "pnpm の lockfile" "npm audit は理由付き SKIP になる"
 assert_not_contains "$(cat "$NPM_ARGS")" "audit" "npm audit は起動されない"
+
+# --- lockfile 併存: check.sh と audit.sh が同じ PM を見る ---
+# npm から pnpm への移行中などで package-lock.json が残っていると、
+# 判定が2箇所にあった頃は check.sh が pnpm で走る一方 audit.sh が npm audit を
+# 実行し、実際の依存解決(pnpm-lock.yaml)と違うツリーを監査していた。
+# 監査対象がテスト実行と食い違う状態を機械的に禁じる(出典 20260817-142537)
+printf '{"lockfileVersion":3}\n' > "$P/package-lock.json"   # pnpm-lock.yaml と併存させる
+: > "$NPM_ARGS"
+
+OUT="$(PATH="$FAKEBIN:$PATH" bash "$CHECK" "$P" 2>&1)"; RC=$?
+assert_eq "0" "$RC" "lockfile 併存でも check.sh は exit 0"
+assert_contains "$OUT" "SKIP  node: npm ls (pnpm は ls --all 非対応)" \
+  "併存時も check.sh は pnpm と判定する"
+
+OUT="$(PATH="$FAKEBIN:$PATH" bash "$AUDIT" "$P" 2>&1)"; RC=$?
+assert_eq "0" "$RC" "lockfile 併存でも audit.sh は exit 0"
+assert_contains "$OUT" "pnpm の lockfile" \
+  "併存時に audit.sh は check.sh と同じ pnpm 判定へ揃う(npm audit を走らせない)"
+assert_not_contains "$(cat "$NPM_ARGS")" "audit" \
+  "package-lock.json が残っていても npm audit は起動されない"
+
+# --- npm プロジェクトでは従来どおり npm audit が動く(過剰なSKIPにしない) ---
+NP="$WORK/npmproj"; mkdir -p "$NP"
+( cd "$NP" && git init -q . )
+printf '{"name":"t","version":"0.0.0"}\n' > "$NP/package.json"
+printf '{"lockfileVersion":3}\n' > "$NP/package-lock.json"
+: > "$NPM_ARGS"
+OUT="$(PATH="$FAKEBIN:$PATH" bash "$AUDIT" "$NP" 2>&1)"
+assert_contains "$(cat "$NPM_ARGS")" "audit" "npm プロジェクトでは npm audit が起動する"
 
 assert_summary

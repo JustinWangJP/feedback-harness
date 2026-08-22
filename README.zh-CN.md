@@ -88,7 +88,8 @@ scripts/
   check_file.sh     # 根据扩展名执行快速单文件检查
   audit.sh          # 按需漏洞审计（唯一使用网络的检查；不属于 Stop hook）
   lib.sh            # 共用工具函数（has / harness_project_root / harness_tree_changed /
-                    #   harness_validate_json|yaml / harness_check_md_links / harness_log_event|warn）
+                    #   harness_node_pm / harness_validate_json|yaml / harness_check_md_links /
+                    #   harness_log_event|warn）
   harness_config.py # 读取 .feedback/config.yaml 并解析检查设置
   feedback_log.py   # 反馈记录 CLI（add / list / search / promote / merge / close /
                     #   retire / rules / stats / report）
