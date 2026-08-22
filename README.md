@@ -16,7 +16,7 @@ Optional tools are used only when they are already installed. Missing tools are 
 
 ### Developing this repository
 
-This repository pins its own check dependencies separately from the harness runtime. Run `make install-dev-tools` to install PyYAML from `requirements-dev.txt` and the actionlint version declared in `scripts/dev_tool_versions.sh` into the repository-local `.venv`. Run `source .venv/bin/activate` before calling `scripts/check.sh` directly; `make test` already prefers that local tool directory. The Linux CI uses the same installation target. This does not make the harness install tools in target projects.
+This repository pins its own check dependencies separately from the harness runtime. Run `make install-dev-tools` to install PyYAML and Ruff from `requirements-dev.txt` and the actionlint version declared in `scripts/dev_tool_versions.sh` into the repository-local `.venv`. Run `source .venv/bin/activate` before calling `scripts/check.sh` directly; `make test` already prefers that local tool directory. The Linux CI uses the same installation target and verifies all three tools before running checks. This does not make the harness install tools in target projects.
 
 ## How it works
 

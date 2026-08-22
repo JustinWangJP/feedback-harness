@@ -45,6 +45,14 @@ jobs:
           npm ci --ignore-scripts
           echo "$GITHUB_WORKSPACE/.venv/bin" >> "$GITHUB_PATH"
 
+      - name: Verify repository check tools
+        shell: bash
+        run: |
+          set -eu
+          python3 -c 'import yaml; print("PyYAML", yaml.__version__)'
+          ruff --version
+          actionlint --version
+
       - name: Validate shell syntax
         run: bash -n scripts/*.sh scripts/checks/*.sh scripts/hooks/*.sh tests/*.sh
 

@@ -63,6 +63,7 @@ assert_file_absent "$WORK/target/scripts/hooks" "hooks ラッパーをコピー�
 
 # 実行権限
 if [[ -x "$WORK/target/scripts/check.sh" ]]; then :; else fail "check.sh に実行権限がない"; fi
+if [[ -x "$WORK/target/scripts/feedback_store.py" ]]; then :; else fail "feedback_store.py に実行権限がない"; fi
 
 # ベンダリングした check.sh が対象プロジェクトで exit 0 になる。
 # ルートに README.md を置く(一般的な導入先と同じ状態)。「0か1なら可」の緩い

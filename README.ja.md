@@ -16,7 +16,7 @@ Claude Code と Codex の両方で使えるフィードバックハーネスで�
 
 ### このリポジトリの開発
 
-このリポジトリ自身の検査依存は、ハーネスの実行要件とは分けてバージョン固定しています。`make install-dev-tools` を実行すると、`requirements-dev.txt` の PyYAML と `scripts/dev_tool_versions.sh` で宣言した actionlint を、リポジトリ内の `.venv` へ導入します。`scripts/check.sh` を直接実行する前は `source .venv/bin/activate` を実行してください。`make test` はこのローカルツールを自動的に優先します。Linux CI も同じ導入ターゲットを使いますが、導入先プロジェクトでハーネスがツールを自動インストールすることはありません。
+このリポジトリ自身の検査依存は、ハーネスの実行要件とは分けてバージョン固定しています。`make install-dev-tools` を実行すると、`requirements-dev.txt` の PyYAMLとRuff、`scripts/dev_tool_versions.sh` で宣言したactionlintを、リポジトリ内の `.venv` へ導入します。`scripts/check.sh` を直接実行する前は `source .venv/bin/activate` を実行してください。`make test` はこのローカルツールを自動的に優先します。Linux CIも同じ導入ターゲットを使い、検査前に3ツールすべてを確認しますが、導入先プロジェクトでハーネスがツールを自動インストールすることはありません。
 
 ## 仕組み
 

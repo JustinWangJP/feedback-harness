@@ -16,7 +16,7 @@
 
 ### 开发本仓库
 
-本仓库自身的检查依赖会单独固定版本，不属于工具链的运行要求。运行 `make install-dev-tools`，即可将 `requirements-dev.txt` 中的 PyYAML 以及 `scripts/dev_tool_versions.sh` 中声明的 actionlint 安装到仓库内的 `.venv`。直接运行 `scripts/check.sh` 前，请先执行 `source .venv/bin/activate`；`make test` 会自动优先使用这些本地工具。Linux CI 使用相同的安装目标，但工具链仍不会在目标项目中自动安装工具。
+本仓库自身的检查依赖会单独固定版本，不属于工具链的运行要求。运行 `make install-dev-tools`，即可将 `requirements-dev.txt` 中的 PyYAML和Ruff，以及 `scripts/dev_tool_versions.sh` 中声明的actionlint安装到仓库内的 `.venv`。直接运行 `scripts/check.sh` 前，请先执行 `source .venv/bin/activate`；`make test` 会自动优先使用这些本地工具。Linux CI使用相同的安装目标，并在检查前验证这三个工具，但工具链仍不会在目标项目中自动安装工具。
 
 ## 工作原理
 

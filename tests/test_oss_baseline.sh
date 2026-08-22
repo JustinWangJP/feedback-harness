@@ -29,10 +29,16 @@ assert_contains "$CI_BODY" "make install-dev-tools" \
   "PyYAMLとactionlintを共通ターゲットからCIへ導入する"
 assert_contains "$CI_BODY" '.venv/bin" >> "$GITHUB_PATH"' \
   "CIがリポジトリ内の開発ツールを後続ステップで検出する"
+assert_contains "$CI_BODY" "ruff --version" \
+  "CIがruffを検査前に実行可能と確認する"
+assert_contains "$CI_BODY" "actionlint --version" \
+  "CIがactionlintを検査前に実行可能と確認する"
 
 assert_file_exists "$REPO/requirements-dev.txt" "Python開発依存の宣言が存在する"
 assert_contains "$(cat "$REPO/requirements-dev.txt")" "PyYAML==6.0.3" \
   "PyYAMLの開発バージョンを固定する"
+assert_contains "$(cat "$REPO/requirements-dev.txt")" "ruff==0.16.1" \
+  "ruffの開発バージョンを固定する"
 assert_file_exists "$REPO/scripts/dev_tool_versions.sh" "外部開発ツールのバージョン宣言が存在する"
 # shellcheck source=../scripts/dev_tool_versions.sh
 . "$REPO/scripts/dev_tool_versions.sh"
@@ -58,6 +64,8 @@ for f in "$REPO/README.md" "$REPO/README.ja.md" "$REPO/README.zh-CN.md"; do
   assert_contains "$(cat "$f")" "MIT License" "$(basename "$f")がMIT Licenseへ案内する"
   assert_contains "$(cat "$f")" "requirements-dev.txt" \
     "$(basename "$f")がリポジトリ開発依存の導入方法を説明する"
+  assert_contains "$(cat "$f")" "Ruff" \
+    "$(basename "$f")がruffをリポジトリ開発依存として説明する"
   assert_contains "$(cat "$f")" "scripts/dev_tool_versions.sh" \
     "$(basename "$f")がactionlintの共通バージョン宣言を参照する"
 done
