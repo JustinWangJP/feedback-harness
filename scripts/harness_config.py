@@ -116,6 +116,11 @@ def _scalar(s, path, lineno):
         return None
     if re.fullmatch(r"-?\d+", s):
         return int(s)
+    # 小数だけ文字列のまま返すと、PyYAML がある環境と無い環境で同じ config が
+    # 別の型になる。整数キーに 7.5 と書いた場合のエラーも「実際: '7.5'」という
+    # クォート付きの紛らわしい表示になるため、ここで数値へ寄せる
+    if re.fullmatch(r"-?\d+\.\d+", s):
+        return float(s)
     return s
 
 
@@ -289,7 +294,10 @@ SECTIONS = {
         "interval_days": ("int", 7, None),
         "npm_audit_level": ("enum", "high", ["low", "moderate", "high", "critical"]),
     },
-    "feedback": {"open_threshold": ("int", 3, None)},
+    "feedback": {
+        "open_threshold": ("int", 3, None),
+        "stale_days": ("int", 7, None),
+    },
 }
 
 # スタック層で使えるキー(全体層の一部)

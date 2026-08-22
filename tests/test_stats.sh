@@ -96,8 +96,12 @@ assert_contains "$OUT" "PostToolUse 初回通過率: 1/3 (33%)" "初回通過率
 assert_contains "$OUT" "1ファイルあたりの平均再チェック回数: 1.00" "平均再チェック回数(fail3/3ファイル)"
 assert_contains "$OUT" "Stop フルチェック初回通過率: 2/3 (67%)" "stop の pass 率"
 # WARN イベントは stop の通過率の分母に混ぜない(warn は「テストの失敗」ではない)
-assert_contains "$OUT" "頻出WARN: python: ruff format(2), config: yaml 構文(1)" "頻出WARNが件数降順で出る"
-assert_contains "$OUT" "失敗上位: src/c.py(2), src/a.py(1)" "失敗上位(件数降順・ファイル名昇順)"
+assert_contains "$OUT" "頻出WARN: python: ruff format(2, 最終 2026-08-13), config: yaml 構文(1, 最終 2026-08-13)" \
+  "頻出WARNが件数降順で最終発生日つきに出る"
+assert_contains "$OUT" "失敗上位: src/c.py(2, 最終 2026-08-12), src/a.py(1, 最終 2026-08-10)" \
+  "失敗上位が件数降順・ファイル名昇順で最終発生日つきに出る"
+# フィクスチャの最終発生は過去日のため、解消済みかもしれない注記が出る
+assert_contains "$OUT" "日以上再発していません" "古いWARNには鮮度の注記が出る"
 
 # --- 期間指定(a.py の2026-08-10を除外 → b,c の2ファイル) ---
 OUT2="$(fb stats --since 2026-08-11)"
@@ -112,8 +116,48 @@ assert_contains "$OUT" "category: style 2 / testing 1" "category 別件数"
 
 # --- 再発候補(同カテゴリの失敗系のみ。別カテゴリは候補に出ない) ---
 assert_contains "$OUT" "20260701-000001 (2026-07-01 昇華)" "再発候補に出典ルールが出る"
-assert_contains "$OUT" "以降の同カテゴリ: 20260715-000001" "昇華日以降の同カテゴリ指摘が列挙される"
-assert_not_contains "$OUT" "以降の同カテゴリ: 20260716-000001" "別カテゴリは再発候補に出ない"
+assert_contains "$OUT" "20260715-000001(参考 " "昇華日以降の同カテゴリ指摘が列挙される"
+assert_not_contains "$OUT" "20260716-000001(参考" "別カテゴリは再発候補に出ない"
+assert_contains "$OUT" "本文を読んで判断すること" "判断はエージェントが行う旨が明示される"
+
+# --- 再発候補は文字列一致で足切りしない(判定はエージェントが本文を読んで行う) ---
+# 主題が離れて見えるエントリも候補として出す。表面的な文字の重なりで捨てると、
+# 言語や書式の差で真の再発を落とし、「ルールが効いていない」ことに気づけなくなる。
+# 余分な候補を1件読む手間より、見落としのほうが重い(2026-08-22 にしきい値方式を撤去)
+cat > "$WORK/project/.feedback/log/20260717-000001-offtopic.md" <<'EOF'
+---
+id: 20260717-000001
+date: 2026-07-17
+source: human
+category: style
+signal: failure
+status: open
+---
+
+# 全く別の主題についての指摘
+
+コミットメッセージの一行目は50文字以内に収める。長い説明は本文へ回す。
+EOF
+OUT_R="$(fb stats --since 2026-08-10)"
+assert_contains "$OUT_R" "20260717-000001(参考 " "主題が離れて見えるエントリも候補として出す(足切りしない)"
+assert_contains "$OUT_R" "20260715-000001(参考 " "同カテゴリの他の候補も引き続き出る"
+# 参考値は読む順のヒント。表面的に近いものが先に並ぶ
+POS_NEAR="$(printf '%s' "$OUT_R" | grep -o '20260715-000001\|20260717-000001' | head -1)"
+assert_eq "20260715-000001" "$POS_NEAR" "参考値の高い候補が先に並ぶ(読む順のヒント)"
+rm "$WORK/project/.feedback/log/20260717-000001-offtopic.md"
+
+# --- 一時ファイルは集計に混ぜない ---
+# スクラッチパッド等はプロジェクトの資産ではないため、件数を稼いで
+# 「どのファイルでつまずいているか」の順位を歪めてはいけない
+cat >> "$WORK/project/.feedback/events.jsonl" <<'EOF'
+{"ts":"2026-08-14T01:00:00Z","hook":"post_edit","file":"/private/tmp/x/scratchpad/probe.py","result":"fail"}
+{"ts":"2026-08-14T01:01:00Z","hook":"post_edit","file":"/private/tmp/x/scratchpad/probe.py","result":"fail"}
+{"ts":"2026-08-14T01:02:00Z","hook":"post_edit","file":"/tmp/other.py","result":"fail"}
+EOF
+OUT_T="$(fb stats --since 2026-08-10)"
+assert_not_contains "$OUT_T" "scratchpad" "スクラッチパッドのファイルは失敗上位に出ない"
+assert_not_contains "$OUT_T" "/tmp/other.py" "/tmp 配下のファイルは失敗上位に出ない"
+assert_contains "$OUT_T" "PostToolUse 初回通過率: 1/3 (33%)" "一時ファイルは初回通過率の分母にも入らない"
 
 # --- events が無いプロジェクトでも死なない ---
 rm "$WORK/project/.feedback/events.jsonl"

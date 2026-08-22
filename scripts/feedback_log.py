@@ -10,7 +10,8 @@ rules.md は CLAUDE.md / AGENTS.md から参照され、次回以降のセッシ
 使い方:
   feedback_log.py add --category <cat> --summary "<要約>" [--detail "<詳細>"] [--source human|hook|agent] \
       [--signal context|instruction|workflow|failure]
-  feedback_log.py list [--status open|promoted|closed|all] [--category <cat>]
+  feedback_log.py list [--status open|promoted|closed|retired|all] [--category <cat>] \
+      [--signal context|instruction|workflow|failure|unknown]
   feedback_log.py search <キーワード>
   feedback_log.py promote <entry-id> --rule "<一般化したルール1行>"
   feedback_log.py merge <entry-id> --into <既存ルールの出典id> [--rule "<更新後の本文>"]
@@ -89,6 +90,9 @@ def _cfg(key, default):
 
 AUDIT_INTERVAL_DAYS = _cfg("audit.interval_days", 7)
 OPEN_THRESHOLD = _cfg("feedback.open_threshold", 3)
+# この日数だけ再発していない頻出項目は「解消済みかもしれない」と注記する。
+# 累積件数だけで並べると直った問題が上位に居座り、対処すべき項目を隠すため
+STALE_DAYS = _cfg("feedback.stale_days", 7)
 # バンドル資産は状態と違い、スクリプトに同梱されて配られる読み取り専用のファイル。
 # 導入先が rules.template.md を持たない(プラグインのみで導入した)場合の供給元。
 BUNDLED_TEMPLATE = Path(__file__).resolve().parent.parent / ".feedback" / "rules.template.md"
@@ -178,13 +182,32 @@ def resolve_since(args) -> str:
     return (datetime.date.today() - datetime.timedelta(days=days)).isoformat()
 
 
+def staleness_cutoff() -> str:
+    """これより古い最終発生日は「しばらく再発していない」と扱う境界日。"""
+    return (datetime.date.today() - datetime.timedelta(days=STALE_DAYS)).isoformat()
+
+
+def is_transient_path(path: str) -> bool:
+    """セッション作業用の一時ファイルなら True。
+
+    スクラッチパッドや /tmp 配下はプロジェクトの資産ではないため、
+    「どのファイルでつまずいているか」の集計に混ぜると順位を歪める。
+    """
+    p = str(path)
+    if "/scratchpad/" in p or p.startswith("/tmp/") or p.startswith("/private/tmp/"):
+        return True
+    return "/.git/" in p
+
+
 def post_edit_first_pass(evs, date_from: str, date_to: str):
-    """期間内の post_edit イベントから(初回pass数, ファイル数, ファイル別fail数)を返す。
+    """期間内の post_edit イベントから
+    (初回pass数, ファイル数, ファイル別fail数, ファイル別の最終fail日)を返す。
 
     「初回」= 期間内でそのファイルに最初に現れたイベント。期間を跨ぐ再登場は
     リセットされる(日次/指定期間のスナップショットとして測る)。
+    一時ファイルは集計対象外(is_transient_path)。
     """
-    first, fails = {}, {}
+    first, fails, last_fail = {}, {}, {}
     for e in evs:
         if e.get("hook") != "post_edit":
             continue
@@ -192,11 +215,15 @@ def post_edit_first_pass(evs, date_from: str, date_to: str):
         if not (date_from <= d <= date_to):
             continue
         f = str(e.get("file", ""))
+        if is_transient_path(f):
+            continue
         if e.get("result") == "fail":
             fails[f] = fails.get(f, 0) + 1
+            if d > last_fail.get(f, ""):
+                last_fail[f] = d
         if f not in first:
             first[f] = e.get("result") == "pass"
-    return (sum(first.values()), len(first), fails)
+    return (sum(first.values()), len(first), fails, last_fail)
 
 
 def root_cause(entry: dict) -> str:
@@ -225,26 +252,93 @@ def rule_sources() -> list:
     return out
 
 
+def _bigrams(text: str) -> set:
+    """文字bigramの集合(読む順のヒント用)。"""
+    t = re.sub(r"\s+", "", text or "")
+    return {t[i:i + 2] for i in range(len(t) - 1)}
+
+
+def text_similarity(a: str, b: str) -> float:
+    """2つの本文の表面的な近さ(文字bigramのJaccard係数、0.0〜1.0)。
+
+    **判定には使わない。** 候補を読む順を決めるためだけの補助値である。
+    文字の重なりしか見ないため、言語によって値域が大きくずれ(実測: 無関係な
+    2文でも英語は 0.16、中国語は同主題でも 0.10)、全エントリ共通の定型句
+    (「根因: …」等)にも引きずられる。同じ原則の再発かどうかの判断は、
+    本文を読めるエージェントが行う(feedback-loop スキル Phase 4)。
+    """
+    A, B = _bigrams(a), _bigrams(b)
+    if not A or not B:
+        return 0.0
+    return len(A & B) / len(A | B)
+
+
+def recurrence_lines(cands: list) -> list:
+    """再発候補の表示行(stats / report 共通)。
+
+    絞り込まずに列挙する。同じ原則の再発かどうかは本文の意味を読まないと決まらず、
+    機械的な文字列一致で足切りすると、言語や書式の差で真の再発を捨てる
+    (2026-08-22: 文字bigramのしきい値方式を撤去)。CLI は見るべき対象を漏れなく
+    出し、判断はエージェントに委ねる。
+    """
+    lines = []
+    for c in cands:
+        if not c["recurrences"]:
+            continue
+        sims = c.get("similarities", {})
+        hits = ", ".join(f"{i}(参考 {sims.get(i, 0):.2f})" for i in c["recurrences"])
+        lines.append(
+            f"- [{c['category']}] {', '.join(c['sources'])} ({c['date']} 昇華) ← 以降の同カテゴリ: {hits}"
+        )
+    if not lines:
+        return ["(なし)"]
+    lines.append(
+        "※ 同じ原則の再発かは出典と候補の本文を読んで判断すること"
+        "(括弧内は表面的な文字の重なりで、読む順のヒント。判定基準ではない)"
+    )
+    return lines
+
+
 def recurrence_candidates() -> list:
     """昇華日以降に同カテゴリの失敗系エントリが出たルールを列挙する。
 
     curator 原則5(再発=ルールが効いていない兆候)と棚卸しPhase4手順1の
     手動検索を機械化したもの。成功系(instruction/workflow)の再記録は
     再発ではないため対象外。
+
+    ここで返すのは**判定結果ではなく調査対象**である。同じ原則の再発かどうかは
+    本文の意味を読まないと決まらず、機械的な文字列一致で足切りすると言語や書式の
+    差で真の再発を捨てる(見落としは「ルールが効いていない」ことに気づけない害が
+    あり、余分な候補を1件読む手間より重い)。判断はエージェントが行う。
+
+    各候補には表面的な類似度を添えるが、これは読む順のヒントに過ぎない
+    (text_similarity の注記を参照)。
     """
     out = []
+    es = entries()
+    by_id = {e.get("id"): e for e in es}
     for rule in rule_sources():
         if not rule["date"]:
             continue
+        # 出典が複数(merge済み)なら最も新しいものを主題の代表とする
+        srcs = [by_id[s] for s in rule["sources"] if s in by_id]
+        src_body = max(srcs, key=lambda e: e.get("date") or "", default={}).get("body", "")
         hits = [
-            e for e in entries()
+            (e.get("id", "?"), text_similarity(src_body, e.get("body", "")))
+            for e in es
             if e.get("category") == rule["category"]
             and (e.get("date") or "") > rule["date"]
             and e.get("id") not in rule["sources"]
             and (e.get("signal") or "unknown") in ("failure", "context", "unknown")
         ]
         if hits:
-            out.append({**rule, "recurrences": [h.get("id", "?") for h in hits]})
+            # 読む順のヒントとして、表面的に近いものを先に出す
+            hits.sort(key=lambda kv: (-kv[1], kv[0]))
+            out.append({
+                **rule,
+                "recurrences": [i for i, _ in hits],
+                "similarities": dict(hits),
+            })
     return out
 
 
@@ -565,7 +659,7 @@ def cmd_stats(args):
     if not evs:
         print("(イベント記録が無い — hooks が .feedback/events.jsonl に蓄積する)")
     else:
-        npass, total, fails = post_edit_first_pass(evs, since, "9999-12-31")
+        npass, total, fails, last_fail = post_edit_first_pass(evs, since, "9999-12-31")
         if total:
             print(f"PostToolUse 初回通過率: {npass}/{total} ({round(npass * 100 / total)}%)")
             print(f"1ファイルあたりの平均再チェック回数: {sum(fails.values()) / total:.2f}")
@@ -581,18 +675,30 @@ def cmd_stats(args):
         if stops:
             spass = sum(1 for e in stops if e.get("result") == "pass")
             print(f"Stop フルチェック初回通過率: {spass}/{len(stops)} ({round(spass * 100 / len(stops))}%)")
+        # 件数だけを出すと、直った問題が累積回数のまま上位に居座り
+        # 「今なお困っていること」と区別できない。最終発生日を併記して鮮度を示す
         top = sorted(fails.items(), key=lambda kv: (-kv[1], kv[0]))[:5]
-        warns = {}
+        warns, warn_last = {}, {}
         for e in evs:
-            if e.get("result") != "warn" or str(e.get("ts", ""))[:10] < since:
+            d = str(e.get("ts", ""))[:10]
+            if e.get("result") != "warn" or d < since:
                 continue
             k = e.get("check", "-")
             warns[k] = warns.get(k, 0) + 1
+            if d > warn_last.get(k, ""):
+                warn_last[k] = d
         if warns:
             top_warn = sorted(warns.items(), key=lambda kv: (-kv[1], kv[0]))[:5]
-            print("頻出WARN: " + ", ".join(f"{k}({v})" for k, v in top_warn))
+            print("頻出WARN: " + ", ".join(
+                f"{k}({v}, 最終 {warn_last.get(k, '?')})" for k, v in top_warn))
         if top:
-            print("失敗上位: " + ", ".join(f"{f}({n})" for f, n in top))
+            print("失敗上位: " + ", ".join(
+                f"{f}({n}, 最終 {last_fail.get(f, '?')})" for f, n in top))
+        stale = [k for k, _ in top_warn] if warns else []
+        stale = [k for k in stale if warn_last.get(k, "") < staleness_cutoff()]
+        if stale:
+            print(f"NOTE: {', '.join(stale)} は {STALE_DAYS}日以上再発していません"
+                  " — 解消済みなら順位から外れるまで表示が残ります")
 
     print()
     print("[ログ]")
@@ -631,12 +737,10 @@ def cmd_stats(args):
         print(line)
 
     print()
-    print("[再発候補] 昇華後に同カテゴリの失敗系エントリが再記録されたルール")
+    print("[再発候補] 昇華後に同カテゴリの失敗系エントリが記録されたルール(調査対象)")
     cands = recurrence_candidates()
-    if not cands:
-        print("(なし)")
-    for c in cands:
-        print(f"- [{c['category']}] {', '.join(c['sources'])} ({c['date']} 昇華) ← 以降の同カテゴリ: {', '.join(c['recurrences'])}")
+    for line in recurrence_lines(cands):
+        print(line)
 
 
 def resolve_report_since(args) -> str:
@@ -699,11 +803,8 @@ def cmd_report(args):
 
     print()
     print("## 再発候補")
-    cands = recurrence_candidates()
-    if not cands:
-        print("(なし)")
-    for c in cands:
-        print(f"- [{c['category']}] {', '.join(c['sources'])} ({c['date']} 昇華) ← 以降の同カテゴリ: {', '.join(c['recurrences'])}")
+    for line in recurrence_lines(recurrence_candidates()):
+        print(line)
 
     print()
     print("## 監査")
@@ -713,16 +814,23 @@ def cmd_report(args):
     print()
     print("## WARN(ブロックしないが溜まっている指摘)")
     evs = load_events()
-    warns = {}
+    warns, warn_last = {}, {}
     for e in evs:
-        if e.get("result") != "warn" or str(e.get("ts", ""))[:10] < since:
+        d = str(e.get("ts", ""))[:10]
+        if e.get("result") != "warn" or d < since:
             continue
         k = e.get("check", "-")
         warns[k] = warns.get(k, 0) + 1
+        if d > warn_last.get(k, ""):
+            warn_last[k] = d
     if not warns:
         print("(なし)")
+    cutoff = staleness_cutoff()
     for k, v in sorted(warns.items(), key=lambda kv: (-kv[1], kv[0])):
-        print(f"- {k}: {v}件")
+        # 累積件数だけでは、直った指摘と今も出ている指摘が同じ見た目になる
+        note = f"(最終 {warn_last.get(k, '?')}"
+        note += f" — {STALE_DAYS}日以上再発なし)" if warn_last.get(k, "") < cutoff else ")"
+        print(f"- {k}: {v}件 {note}")
 
     print()
     print("## 数字")
