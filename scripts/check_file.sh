@@ -70,7 +70,13 @@ case "$FILE" in
     sev="$(harness_check_severity node-lint fail)"
     if [[ "$sev" != "skip" ]]; then
       cur=""
-      if has npx && [[ -f .eslintrc.json || -f .eslintrc.js || -f eslint.config.js || -f eslint.config.mjs ]]; then
+      # npx --no-install は「未インストール」も「lint 違反」も非0で返すため、
+      # 設定ファイルの有無だけをゲートにすると eslint 未導入のプロジェクトで
+      # npm の内部エラー(missing packages)がそのまま差し戻される。check.sh の
+      # prettier / knip / secretlint と同じく --version で事前プローブし、
+      # 未導入は検査せず素通しする(単一ファイル検査に SKIP の出口は無いため)
+      if has npx && [[ -f .eslintrc.json || -f .eslintrc.js || -f eslint.config.js || -f eslint.config.mjs ]] \
+         && npx --no-install eslint --version >/dev/null 2>&1; then
         cur="$(npx --no-install eslint --format unix "$FILE" 2>&1)" && cur=""
       elif has node && [[ "$FILE" == *.js || "$FILE" == *.mjs || "$FILE" == *.cjs ]]; then
         cur="$(node --check "$FILE" 2>&1)" && cur=""

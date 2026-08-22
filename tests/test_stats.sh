@@ -149,14 +149,21 @@ rm "$WORK/project/.feedback/log/20260717-000001-offtopic.md"
 # --- 一時ファイルは集計に混ぜない ---
 # スクラッチパッド等はプロジェクトの資産ではないため、件数を稼いで
 # 「どのファイルでつまずいているか」の順位を歪めてはいけない
+# フィクスチャは writer(lib.sh の harness_log_event)が実際に書く形に合わせる。
+# プロジェクト内のファイルは root を剥がした相対パスで記録されるため、
+# ルート直下の scratchpad/ は先頭にスラッシュが付かない。絶対パスだけで
+# テストすると、除外機能の主要ケースに一度も触れないまま緑になる
 cat >> "$WORK/project/.feedback/events.jsonl" <<'EOF'
-{"ts":"2026-08-14T01:00:00Z","hook":"post_edit","file":"/private/tmp/x/scratchpad/probe.py","result":"fail"}
-{"ts":"2026-08-14T01:01:00Z","hook":"post_edit","file":"/private/tmp/x/scratchpad/probe.py","result":"fail"}
-{"ts":"2026-08-14T01:02:00Z","hook":"post_edit","file":"/tmp/other.py","result":"fail"}
+{"ts":"2026-08-14T01:00:00Z","hook":"post_edit","file":"scratchpad/probe.py","result":"fail"}
+{"ts":"2026-08-14T01:01:00Z","hook":"post_edit","file":"scratchpad/probe.py","result":"fail"}
+{"ts":"2026-08-14T01:02:00Z","hook":"post_edit","file":"_workspace/scratchpad/deep.py","result":"fail"}
+{"ts":"2026-08-14T01:03:00Z","hook":"post_edit","file":"/tmp/other.py","result":"fail"}
+{"ts":"2026-08-14T01:04:00Z","hook":"post_edit","file":".git/COMMIT_EDITMSG","result":"fail"}
 EOF
 OUT_T="$(fb stats --since 2026-08-10)"
-assert_not_contains "$OUT_T" "scratchpad" "スクラッチパッドのファイルは失敗上位に出ない"
+assert_not_contains "$OUT_T" "scratchpad" "スクラッチパッドのファイルは失敗上位に出ない(相対・深い階層とも)"
 assert_not_contains "$OUT_T" "/tmp/other.py" "/tmp 配下のファイルは失敗上位に出ない"
+assert_not_contains "$OUT_T" "COMMIT_EDITMSG" "ルート直下の .git/ も失敗上位に出ない"
 assert_contains "$OUT_T" "PostToolUse 初回通過率: 1/3 (33%)" "一時ファイルは初回通過率の分母にも入らない"
 
 # --- events が無いプロジェクトでも死なない ---

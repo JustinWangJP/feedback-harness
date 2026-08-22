@@ -194,9 +194,15 @@ def is_transient_path(path: str) -> bool:
     「どのファイルでつまずいているか」の集計に混ぜると順位を歪める。
     """
     p = str(path)
-    if "/scratchpad/" in p or p.startswith("/tmp/") or p.startswith("/private/tmp/"):
+    if p.startswith("/tmp/") or p.startswith("/private/tmp/"):
         return True
-    return "/.git/" in p
+    # 判定はセグメント単位で行う。events.jsonl の writer(lib.sh の
+    # harness_log_event)はプロジェクト内のファイルを相対パスで記録するため、
+    # "/scratchpad/" のように前後のスラッシュを要求すると、ルート直下の
+    # scratchpad/x.py だけが除外から漏れ、_workspace/scratchpad/x.py は
+    # 除外されるという階層依存の挙動になる(実測で再現)
+    segments = p.split("/")
+    return "scratchpad" in segments or ".git" in segments
 
 
 def post_edit_first_pass(evs, date_from: str, date_to: str):

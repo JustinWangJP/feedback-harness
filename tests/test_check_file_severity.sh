@@ -79,6 +79,38 @@ OUT="$(cd "$P4" && run_cf "$P4/bad.js")"; RC=$?
 assert_eq "0" "$RC" "checks.node-lint.severity=skip で exit 0"
 rm -f "$FAKEBIN/npx"
 
+# --- eslint 未導入は差し戻さない(npx を実際に呼ぶ経路) ---
+# 上の skip ケースは分岐へ入る前に return するため、npx を起動するコードパスは
+# 一度も実行されていなかった。npx --no-install は「未インストール」も「lint 違反」も
+# 非0で返すため、設定ファイルの有無だけをゲートにすると eslint 未導入のプロジェクトで
+# npm の内部エラー(missing packages)がそのまま差し戻される(実測で再現)
+P6="$(new_project node_eslint_missing)"
+{ echo '#!/usr/bin/env bash'
+  # --version(プローブ)も本体も失敗する = eslint がインストールされていない状態
+  echo 'echo "npm error npx canceled due to missing packages and no YES option: [\"eslint@9.39.5\"]" >&2'
+  echo 'exit 1'
+} > "$FAKEBIN/npx"; chmod +x "$FAKEBIN/npx"
+printf '{}' > "$P6/eslint.config.js"
+printf 'var x = 1\n' > "$P6/bad.js"
+OUT="$(cd "$P6" && run_cf "$P6/bad.js")"; RC=$?
+assert_eq "0" "$RC" "eslint 未導入では差し戻さない"
+assert_not_contains "$OUT" "missing packages" "npm の内部エラーを差し戻さない"
+
+# --- eslint 導入済みなら lint 違反を差し戻す(同じ経路の対になるケース) ---
+# 上の未導入ケースだけだと「常に素通し」に退行しても緑のままになる
+P7="$(new_project node_eslint_present)"
+{ echo '#!/usr/bin/env bash'
+  echo 'case "$*" in *--version*) exit 0 ;; esac'
+  echo 'echo "bad.js:1:1: warning: unexpected var [no-var]"'
+  echo 'exit 1'
+} > "$FAKEBIN/npx"; chmod +x "$FAKEBIN/npx"
+printf '{}' > "$P7/eslint.config.js"
+printf 'var x = 1\n' > "$P7/bad.js"
+OUT="$(cd "$P7" && run_cf "$P7/bad.js")"; RC=$?
+assert_eq "1" "$RC" "eslint 導入済みなら lint 違反で exit 1"
+assert_contains "$OUT" "no-var" "eslint の指摘内容が出る"
+rm -f "$FAKEBIN/npx"
+
 # --- 壊れた config.yaml は check_file.sh 自身をブロックする ---
 # AGENTS.md §2 で check_file.sh は編集直後の必須ゲート。黙って exit 0 で
 # 通すと、設定の打ち間違いに誰も気づけない
