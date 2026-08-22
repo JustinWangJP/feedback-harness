@@ -26,7 +26,17 @@ description: フィードバックハーネス全体のオーケストレータ�
 環境のサブエージェント機能で feedback-curator を呼び出す（定義: `agents/feedback-curator.md` — 定義ファイルの作業原則を prompt に含める）。Claude Code では `Agent` と `model: "opus"`、Codex では継承モデルを使う:
 
 - 入力: openエントリ一覧 + 既存rules.md + ユーザーの直近指摘
-- 期待出力: promote/merge/close の実行結果と判断の要約。rules.md 以外への反映提案(CLAUDE.md 追記案・lint/テスト追加案)があればその一覧
+- 期待出力: promote/merge/close の実行結果と判断の要約、および次の構造化契約。候補が無い場合も `automation_candidates: []` を出す
+
+```yaml
+automation_candidates:
+  - candidate: "機械的に検出したい失敗"
+    evidence: "対象entry IDと再現・反復の証拠"
+    recommended_check: "追加するlint・テスト・チェックの案"
+    human_decision: pending
+```
+
+`human_decision` は承認前には必ず `pending` とする。
 - 完了後、rules.mdの差分と反映提案をユーザーに提示する。提案の採否はユーザーが決める(curator は共有アーティファクトを直接編集しない)
 
 ## Phase 2: ハーネスQA

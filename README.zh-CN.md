@@ -14,6 +14,10 @@
 
 只会使用已经安装的可选工具。找不到的工具会在说明原因后标记为 `SKIP`，工具链不会自动安装任何工具。
 
+### 开发本仓库
+
+本仓库自身的检查依赖会单独固定版本，不属于工具链的运行要求。运行 `make install-dev-tools`，即可将 `requirements-dev.txt` 中的 PyYAML和Ruff，以及 `scripts/dev_tool_versions.sh` 中声明的actionlint安装到仓库内的 `.venv`。直接运行 `scripts/check.sh` 前，请先执行 `source .venv/bin/activate`；`make test` 会自动优先使用这些本地工具。Linux CI使用相同的安装目标，并在检查前验证这三个工具，但工具链仍不会在目标项目中自动安装工具。
+
 ## 工作原理
 
 | 环境 | 自动检查 | 应用规则 |
@@ -50,9 +54,11 @@
 |---|---|---|
 | 记录反馈 | `feedback_log.py add` | 立即记录人工反馈或有效的工作方式，并保存 signal |
 | 转化为规则 | `promote` / `merge` / `close` / `retire` | 向 `rules.md` 添加或合并规则、关闭已处理的反馈，或停用过时规则 |
-| 测量 | `stats` | 显示首次通过率、平均重新检查次数、常见 WARN 和**复发候选** |
-| 报告 | `report` | 生成用于晨会或复盘的周期摘要，并与上一周期进行比较 |
-| 漏洞审计 | `audit.sh` | 仅在需要时执行（唯一使用网络的处理） |
+| 测量 | `stats` | 显示仅限当前工作副本的首次通过率、平均重新检查次数、常见 WARN 和**复发候选** |
+| 报告 | `report` | 生成仅限当前工作副本的周期摘要，用于晨会或复盘，并与上一周期比较 |
+| 漏洞审计 | `audit.sh` | 仅在需要时执行（工具链中专门进行联网审计的处理） |
+
+curator 对 `rules.md` 之外的自动化建议使用结构化 `automation_candidates` 契约（`candidate`、`evidence`、`recommended_check`、`human_decision`），在人工批准之前保持待定。
 
 ## 可以做什么 / 不会做什么
 
@@ -62,7 +68,7 @@
 |---|---|
 | 自动将检查失败返回给代理，使其能够自行修复问题 | **不会强制完成** — WARN（项目未明确配置的检查所产生的问题）保持退出码 0；只有 FAIL 会阻塞完成 |
 | 使用已有工具；工具不存在时说明原因并标记为 SKIP | **不会自动安装工具。** 是否更改环境由用户决定 |
-| 每轮运行可完全离线完成的检查 | **`check.sh` 不使用网络。** 漏洞审计被独立到 `audit.sh`，Stop hook 不会调用它 |
+| 不额外下载依赖或查询远程服务地运行检查 | **`check.sh` 本身不会主动发起网络访问。** 但项目定义的命令和外部工具仍可能根据自身配置访问网络。漏洞审计被独立到 `audit.sh`，Stop hook 不会调用它 |
 | 测量覆盖率 | **不会运行两次测试。** 只在现有 test 命令中加入覆盖率测量，或切换到 `test:coverage` |
 | 通过与 Git 基线比较来检测破坏性变更 | **不会访问远程仓库。** 比较基线为 `git merge-base HEAD <默认分支>`；无法解析时使用 `HEAD` |
 | `apply-feedback` skill 读取已记录的反馈并应用到下一项工作 | **不会擅自修改共享文件。** 对 `rules.md` 以外的变更（如追加 CLAUDE.md 或引入 lint）只提出建议，经人工批准后才应用 |
@@ -85,12 +91,14 @@ hooks/
   hooks.json        # 用于分发的 Claude Code / Codex 共用 Hooks 定义
 scripts/
   check.sh          # 自动检测技术栈（Python/Node/Go/Rust/Java/Shell/Make）→ 8 个阶段 + 横向检查
+  checks/*.sh       # 技术栈与横向 runner；共用执行 core 保留在 check.sh
   check_file.sh     # 根据扩展名执行快速单文件检查
-  audit.sh          # 按需漏洞审计（唯一使用网络的检查；不属于 Stop hook）
+  audit.sh          # 按需漏洞审计（专门主动联网的检查；不属于 Stop hook）
   lib.sh            # 共用工具函数（has / harness_project_root / harness_tree_changed /
                     #   harness_node_pm / harness_validate_json|yaml / harness_check_md_links /
                     #   harness_log_event|warn）
   harness_config.py # 读取 .feedback/config.yaml 并解析检查设置
+  feedback_store.py # repository lock、原子写入及中断事务恢复
   feedback_log.py   # 反馈记录 CLI（add / list / search / promote / merge / close /
                     #   retire / rules / stats / report）
   init.sh           # 安装脚本（为不支持 Hooks 的环境部署资源）
@@ -107,6 +115,8 @@ scripts/
   .last-check       # Stop hook 的本地检查标记，使用修改时间（不由 Git 跟踪）
   .last-retro       # 复盘统计周期的起点（由 report --mark 更新；不跟踪）
   .last-audit       # 最近一次成功漏洞审计的日期（不跟踪）
+  .state.lock       # feedback CLI 的 repository-wide lock（持久存在，不跟踪）
+  .transaction.json # 中断更新的恢复 journal（正常完成时不存在，不跟踪）
   events.jsonl      # 用于 stats/report 的 Hook 结果和 WARN 日志（本地状态；不跟踪）
 package.json        # 仅用于让 npx --no-install 解析 secretlint 等检查工具
 tests/              # Bash 测试（check.sh 会检测并自动运行 make check）
@@ -185,7 +195,7 @@ cd /path/to/your-project && bash scripts/check.sh   # 验证技术栈检测
 
 | 资源 | 插件 | `init.sh` |
 |---|---|---|
-| `scripts/check.sh` `check_file.sh` `audit.sh` `lib.sh` `harness_config.py` `feedback_log.py` `README.md` `README.ja.md` `README.zh-CN.md` | 保存在插件中。Codex 通过 `PLUGIN_ROOT` 运行（Hooks 还会设置兼容变量 `CLAUDE_PLUGIN_ROOT`）；Claude Code 使用 `CLAUDE_PLUGIN_ROOT` | 复制到目标项目的 `scripts/` 目录 |
+| `scripts/check.sh` `checks/*.sh` `check_file.sh` `audit.sh` `lib.sh` `harness_config.py` `feedback_store.py` `feedback_log.py` `README.md` `README.ja.md` `README.zh-CN.md` | 保存在插件中。Codex 通过 `PLUGIN_ROOT` 运行（Hooks 还会设置兼容变量 `CLAUDE_PLUGIN_ROOT`）；Claude Code 使用 `CLAUDE_PLUGIN_ROOT` | 复制到目标项目的 `scripts/` 目录 |
 | Hooks（`hooks.json`） | 是（启用后自动运行） | 否（由 CLAUDE.md / AGENTS.md 规则作为替代） |
 | skills | 是（Claude Code / Codex） | 否（由 CLAUDE.md / AGENTS.md 规则作为替代） |
 | agents / commands | 仅 Claude Code | 否 |
@@ -417,3 +427,7 @@ bash scripts/check.sh --list-checks --json    # 以机器可读 JSON 输出相�
 测量对应 Feedback Flywheel 中的“测量变化”。本工具链不会创建仪表盘。`stats` 只在请求时输出文本，数值只出现在 `report` 的“数字”部分。`events.jsonl`（Hook 结果）和 `.last-retro`（统计周期标记）都是仅在本机使用的状态文件，不通过 Git 共享。
 
 规则并非唯一的反映位置，因为合适的共享成果物取决于 signal 类型。缺少知识时，应补充 CLAUDE.md 等前提文档。对于能够机械检测的失败，将其加入 lint 或测试，比仅依赖文字规则更可靠。参阅 [Feedback Flywheel](docs/references/fowler-feedback-flywheel-translation.md)。
+
+## 许可证
+
+本项目采用 [MIT License](LICENSE)。

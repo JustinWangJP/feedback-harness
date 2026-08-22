@@ -14,6 +14,10 @@ A feedback harness for both Claude Code and Codex. It provides two mechanisms:
 
 Optional tools are used only when they are already installed. Missing tools are reported as `SKIP` with a reason; the harness never installs them automatically.
 
+### Developing this repository
+
+This repository pins its own check dependencies separately from the harness runtime. Run `make install-dev-tools` to install PyYAML and Ruff from `requirements-dev.txt` and the actionlint version declared in `scripts/dev_tool_versions.sh` into the repository-local `.venv`. Run `source .venv/bin/activate` before calling `scripts/check.sh` directly; `make test` already prefers that local tool directory. The Linux CI uses the same installation target and verifies all three tools before running checks. This does not make the harness install tools in target projects.
+
 ## How it works
 
 | Environment | Automated checks | Applying rules |
@@ -50,9 +54,11 @@ The feedback accumulation features are:
 |---|---|---|
 | Record feedback | `feedback_log.py add` | Records human feedback or a successful working pattern immediately, including its signal |
 | Turn feedback into rules | `promote` / `merge` / `close` / `retire` | Adds or merges rules in `rules.md`, closes processed feedback, or retires obsolete rules |
-| Measure | `stats` | Reports first-pass rate, average recheck count, frequent WARNs, and **recurrence candidates** |
-| Report | `report` | Produces a period summary for stand-ups and retrospectives, including comparison with the preceding period |
-| Vulnerability audit | `audit.sh` | Runs only when requested (the only operation that uses the network) |
+| Measure | `stats` | Reports local-only first-pass rate, average recheck count, frequent WARNs, and **recurrence candidates** |
+| Report | `report` | Produces a local-only period summary for stand-ups and retrospectives, including comparison with the preceding period |
+| Vulnerability audit | `audit.sh` | Runs only when requested (the harness's dedicated networked operation) |
+
+Curator suggestions outside `rules.md` use a structured `automation_candidates` contract (`candidate`, `evidence`, `recommended_check`, and `human_decision`) so that proposed automation remains pending until a human approves it.
 
 ## What it does and does not do
 
@@ -62,7 +68,7 @@ The harness deliberately leaves some things undone. These are design decisions, 
 |---|---|
 | Returns failed checks to the agent automatically so it can fix problems itself | **Does not force completion** — WARNs (findings from checks not explicitly configured by the project) keep exit code 0; only FAIL blocks completion |
 | Uses tools that are available and reports missing ones as SKIP with a reason | **Does not install tools automatically.** The user decides whether to change the environment |
-| Runs fully offline checks on every turn | **`check.sh` does not use the network.** Vulnerability auditing is isolated in `audit.sh` and is never called by the Stop hook |
+| Runs checks without adding dependency downloads or remote lookups of its own | **`check.sh` itself does not intentionally initiate network access.** Project-defined commands and tools may still use the network according to their configuration. The dedicated vulnerability audit is isolated in `audit.sh` and is never called by the Stop hook |
 | Measures coverage | **Does not run tests twice.** It only adds coverage instrumentation to the existing test command (or switches to `test:coverage`) |
 | Detects breaking changes against a Git baseline | **Does not consult a remote.** The baseline is `git merge-base HEAD <default-branch>`, falling back to `HEAD` when it cannot be resolved |
 | Uses the `apply-feedback` skill to read recorded feedback and apply it to the next task | **Does not modify shared files without permission.** Changes outside `rules.md` (such as additions to CLAUDE.md or a new linter) are proposed and applied only after human approval |
@@ -85,12 +91,14 @@ hooks/
   hooks.json        # Shared Claude Code / Codex Hooks definition for distribution
 scripts/
   check.sh          # Detects stacks (Python/Node/Go/Rust/Java/Shell/Make) → 8 stages + cross-cutting checks
+  checks/*.sh       # Stack and cross-cutting runners; check.sh keeps the shared execution core
   check_file.sh     # Fast single-file checks based on file extension
-  audit.sh          # On-demand vulnerability audit (only networked check; excluded from Stop hooks)
+  audit.sh          # On-demand vulnerability audit (dedicated networked check; excluded from Stop hooks)
   lib.sh            # Shared utilities (has / harness_project_root / harness_tree_changed /
                     #   harness_node_pm / harness_validate_json|yaml / harness_check_md_links /
                     #   harness_log_event|warn)
   harness_config.py # Loads .feedback/config.yaml and resolves check settings
+  feedback_store.py # Repository lock, atomic writes, and interrupted-transaction recovery
   feedback_log.py   # Feedback CLI (add / list / search / promote / merge / close /
                     #   retire / rules / stats / report)
   init.sh           # Installer (deploys assets for environments without Hooks)
@@ -107,6 +115,8 @@ scripts/
   .last-check       # Local Stop-hook check marker based on modification time (not tracked by Git)
   .last-retro       # Start of the retrospective reporting period (updated by report --mark; not tracked)
   .last-audit       # Date of the last successful vulnerability audit (not tracked)
+  .state.lock       # Persistent repository-wide lock for feedback CLI mutations (not tracked)
+  .transaction.json # Recovery journal present only after an interrupted mutation (not tracked)
   events.jsonl      # Hook results and WARN log for stats/report (local state; not tracked)
 package.json        # Declares check tools such as secretlint solely for npx --no-install resolution
 tests/              # Bash tests (make check is detected and run automatically by check.sh)
@@ -185,7 +195,7 @@ The installer copies `scripts/` and AGENTS.md into the target project. It adds g
 
 | Asset | Plugin | `init.sh` |
 |---|---|---|
-| `scripts/check.sh` `check_file.sh` `audit.sh` `lib.sh` `harness_config.py` `feedback_log.py` `README.md` `README.ja.md` `README.zh-CN.md` | Stored in the plugin. Codex runs them through `PLUGIN_ROOT` (Hooks also set the compatibility variable `CLAUDE_PLUGIN_ROOT`); Claude Code uses `CLAUDE_PLUGIN_ROOT` | Copied into the target project's `scripts/` directory |
+| `scripts/check.sh` `checks/*.sh` `check_file.sh` `audit.sh` `lib.sh` `harness_config.py` `feedback_store.py` `feedback_log.py` `README.md` `README.ja.md` `README.zh-CN.md` | Stored in the plugin. Codex runs them through `PLUGIN_ROOT` (Hooks also set the compatibility variable `CLAUDE_PLUGIN_ROOT`); Claude Code uses `CLAUDE_PLUGIN_ROOT` | Copied into the target project's `scripts/` directory |
 | Hooks (`hooks.json`) | Yes (runs automatically after enablement) | No (CLAUDE.md / AGENTS.md rules are the fallback) |
 | skills | Yes (Claude Code / Codex) | No (CLAUDE.md / AGENTS.md rules are the fallback) |
 | agents / commands | Claude Code only | No |
@@ -417,3 +427,7 @@ Recorded feedback is consulted from the next task onward without waiting for `pr
 Measurement corresponds to “measuring the change” in the Feedback Flywheel. The harness does not build a dashboard. `stats` produces text only on request, and numbers appear only in the “Numbers” section of `report`. `events.jsonl` (Hook results) and `.last-retro` (the reporting period marker) are local state files and are not shared through Git.
 
 Rules are not the only destination because the right shared artifact depends on the signal. Missing knowledge belongs in prerequisite documentation such as CLAUDE.md. Mechanically detectable failures are prevented more reliably by a linter or test than by prose alone. See [Feedback Flywheel](docs/references/fowler-feedback-flywheel-translation.md).
+
+## License
+
+Released under the [MIT License](LICENSE).

@@ -47,8 +47,18 @@ model: opus
 ## 入力/出力プロトコル
 
 - 入力: `.feedback/log/*.md`(status: open。本文の `根因:` 行を昇華先判断に使う)、ユーザーの直近の指摘、既存 `.feedback/rules.md`
-- 出力: `"${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-}}/scripts/feedback_log.py" promote <id> --rule "..."` の実行結果、および変更内容の要約報告。rules.md 以外への反映が適切なエントリは、提案(CLAUDE.md 追記案 / lint・テスト追加案)として要約報告に含める(直接編集しない)
+- 出力: `"${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-}}/scripts/feedback_log.py" promote <id> --rule "..."` の実行結果、および変更内容の要約報告。rules.md 以外への反映が適切なエントリは、次の `automation_candidates` 契約で提案する(直接編集しない)
 - 新規指摘の記録は `"${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-}}/scripts/feedback_log.py" add` を使う(手書きでlogファイルを作らない — フォーマット一貫性のため)
+
+```yaml
+automation_candidates:
+  - candidate: "機械的に検出したい失敗"
+    evidence: "対象entry IDと再現・反復の証拠"
+    recommended_check: "追加するlint・テスト・チェックの案"
+    human_decision: pending
+```
+
+候補が無い場合も `automation_candidates: []` を必ず出す。`human_decision` は curator が承認を推測せず `pending` とし、ユーザーの承認後にだけ別作業として反映する。
 
 ## エラーハンドリング
 

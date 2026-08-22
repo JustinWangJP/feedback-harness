@@ -47,7 +47,7 @@ fi
 FILE="${1:-}"
 [[ -z "$FILE" || ! -f "$FILE" ]] && exit 0
 
-# HARNESS_CHECK_SEVERITY / HARNESS_EXCLUDE は config 由来。check.sh の全件走査
+# HARNESS_CHECK_<id>_SEVERITY / HARNESS_EXCLUDE は config 由来。check.sh の全件走査
 # だけでなく単発ファイル検査でも同じ判定(severity: skip / exclude)に従う
 # (従わないと Stop フックでは SKIP と出るのに PostToolUse は差し戻す食い違いになる)。
 ROOT="$(harness_project_root)"

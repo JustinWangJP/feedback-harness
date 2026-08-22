@@ -2,6 +2,7 @@
   "name": "feedback-harness-tools",
   "version": "0.0.0",
   "private": true,
+  "license": "MIT",
   "description": "ハーネスが呼び出す検査ツールの置き場。このリポジトリ自身は Node アプリではなく、secretlint 等を npx --no-install で解決するためだけに package.json を持つ",
   "devDependencies": {
     "@secretlint/secretlint-rule-preset-recommend": "^13.0.4",

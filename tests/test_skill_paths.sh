@@ -41,4 +41,15 @@ case "$POINTER" in
   *CLAUDE_PLUGIN_ROOT*) fail "pointer_agents.md に CLAUDE_PLUGIN_ROOT を書いてはいけない" ;;
 esac
 
+# curator と orchestrator の出力契約は同じ語彙・必須フィールドを持つ。
+# 提案を自由文だけに戻すと、承認判断と将来の自動処理で取りこぼすため固定する
+for contract in "$REPO/agents/feedback-curator.md" "$REPO/skills/feedback-loop/SKILL.md"; do
+  assert_contains "$(cat "$contract")" "automation_candidates" \
+    "$(basename "$contract") に automation_candidates がある"
+  for field in candidate evidence recommended_check human_decision; do
+    assert_contains "$(cat "$contract")" "$field" \
+      "$(basename "$contract") に $field がある"
+  done
+done
+
 assert_summary

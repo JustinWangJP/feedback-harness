@@ -219,7 +219,10 @@ check:
     - "vendor dir/**"
     - "$(touch /tmp/harness_pwned); echo x"
 EOF
-eval "$(python3 "$CFG" --shell "$WORK/proj")"
+SHELL_OUT="$(python3 "$CFG" --shell "$WORK/proj")"
+assert_not_contains "$SHELL_OUT" "HARNESS_CHECK_SEVERITY=" \
+  "検査設定を区切り文字入りの単一変数へ詰めない"
+eval "$SHELL_OUT"
 assert_file_absent "/tmp/harness_pwned" "config の値がシェルコードとして実行されない"
 ASSERT_CHECKS=$((ASSERT_CHECKS + 1))
 [[ "$(printf '%s' "$HARNESS_EXCLUDE" | wc -l | tr -d ' ')" == "1" ]] \
@@ -238,6 +241,36 @@ assert_eq "skip" "$(harness_check_severity vulture warn)" "config の判定が�
 assert_eq "checks.vulture" "$(harness_check_source vulture)" "出所が返る"
 assert_eq "fail" "$(harness_check_severity ruff fail)" "指定の無い検査は呼び出し側の既定"
 assert_eq "既定" "$(harness_check_source ruff)" "指定が無ければ出所は既定"
+
+# source は構造化された別フィールドなので、旧形式の区切り文字・空白・タブ・
+# Unicode を含んでも欠落しない。Python生成→shell eval→lookupを端から端まで試す
+SPECIAL_SHELL_OUT="$(python3 - "$REPO/scripts" "$WORK/proj" <<'PY'
+import sys
+
+sys.path.insert(0, sys.argv[1])
+import harness_config as hc
+
+real_effective = hc.effective
+def special_effective(root, env):
+    result = real_effective(root, env)
+    result["severity"]["vulture"] = ("skip", "local: path\t日本語")
+    return result
+
+hc.effective = special_effective
+hc._cmd_shell(sys.argv[2], {})
+PY
+)"
+eval "$SPECIAL_SHELL_OUT"
+assert_eq $'local: path\t日本語' "$(harness_check_source vulture)" \
+  "出所の内容を区切り文字で再解釈しない"
+
+# 永続ロックの待機時間は設定可能だが、0 や過大値で安全機構を無効化できない
+OUT="$(val 'feedback:
+  lock_timeout_seconds: 0')"
+assert_contains "$OUT" "1〜300" "lock_timeout_seconds の下限を検証する"
+OUT="$(val 'feedback:
+  lock_timeout_seconds: 301')"
+assert_contains "$OUT" "1〜300" "lock_timeout_seconds の上限を検証する"
 rm -f "$WORK/proj/.feedback/config.yaml"
 
 # --- feedback_log.py が config に従う ---
@@ -290,8 +323,10 @@ assert_eq "" "$MISSING" "全検査IDが設定ガイドに載っている"
 # 行頭アンカーの grep は "cmd && run_stage ..." 形式の行を拾えないため
 # 非アンカーで抽出する。ID の過不足と、ステージ引数の取り違えの両方を見る
 DRIFT="$(python3 - "$REPO/scripts/check.sh" "$CFG" <<'PY'
-import re, subprocess, sys
-src = open(sys.argv[1]).read()
+import pathlib, re, subprocess, sys
+check_sh = pathlib.Path(sys.argv[1])
+src = check_sh.read_text()
+src += "\n".join(p.read_text() for p in sorted((check_sh.parent / "checks").glob("*.sh")))
 calls = re.findall(r'\brun_stage(?:_soft)?\s+([a-z]+)\s+"([a-z0-9-]+)"', src)
 keys = {}
 for line in subprocess.run(
@@ -341,10 +376,9 @@ printf 'checks:\n  ruff:\n    severity: skip\n' > "$LP/.feedback/local/config.ya
 assert_eq "skip|local.checks.ruff" "$(eff "$LP" | src_of - ruff)" \
   "個人設定が共有設定を上書きし、出所に local. が付く"
 
-# 出所にコロンを使うと HARNESS_CHECK_SEVERITY("id:sev:出所" を ${entry##*:} で
-# 読む)でレイヤ名が黙って落ちる。ドット形式であることを固定する
+# 一覧や JSON の利用者が安定して扱えるよう、出所の公開表記はドット形式に固定する
 assert_not_contains "$(eff "$LP" | src_of - ruff)" "local:" \
-  "出所の区切りにコロンを使わない(シェル側のパースで落ちるため)"
+  "出所はドット形式の安定した識別子にする"
 
 # 個人設定が触れていない検査は共有設定のまま
 printf 'checks:\n  ruff:\n    severity: warn\n  shellcheck:\n    severity: skip\n' \

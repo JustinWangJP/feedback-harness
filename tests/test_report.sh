@@ -77,6 +77,8 @@ cat > "$WORK/project/.feedback/events.jsonl" <<'EOF'
 EOF
 
 OUT="$(fb report --since 2026-07-10)"
+assert_contains "$OUT" "scope: local" "report はローカル集計であることを明示する"
+assert_contains "$OUT" ".feedback/log/" "report はデータ元を明示する"
 
 # --- セクション構造と期間フィルタ ---
 assert_contains "$OUT" "フィードバックレポート(2026-07-10 以降" "ヘッダに期間が出る"
