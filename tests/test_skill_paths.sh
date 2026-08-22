@@ -25,6 +25,15 @@ if [[ "$HAS_PLUGIN_ROOT" -lt 3 ]]; then
   fail "CLAUDE_PLUGIN_ROOT を使うファイルが少なすぎる($HAS_PLUGIN_ROOT 件)"
 fi
 
+# 2b: skills/ と agents/ は両環境で展開される。Codex はスキル本文で
+# CLAUDE_PLUGIN_ROOT を設定しない(互換変数は Hooks のみ)ため、
+# 裸の ${CLAUDE_PLUGIN_ROOT} は Codex で空へ潰れ "/scripts/..." になる。
+# PLUGIN_ROOT を先に見るフォールバック形式を必須とする。
+BARE_CLAUDE="$(grep -rn 'CLAUDE_PLUGIN_ROOT' "$REPO/skills" "$REPO/agents" 2>/dev/null \
+  | grep -v 'PLUGIN_ROOT:-' || true)"
+assert_eq "" "$BARE_CLAUDE" \
+  "skills/agents のプラグインルート参照が \${PLUGIN_ROOT:-\${CLAUDE_PLUGIN_ROOT:-}} 形式に統一されている"
+
 # 3: Codex 向けポインタは据え置き(placeholder を書いてはいけない)
 POINTER="$(cat "$REPO/docs/pointer_agents.md")"
 assert_contains "$POINTER" "scripts/feedback_log.py" "ポインタはリポジトリ相対のまま"

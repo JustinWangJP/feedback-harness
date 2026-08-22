@@ -136,7 +136,9 @@ elif heading in content:
     match = re.search(legacy_end, content[start:], re.MULTILINE)
     if match is None:
         print(
-            "ERROR: 旧ポインタの末尾を特定できません。既存ポインタを手動で削除して再実行してください",
+            "ERROR: 旧ポインタの末尾を特定できません。既存ポインタを手動で削除して再実行してください。\n"
+            "  この整理が要るのは init.sh が必要な環境(Codex IDE 拡張や他の汎用エージェントを併用する場合)だけです。\n"
+            "  Claude Code または Codex app / CLI のプラグインだけで使うなら init.sh 自体が不要なため、この作業は不要です。",
             file=sys.stderr,
         )
         raise SystemExit(3)

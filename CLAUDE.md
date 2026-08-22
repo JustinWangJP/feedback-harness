@@ -16,6 +16,8 @@
 **スクリプト設計メモ:**
 - フック実行時に export された環境変数(CLAUDE_PROJECT_DIR 等)は make・テスト経由の子孫プロセスすべてに伝播する。スクリプトが環境変数でルート解決する場合、ネスト呼び出しでの再帰を前提にガードを入れること(FEEDBACK_CHECK_RECURSION_GUARD が参考実装 — 2026-08-16 の無限再帰修正由来)。
 - テストの実行は run_tests.sh の契約に乗せる:ランナーはフック由来の CLAUDE_PROJECT_DIR 等を掃落としてから各テストを起動し、テストは必要な変数を自分で設定する(2026-08-19 に2件発生した「本リポジトリの .feedback/ を隔離プロジェクトの代わりに読み書きする」事故の対策)。FEEDBACK_CHECK_RECURSION_GUARD だけは意図的な伝播(再帰切断)なので掃落とさない。
+- 分類語彙・列挙(根因の5分類など)は文書・スキル・エージェント定義・README各言語版・CLI実装へ複製される。追加・変更時は参照している全ファイルを同一コミットで更新し、`tests/test_root_cause_consistency.sh` と同形式の整合テストを併せて追加すること(2026-08-20 の根因定義ドリフト由来)。
+- skills/ と agents/ の本文からハーネス側スクリプトを呼ぶときは `${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-}}` を使う。Codex はスキル本文で `CLAUDE_PLUGIN_ROOT` を設定しない(互換変数は Hooks のみ)ため、裸の `${CLAUDE_PLUGIN_ROOT}` は空に潰れてパスが壊れる。commands/ は Claude Code 専用のため対象外(2026-08-22 のQA FAIL-1 由来)。
 - 配布物の文言に「更新可能」等の振る舞いを記載する前に、(1) その更新が既存導入へ実際に届く経路(第三者マーケットプレイスの自動更新条件)と (2) init.sh が既存ポインタをスキップするため修正文を再配布できない事実を確認する。既存導入へ届かない記述は利用者に誤解を生む。
 
 **変更履歴:**
@@ -39,3 +41,7 @@
 | 2026-08-18 | プロジェクト設定ファイル(config.yaml) | harness_config.py / check.sh / lib.sh / docs | 環境変数3つしか可変点が無くチームで共有できない問題。3層(全体・スタック・検査)+ 環境変数の優先順位、--list-checks で実効値と出所を可視化 |
 | 2026-08-19 | レビュー指摘への対応と文書同期 | check.sh / check_file.sh / harness_config.py / init.sh / docs | SKIP項目の一覧漏れ、単一ファイル検査の判定不一致、設定エラーの見逃し、Rust契約検査の外部参照、設定の優先順位を修正し、現行仕様を文書へ反映 |
 | 2026-08-19 | テストランナーでフック由来環境変数を一括リセット | tests/run_tests.sh / test_check_file_severity.sh / test_events_log.sh / CLAUDE.md | CLAUDE_PROJECT_DIR が伝播し隔離プロジェクトでなく本リポジトリの .feedback/ を読み書きする事故が同日2件。run_tests.sh で一括掃落とし「テストは必要な変数を自分で設定する」契約へ(FEEDBACK_CHECK_RECURSION_GUARD は再帰切断のため意図的に残す) |
+| 2026-08-22 | 再発候補の判定をエージェントへ委譲 | feedback_log.py / harness_config.py / skills / agents / tests / docs / scripts/README×3 | 偽陽性を減らそうと文字bigram類似度のしきい値で足切りしたが、実測で英語は無関係な2文でも0.16・中国語は同主題でも0.10となり日本語専用の値でしか分離できず、比較対象にも全エントリ共通の定型句が混入していた。意味判断を貧弱な文字列一致で先取りしたのが誤り。しきい値と設定キーを撤去し、CLI は調査対象の列挙に徹して判定はエージェントが本文を読んで行う契約へ(類似度は読む順のヒントとしてのみ表示) |
+| 2026-08-22 | Node の PM 判定を共通関数へ集約 | lib.sh / check.sh / audit.sh / tests / README×3 / scripts/README×3 | 判定が check.sh と audit.sh に分かれ、lockfile 併存時(npm→pnpm 移行中など)にテストは pnpm・監査は npm audit という食い違いが発生。実際の依存解決と違うツリーを監査していた。`harness_node_pm` へ一本化し、併存ケースをテストで固定(ルール 20260817-142537 の実装追従) |
+| 2026-08-22 | stats/report の鮮度表示と初回棚卸し | feedback_log.py / harness_config.py / tests / docs / scripts/README×3 / config.example | 累積件数だけで並べると解消済みの指摘が上位に居座り対処すべき項目を隠すため、頻出WARN・失敗上位に最終発生日と `feedback.stale_days` の注記を追加。一時ファイル(scratchpad・/tmp)を集計から除外。`.last-retro` の基点を作成し `report --last` を有効化 |
+| 2026-08-22 | キュレーションと再QA(FAIL4件)対応 | skills / agents / scripts / tests / README.ja / CLAUDE.md | Codexでスキル本文の`${CLAUDE_PLUGIN_ROOT}`が空になり記録・適用・昇華が落ちる不具合、構成図とdocstringの実装との乖離、`--help`が引数エラーになる問題を修正。init案内の環境別要否と共有語彙の同期をテストで固定 |
