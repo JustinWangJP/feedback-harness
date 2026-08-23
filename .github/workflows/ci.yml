@@ -73,6 +73,7 @@ jobs:
       run:
         shell: bash
     env:
+      PYTHONUTF8: "1"
       PYTHONIOENCODING: utf-8
       PYTHONLEGACYWINDOWSSTDIO: "1"
     steps:

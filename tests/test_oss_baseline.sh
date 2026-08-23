@@ -22,6 +22,8 @@ WINDOWS_CI_BODY="$(sed -n '/^  windows-git-bash:/,/^  [[:alnum:]_-][[:alnum:]_-]
 assert_contains "$CI_BODY" "runs-on: ubuntu-latest" "Linux runnerを必須にする"
 assert_not_contains "$CI_BODY" "macos-" "macOS runnerを必須にしない"
 assert_contains "$CI_BODY" "windows-git-bash" "Windows Git Bash runnerを必須にする"
+assert_contains "$WINDOWS_CI_BODY" 'PYTHONUTF8: "1"' \
+  "Windows Git Bash runnerのPython既定エンコーディングをUTF-8にする"
 assert_contains "$WINDOWS_CI_BODY" "PYTHONIOENCODING: utf-8" \
   "Windows Git Bash runnerのPython標準入出力をUTF-8にする"
 assert_contains "$WINDOWS_CI_BODY" 'PYTHONLEGACYWINDOWSSTDIO: "1"' \
