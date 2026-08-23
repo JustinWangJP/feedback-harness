@@ -296,6 +296,7 @@ SECTIONS = {
     },
     "feedback": {
         "open_threshold": ("int", 3, None),
+        "lock_timeout_seconds": ("int", 10, (1, 300)),
         "stale_days": ("int", 7, None),
         # 棚卸し(ルールの定期審査)の間隔。既定 90 日は feedback-loop スキルの
         # 「目安は四半期に1回」に合わせている。監査(audit.interval_days)より
@@ -508,10 +509,9 @@ def resolve(layers, env):
         # "local." を前置する。既存の出所表示・テスト・文書を変えずに、
         # 手元の上書きが起きた箇所だけを見分けられるようにするため。
         #
-        # 区切りにコロンを使ってはいけない: 出所は HARNESS_CHECK_SEVERITY へ
-        # "id:severity:出所" の形で詰められ、読み出しは ${entry##*:}(最後の
-        # コロン以降)。出所にコロンがあるとレイヤ名が黙って落ちる。
-        # 環境変数由来の "env.FEEDBACK_CHECK_SKIP" と同じドット形式に揃える
+        # 出所は一覧表示と JSON 利用者が読む安定した識別子なので、個人設定も
+        # 環境変数由来の "env.FEEDBACK_CHECK_SKIP" と同じドット形式に揃える。
+        # shell 受け渡しは検査・フィールドごとの変数であり、この文字列を再解釈しない
         tag = "" if name == "config" else f"{name}."
         check = layer.get("check") or {}
         _stage_verdicts("global", check, f"{tag}check", severity)
@@ -586,12 +586,13 @@ def _cmd_shell(root, env):
         out.append(f"{name}={shlex.quote(str(value))}")
 
     emit("HARNESS_CONFIG_ERROR", eff["error"] or "")
-    # 判定は「id:severity:出所」の空白区切り。検査IDと severity と出所は
-    # いずれも空白を含まないため、この形で安全に1変数へ収まる
-    emit(
-        "HARNESS_CHECK_SEVERITY",
-        " ".join(f"{cid}:{sev}:{src}" for cid, (sev, src) in sorted(eff["severity"].items())),
-    )
+    # 検査ごと・フィールドごとの変数に分ける。旧形式の
+    # "id:severity:source" は区切り文字が値に現れると情報を失うため使わない。
+    # ID はスキーマで固定され、'-' を '_' に置換しても一意であることを
+    # _check_env_name が検証する。
+    for cid, (severity, source) in sorted(eff["severity"].items()):
+        emit(_check_env_name(cid, "SEVERITY"), severity)
+        emit(_check_env_name(cid, "SOURCE"), source)
     # exclude だけは改行区切り。ユーザーが書く glob には空白を含むパスがありえ、
     # 空白区切りだと "vendor dir/**" が2件に割れる
     emit("HARNESS_EXCLUDE", "\n".join(eff["values"]["check.exclude"][0]))
@@ -602,7 +603,26 @@ def _cmd_shell(root, env):
     emit("HARNESS_AUDIT_INTERVAL_DAYS", eff["values"]["audit.interval_days"][0])
     emit("HARNESS_AUDIT_NPM_LEVEL", eff["values"]["audit.npm_audit_level"][0])
     emit("HARNESS_FEEDBACK_OPEN_THRESHOLD", eff["values"]["feedback.open_threshold"][0])
+    emit(
+        "HARNESS_FEEDBACK_LOCK_TIMEOUT_SECONDS",
+        eff["values"]["feedback.lock_timeout_seconds"][0],
+    )
     print("\n".join(out))
+
+
+def _check_env_name(check_id, field):
+    """検査IDとフィールドを衝突しない shell 変数名へ写像する。"""
+    if check_id not in CHECKS:
+        raise ConfigError(f"未知の検査IDです: {check_id}")
+    if field not in ("SEVERITY", "SOURCE"):
+        raise ConfigError(f"未知の検査設定フィールドです: {field}")
+    normalized = check_id.replace("-", "_")
+    collisions = [cid for cid in CHECKS if cid.replace("-", "_") == normalized]
+    if collisions != [check_id]:
+        raise ConfigError(
+            "shell 変数名へ変換すると検査IDが衝突します: " + ", ".join(collisions)
+        )
+    return f"HARNESS_CHECK_{normalized}_{field}"
 
 
 def _display_width(s):

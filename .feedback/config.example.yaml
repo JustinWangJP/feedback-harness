@@ -57,6 +57,8 @@ audit:
 feedback:
   # promote を促す open エントリ件数
   open_threshold: 3
+  # 複数agent/sessionが同じrepositoryを更新するとき、state lockを待つ秒数(1〜300)
+  lock_timeout_seconds: 10
   # stats / report の頻出WARN・失敗上位で「しばらく再発していない」と注記するまでの日数。
   # 累積件数だけで並べると、解消済みの指摘が上位に居座って対処すべき項目を隠すため
   stale_days: 7

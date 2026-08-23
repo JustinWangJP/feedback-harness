@@ -73,6 +73,14 @@ LAST_AUDIT = ROOT / ".feedback" / ".last-audit"
 # Python プロジェクトでない導入先の untracked ノイズになるのを防ぐ
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from feedback_store import (  # noqa: E402 -- 配布先scripts/を先にpathへ載せる
+    StoreError,
+    atomic_create_text,
+    recover_transaction,
+    state_lock,
+    transaction,
+)
+
 try:
     import harness_config as _hc
 
@@ -96,6 +104,7 @@ STALE_DAYS = _cfg("feedback.stale_days", 7)
 # 棚卸し(ルールの定期審査)の間隔。更新されないルールは安定するのではなく
 # 負債になるため、監査と同じく「ブロックせず、溜まったら見える」形で促す
 RETRO_INTERVAL_DAYS = _cfg("feedback.retro_interval_days", 90)
+LOCK_TIMEOUT_SECONDS = _cfg("feedback.lock_timeout_seconds", 10)
 # バンドル資産は状態と違い、スクリプトに同梱されて配られる読み取り専用のファイル。
 # 導入先が rules.template.md を持たない(プラグインのみで導入した)場合の供給元。
 BUNDLED_TEMPLATE = Path(__file__).resolve().parent.parent / ".feedback" / "rules.template.md"
@@ -398,8 +407,7 @@ def cmd_add(args):
     entry_id = next_entry_id(now)
     signal = args.signal or infer_signal(args.category, args.detail)
     path = LOG_DIR / f"{entry_id}-{slugify(args.summary)}.md"
-    path.write_text(
-        f"""---
+    content = f"""---
 id: {entry_id}
 date: {now.strftime('%Y-%m-%d')}
 source: {args.source}
@@ -411,9 +419,8 @@ status: open
 # {args.summary}
 
 {args.detail or ''}
-""",
-        encoding="utf-8",
-    )
+"""
+    atomic_create_text(path, content)
     print(f"recorded: {path.relative_to(ROOT)} (id={entry_id})")
     open_count = sum(1 for e in entries() if e.get("status") == "open")
     if open_count >= OPEN_THRESHOLD:
@@ -475,19 +482,16 @@ def ensure_sections(text: str) -> str:
 def cmd_promote(args):
     target = find_entry(args.entry_id)
     RULES.parent.mkdir(parents=True, exist_ok=True)
-    if not RULES.exists():
-        RULES.write_text(ensure_sections(rules_seed()), encoding="utf-8")
-    text = ensure_sections(RULES.read_text(encoding="utf-8"))
+    text = ensure_sections(
+        RULES.read_text(encoding="utf-8") if RULES.exists() else rules_seed()
+    )
     date = datetime.date.today().isoformat()
-    rule_line = f"- **[{target.get('category','-')}]** {args.rule}  "
+    rule_line = f"- **[{target.get('category','-')}]** {args.rule}<br>"
     source_line = f"  <sub>出典: {target.get('id')} ({date} 昇華)</sub>"
     # instruction/workflow(成功系)は成功セクションの末尾へ、それ以外
     # (failure/context/unknown)は失敗セクションの末尾(=成功マーカーの直前)へ
     if (target.get("signal") or "unknown") in ("instruction", "workflow"):
-        RULES.write_text(
-            text.rstrip("\n") + "\n\n" + rule_line + "\n" + source_line + "\n",
-            encoding="utf-8",
-        )
+        rules_text = text.rstrip("\n") + "\n\n" + rule_line + "\n" + source_line + "\n"
     else:
         lines = text.splitlines()
         j = lines.index(SUCCESS_MARKER)
@@ -495,8 +499,12 @@ def cmd_promote(args):
         if lines[j - 1].strip():
             ins.insert(0, "")
         lines[j:j] = ins
-        RULES.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    set_status(target, "promoted")
+        rules_text = "\n".join(lines) + "\n"
+    transaction(
+        ROOT,
+        f"promote:{target.get('id')}",
+        [(RULES, rules_text), (target["path"], updated_status_text(target, "promoted"))],
+    )
     print(f"promoted: rules.md に追加し {target.get('id')} を promoted に更新")
 
 
@@ -515,9 +523,10 @@ def find_entry(entry_id: str) -> dict:
     return matches[0]
 
 
-def set_status(target: dict, new_status: str) -> None:
+def updated_status_text(target: dict, new_status: str, text: str | None = None) -> str:
     today = datetime.date.today().isoformat()
-    text = target["path"].read_text(encoding="utf-8")
+    if text is None:
+        text = target["path"].read_text(encoding="utf-8")
     text = text.replace(f"status: {target.get('status')}", f"status: {new_status}", 1)
     if "status_changed:" in text:
         # 1キー・上書き(report の期間集計は「最後の状態変化」を基準にする)
@@ -526,9 +535,7 @@ def set_status(target: dict, new_status: str) -> None:
         text = text.replace(
             f"status: {new_status}", f"status: {new_status}\nstatus_changed: {today}", 1
         )
-    target["path"].write_text(text, encoding="utf-8")
-
-
+    return text
 RULE_SOURCE_RE = re.compile(r"^(\s*<sub>出典: )(.+?)( \(.*)$")
 
 
@@ -562,11 +569,15 @@ def cmd_close(args):
     target = find_entry(args.entry_id)
     if target.get("status") != "open":
         sys.exit(f"ERROR: id={args.entry_id} は open ではありません (status={target.get('status')})")
+    text = target["path"].read_text(encoding="utf-8")
     if args.reason:
-        text = target["path"].read_text(encoding="utf-8").rstrip("\n")
-        target["path"].write_text(f"{text}\n\n---\nclose理由: {args.reason}\n", encoding="utf-8")
-        target = find_entry(args.entry_id)
-    set_status(target, "closed")
+        text = text.rstrip("\n")
+        text = f"{text}\n\n---\nclose理由: {args.reason}\n"
+    transaction(
+        ROOT,
+        f"close:{target.get('id')}",
+        [(target["path"], updated_status_text(target, "closed", text))],
+    )
     print(f"closed: {args.entry_id} を closed に更新(ルールには昇華していません)")
 
 
@@ -594,10 +605,16 @@ def cmd_merge(args):
         category = re.match(r"^(\s*- \*\*\[[^\]]+\]\*\* )", lines[i - 1])
         if not category:
             sys.exit(f"ERROR: ルール本文行の形式を解釈できません: {lines[i - 1]}")
-        lines[i - 1] = f"{category.group(1)}{args.rule}  "
+        lines[i - 1] = f"{category.group(1)}{args.rule}<br>"
 
-    RULES.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    set_status(target, "promoted")
+    transaction(
+        ROOT,
+        f"merge:{target.get('id')}->{args.into}",
+        [
+            (RULES, "\n".join(lines) + "\n"),
+            (target["path"], updated_status_text(target, "promoted")),
+        ],
+    )
     print(f"merged: {args.entry_id} を既存ルール(出典 {args.into})へ統合し promoted に更新")
 
 
@@ -622,9 +639,9 @@ def cmd_retire(args):
     if start > 0 and not lines[start - 1].strip():
         start -= 1  # promote が挿入する直前の空行も一緒に取り除く
     del lines[start : i + 1]
-    RULES.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
     updated = []
+    writes = [(RULES, "\n".join(lines) + "\n")]
     for sid in sources:
         matches = [e for e in entries() if e.get("id") == sid]
         if len(matches) != 1:
@@ -632,9 +649,10 @@ def cmd_retire(args):
             continue
         target = matches[0]
         text = target["path"].read_text(encoding="utf-8").rstrip("\n")
-        target["path"].write_text(f"{text}\n\n---\nretire理由: {args.reason}\n", encoding="utf-8")
-        set_status(parse_entry(target["path"]), "retired")
+        text = f"{text}\n\n---\nretire理由: {args.reason}\n"
+        writes.append((target["path"], updated_status_text(target, "retired", text)))
         updated.append(sid)
+    transaction(ROOT, f"retire:{args.entry_id}", writes)
     print(f"retired: rules.md からルールを撤去し、出典エントリ({', '.join(updated) if updated else 'なし'})を retired に更新")
 
 
@@ -684,6 +702,10 @@ def retro_status_lines() -> list:
 def cmd_stats(args):
     since = resolve_since(args)
     print(f"# feedback stats(イベント集計: {since} 以降 / ログ集計: 全期間)")
+    print(
+        "scope: local (source: .feedback/events.jsonl, .feedback/log/, "
+        ".feedback/rules.md, .feedback/.last-*)"
+    )
     evs = load_events()
 
     print()
@@ -793,6 +815,10 @@ def cmd_report(args):
     since = resolve_report_since(args)
     today = datetime.date.today().isoformat()
     print(f"# フィードバックレポート({since} 以降 {today} まで)")
+    print(
+        "scope: local (source: .feedback/events.jsonl, .feedback/log/, "
+        ".feedback/rules.md, .feedback/.last-*)"
+    )
     es = entries()
 
     print()
@@ -889,7 +915,7 @@ def cmd_report(args):
 
     if args.mark:
         LAST_RETRO.parent.mkdir(parents=True, exist_ok=True)
-        LAST_RETRO.write_text(today, encoding="utf-8")
+        transaction(ROOT, "report-mark", [(LAST_RETRO, today)])
         print()
         print(f"(基点を更新しました: .feedback/.last-retro = {today})")
 
@@ -957,7 +983,14 @@ def main():
     r.set_defaults(func=cmd_rules)
 
     args = p.parse_args()
-    args.func(args)
+    try:
+        with state_lock(ROOT, LOCK_TIMEOUT_SECONDS):
+            recovered = recover_transaction(ROOT)
+            if recovered:
+                print("NOTE: 中断されたfeedback transactionを回復しました", file=sys.stderr)
+            args.func(args)
+    except StoreError as exc:
+        sys.exit(f"ERROR: {exc}")
 
 
 if __name__ == "__main__":

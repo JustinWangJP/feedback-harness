@@ -11,11 +11,13 @@
 ```text
 scripts/
 ├── check.sh          # 完整检查：自动检测技术栈 → 8 个阶段和横向检查，输出摘要
+├── checks/*.sh       # 技术栈与横向runner（共用执行core保留在check.sh）
 ├── check_file.sh     # 快速单文件检查：根据扩展名执行静态检查
 ├── lib.sh            # check.sh / check_file.sh 的共用工具函数（包括 has()）
 ├── harness_config.py # .feedback/config.yaml 的唯一解析器（YAML 子集、schema 验证、3 层解析）
+├── feedback_store.py # repository lock、原子写入及中断事务恢复
 ├── feedback_log.py   # 反馈记录 CLI：记录、整理、盘点、统计和周期报告
-├── audit.sh          # 按需漏洞审计（唯一使用网络的检查；Stop hook 不会调用）
+├── audit.sh          # 按需漏洞审计（工具链中专门联网的检查；Stop hook 不会调用）
 ├── init.sh           # 安装脚本（为不支持 Hooks 的环境部署资源；不会复制到目标项目）
 └── hooks/
     ├── on_session_start.sh  # Claude Code / Codex SessionStart → 首次初始化 .feedback/
@@ -27,11 +29,11 @@ scripts/
 
 | 类别 | 脚本 | 职责 |
 |------|-----------|------|
-| 自动检查（离线） | `check.sh`、`check_file.sh`、`hooks/*` | 将 lint/test/build 结果返回给代理，使其自行修复问题 |
+| 自动检查 | `check.sh`、`check_file.sh`、`hooks/*` | 不额外下载依赖或查询远程服务地将 lint/test/build 结果返回给代理 |
 | 反馈积累和测量 | `feedback_log.py` | 记录并通用化人工反馈，传递到后续会话；输出指标和周期摘要 |
 | 按需审计（使用网络） | `audit.sh` | 检查依赖项漏洞；Hooks 不会调用 |
 
-有两种分发方式。**插件安装**会将所有文件保留在插件中。Codex 使用 `PLUGIN_ROOT`（Hooks 还会设置兼容变量 `CLAUDE_PLUGIN_ROOT`），Claude Code 使用 `CLAUDE_PLUGIN_ROOT`。**通过 `init.sh` 安装**时，会将 `check.sh`、`check_file.sh`、`lib.sh`、`audit.sh`、`harness_config.py`、`feedback_log.py` 以及本 README 的三种语言版本复制到目标项目的 `scripts/` 目录。`hooks/` 和 `init.sh` 本身不会复制：前者仅用于插件，后者应从分发源仓库运行。
+有两种分发方式。**插件安装**会将所有文件保留在插件中。Codex 使用 `PLUGIN_ROOT`（Hooks 还会设置兼容变量 `CLAUDE_PLUGIN_ROOT`），Claude Code 使用 `CLAUDE_PLUGIN_ROOT`。**通过 `init.sh` 安装**时，会将 `check.sh`、`checks/*.sh`、`check_file.sh`、`lib.sh`、`audit.sh`、`harness_config.py`、`feedback_store.py`、`feedback_log.py` 以及本 README 的三种语言版本复制到目标项目的 `scripts/` 目录。`hooks/` 和 `init.sh` 本身不会复制：前者仅用于插件，后者应从分发源仓库运行。
 
 ## 共用设计原则
 
@@ -40,7 +42,7 @@ scripts/
 3. **根据声明决定严格程度：** 项目通过配置文件声明的检查为 `FAIL`（阻塞完成）；工具链推测执行的检查为 `WARN`（仅报告，退出码为 0）。如果未声明的检查也能阻塞完成，已有项目在引入工具链的第一天就可能无法工作。WARN 会记录到 `events.jsonl`，并出现在 `stats` / `report` 的“常见 WARN”中。
 4. **不自动安装工具：** 缺少工具时只标记为 `SKIP` 并说明原因。是否安装并改变环境由用户决定。
 5. **与技术栈无关：** 根据 `pyproject.toml`、`package.json` 等 manifest 自动检测项目类型，无需配置。
-6. **分离状态：** 脚本本身不内嵌状态，所有状态都保存在 `.feedback/` 下。`rules.md`、`log/` 等共享数据可由 Git 跟踪；`events.jsonl`、`.last-check`、`.last-retro`、`.last-audit` 等运行时状态属于 `.gitignore` 对象，不在设备间共享。
+6. **分离状态：** 脚本本身不内嵌状态，所有状态都保存在 `.feedback/` 下。`rules.md`、`log/` 等共享数据可由 Git 跟踪；`events.jsonl`、`.last-check`、`.last-retro`、`.last-audit`、`.state.lock`、`.transaction.json` 等运行时状态属于 `.gitignore` 对象，不在设备间共享。lock 会持久保留以确保所有进程锁定同一 inode；中断事务的 journal 会在下一次 CLI 调用时重放。
 
 ---
 
@@ -66,7 +68,7 @@ bash scripts/check.sh --help          # 显示用法（exit 0）
 |---|---|---|---|---|---|---|
 | `lint` | `ruff check` | `run lint` / `npm ls --all` | `go vet` / `go mod verify` | `clippy` / `cargo metadata --offline` | — | `bash -n` / `shellcheck` |
 | `typecheck` | `mypy`（声明时） | `run typecheck` / `tsc --noEmit` | — | — | — | — |
-| `test` | `pytest`（+`--cov`） | `test` 或 `test:coverage` | `go test -cover` | `cargo test` | `mvn verify` / `gradle check` | — |
+| `test` | `pytest`（+`--cov`） | `test` 或 `test:coverage` | `go test -cover` | `cargo test` | `./mvnw` 或 `mvn verify` / `gradle check` | — |
 | `build` | — | `run build` | `go build` | `cargo check`（没有 clippy 时） | — | — |
 | `format` | `ruff format` | `prettier`（声明时） | `gofmt -l` | `cargo fmt` | — | — |
 | `contract` | — | — | — | `cargo semver-checks`（`[lib]`） | — | — |
@@ -75,13 +77,14 @@ bash scripts/check.sh --help          # 显示用法（exit 0）
 
 **本脚本不会执行的操作：**
 
-- **使用网络** — 漏洞审计独立到 `audit.sh`。`npx` 始终带有 `--no-install`；未安装时不会下载，只标记为 `SKIP`
+- **由工具链本身主动访问网络** — 漏洞审计独立到 `audit.sh`。`npx` 始终带有 `--no-install`；未安装时不会下载，只标记为 `SKIP`。但项目定义的命令和外部工具仍可能根据自身配置访问网络
 - **安装工具** — 缺少工具时标记为 `SKIP` 并说明原因
 - **运行两次测试** — 通过在现有 test 命令中加入覆盖率测量，或改用 `test:coverage` 来获得覆盖率
 - **因未声明的检查而阻塞完成** — 这类问题标记为 `WARN`（退出码为 0）
 - **访问远程仓库** — 契约差异基线为 `git merge-base HEAD <FEEDBACK_CONTRACT_BASE:-main>`；无法解析时使用 `HEAD`
 
 - **检测对象：** Python（`pyproject.toml` / `setup.py` / `requirements.txt`；即使没有这些文件，只要存在 `*.py` 也会仅运行 `ruff`）/ Node（`package.json`）/ Go（`go.mod`）/ Rust（`Cargo.toml`）/ Java（`pom.xml` / `build.gradle`）/ Shell（`*.sh`）/ 通用（`Makefile` 的 `check` target）
+- **Maven 项目：** 根目录存在 `pom.xml` 时，将其作为 reactor 入口，只运行一次 `verify`。没有根 POM 时，对检测到的每个 `pom.xml` 使用 `-f` 独立运行。每个 POM 依次优先使用同目录的 `mvnw`、仓库根目录的 `mvnw`，最后才使用全局 `mvn`。wrapper 存在但不可执行时会标记为 `SKIP`，不会静默回退。Maven `verify` 包含项目配置的编译、测试、打包和 integration-test 生命周期阶段；Maven 可能会按照项目设置从仓库解析依赖项和插件
 - **横向检查（与技术栈无关）：** 验证 `*.json`、`*.yaml` 和 `*.yml` 的语法。`tsconfig*.json`、`jsconfig*.json`、`devcontainer.json` 以及 `.vscode/` 下的文件通常允许注释（JSONC），因此不检查。YAML 支持由 `---` 分隔的多文档格式，`!Ref` 等未知自定义标签不视为语法错误。未安装 PyYAML 时，YAML 检查标记为 `SKIP` 并说明原因
 - **文档一致性：** 在 `docs` 阶段检测 Markdown 内部链接失效。为保持离线运行，不检查外部 URL、`mailto:`、仅锚点链接和绝对路径。代码块和行内代码中的链接状文本不参与验证
 - **密钥（`security` 阶段）：** 存在 `.secretlintrc.*` 时运行 `secretlint`。**未配置时标记为 SKIP**，因为 secretlint 无法在没有配置的情况下启动。值默认会被屏蔽，不会出现在失败日志中。PATH 中存在 `gitleaks` 时也会运行，但仅支持带有 `--no-git --redact` 的版本
@@ -95,7 +98,7 @@ bash scripts/check.sh --help          # 显示用法（exit 0）
 - **Make 递归防护：** 仅在运行 `make check` 时将 `FEEDBACK_CHECK_RECURSION_GUARD` 传给后代进程，使其中启动的 check.sh 跳过 Make 回退。这样可阻止以下无限递归：Hook 执行时传播的 `CLAUDE_PROJECT_DIR` 让测试中的 check.sh 将根目录重新解析为本仓库，随后 make check 再次执行测试，最终耗尽 Stop hook 的 timeout。**普通 Make 命令和直接运行的 lint/test/build 阶段不受影响**
 - **SKIP 原因：** 输出一定包含原因，例如 `(<tool> 未インストール)` / `(<tool> 起動不可 — 環境を確認してください)` / `(実行不可)`；由环境变量造成的跳过显示 `(env.FEEDBACK_CHECK_SKIP)`，由配置造成的跳过显示 `(config: <キーのパス>)`，按技术栈统一跳过时显示 `(<stack>: 全ステージ …)`。**仅因工具缺失或损坏不会成为 `FAIL`**，因为这不是用户代码的问题
 - **检查文件：** 在 Git 仓库中使用 `git ls-files --cached --others --exclude-standard`。这会检查**尚未提交的新文件**，并排除已由 `.gitignore` 忽略的文件
-- **不使用网络：** Node 类型检查的回退命令为 `npx --no-install tsc`。未安装 `typescript` 时不会尝试下载，只标记为 `SKIP`
+- **不隐式下载工具：** Node 类型检查的回退命令为 `npx --no-install tsc`。未安装 `typescript` 时不会尝试下载，只标记为 `SKIP`。但 Maven `verify` 等项目定义的命令仍可能解析已声明的依赖项和插件
 - **shellcheck 严重程度：** 默认为 `warning`（`-S warning`）。如果连 `style` / `info` 也检查，已有项目可能在引入工具链的第一天就无法继续工作。设置 `FEEDBACK_SHELLCHECK_SEVERITY=style` 可提高严格程度
 - **失败输出：** 失败阶段的日志末尾 40 行会汇总到 `failures.txt`，最后统一显示
 - **最终行**（FAIL 时除外；以下情况退出码均为 0）：
@@ -150,8 +153,8 @@ python3 scripts/feedback_log.py <子命令> [参数]
 | `close` | `<entry-id>` `[--reason "<原因>"]` | 不整理为规则，直接标记为 `closed`。用于无法通用化的一次性反馈 |
 | `retire` | `<来源entry-id>` `--reason "<停用原因>"` | 从 rules.md **移除已整理的规则**，并将其来源条目（包括已经 merge 的条目）标记为 `retired`。在规则盘点并由人工裁定后使用 |
 | `rules` | （无） | 显示当前 `rules.md` |
-| `stats` | `[--since <日期>]` `[--days <N>]` | 汇总 Hook 结果和日志：PostToolUse 首次通过率、平均重新检查次数、Stop 首次通过率、常见失败、按 signal/根因统计的数量，以及**复发候选**（整理后同类别又记录了失败类反馈的规则——这是**待调查的线索而非判定结果**，是否属于同一原则的复发由阅读正文的 Agent 判断。每条候选旁的数值只是表层字符重合度，仅用于决定阅读顺序）。常见 WARN 与常见失败会附带**最近发生日期**，超过 `feedback.stale_days`（默认 7 天）未再出现的项目会加注说明。草稿目录等临时文件不计入统计。同时显示**最近审计日期**与**最近盘点日期**，分别超过 `audit.interval_days`（默认 7 天）与 `feedback.retro_interval_days`（默认 90 天，约一个季度）时会显示建议 |
-| `report` | `--since <日期\|yesterday>` 或 `--last`、`[--mark]` | 周期摘要（新条目、promote/close/retire、open 盘点、复发候选和数值）。`--last` 以 `.feedback/.last-retro` 为起点；`--mark` 在复盘后更新起点 |
+| `stats` | `[--since <日期>]` `[--days <N>]` | 仅汇总当前工作副本中的本地数据：PostToolUse 首次通过率、平均重新检查次数、Stop 首次通过率、常见失败、按 signal/根因统计的数量，以及**复发候选**（整理后同类别又记录了失败类反馈的规则——这是**待调查的线索而非判定结果**，是否属于同一原则的复发由阅读正文的 Agent 判断。每条候选旁的数值只是表层字符重合度，仅用于决定阅读顺序）。常见 WARN 与常见失败会附带**最近发生日期**，超过 `feedback.stale_days`（默认 7 天）未再出现的项目会加注说明。草稿目录等临时文件不计入统计。同时显示**最近审计日期**与**最近盘点日期**，分别超过 `audit.interval_days`（默认 7 天）与 `feedback.retro_interval_days`（默认 90 天，约一个季度）时会显示建议 |
+| `report` | `--since <日期\|yesterday>` 或 `--last`、`[--mark]` | 仅限当前工作副本的周期摘要（新条目、promote/close/retire、open 盘点、复发候选和数值）。`--last` 以 `.feedback/.last-retro` 为起点；`--mark` 在复盘后更新起点 |
 
 - **category：** `style` / `architecture` / `testing` / `naming` / `workflow` / `domain`
 - **entry-id：** 记录时间，格式为 `%Y%m%d-%H%M%S`。同一秒记录多个条目时，依次添加 `-2`、`-3` 等以确保唯一；若重复，`promote` 只会取得第一条，其余条目将无法整理

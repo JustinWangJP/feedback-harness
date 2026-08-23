@@ -20,6 +20,10 @@ assert_file_exists "$WORK/target/scripts/check.sh" "check.sh"
 assert_file_exists "$WORK/target/scripts/check_file.sh" "check_file.sh"
 assert_file_exists "$WORK/target/scripts/lib.sh" "lib.sh"
 assert_file_exists "$WORK/target/scripts/feedback_log.py" "feedback_log.py"
+assert_file_exists "$WORK/target/scripts/feedback_store.py" "feedback_store.py"
+for runner in python node go rust java shell cross_cutting; do
+  assert_file_exists "$WORK/target/scripts/checks/$runner.sh" "$runner runner"
+done
 # audit.sh は導入先に必要。scripts/README.md が使い方を載せ、feedback_log.py の
 # stats/report が「bash scripts/audit.sh の実行を推奨」と案内するため、
 # 配り漏れると案内先が存在しないコマンドになる
@@ -59,6 +63,7 @@ assert_file_absent "$WORK/target/scripts/hooks" "hooks ラッパーをコピー�
 
 # 実行権限
 if [[ -x "$WORK/target/scripts/check.sh" ]]; then :; else fail "check.sh に実行権限がない"; fi
+if [[ -x "$WORK/target/scripts/feedback_store.py" ]]; then :; else fail "feedback_store.py に実行権限がない"; fi
 
 # ベンダリングした check.sh が対象プロジェクトで exit 0 になる。
 # ルートに README.md を置く(一般的な導入先と同じ状態)。「0か1なら可」の緩い
@@ -66,10 +71,10 @@ if [[ -x "$WORK/target/scripts/check.sh" ]]; then :; else fail "check.sh に実�
 # いた — docs/ は配布対象外のため、scripts/README.md から docs/ への
 # リンクを足すと必ず壊れる(2026-08-18 のレビューで発見)
 printf '# Target README\n' > "$WORK/target/README.md"
-( cd "$WORK/target" && bash scripts/check.sh >/dev/null 2>&1 )
+CHECK_OUT="$(cd "$WORK/target" && bash scripts/check.sh 2>&1)"
 RC=$?
 if [[ "$RC" != "0" ]]; then
-  fail "ベンダリングした check.sh が exit 0 にならない (exit=$RC) — 配布物のリンク切れ等の可能性"
+  fail "ベンダリングした check.sh が exit 0 にならない (exit=$RC) — 出力: [$CHECK_OUT]"
 fi
 
 # 冪等性と更新: 2回目で管理ブロックを置換し、利用者の記述を保持する

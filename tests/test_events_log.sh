@@ -26,6 +26,7 @@ mkdir -p "$WORK/fake/hooks"
 cp "$REPO/scripts/hooks/post_edit.sh" "$WORK/fake/hooks/"
 cp "$REPO/scripts/hooks/on_stop.sh" "$WORK/fake/hooks/"
 cp "$REPO/scripts/lib.sh" "$WORK/fake/"
+cp "$REPO/scripts/feedback_store.py" "$WORK/fake/"
 fake_exit() { # fake_exit <exit-code>
   for name in check_file check; do
     { echo '#!/usr/bin/env bash'; echo "exit $1"; } > "$WORK/fake/$name.sh"

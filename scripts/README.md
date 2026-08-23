@@ -11,11 +11,13 @@ The scripts and accumulated data (`.feedback/`) are **fully shared between Claud
 ```text
 scripts/
 ├── check.sh          # Full check: stack detection → 8 stages and cross-cutting checks, then summary
+├── checks/*.sh       # Stack and cross-cutting runners; shared execution core stays in check.sh
 ├── check_file.sh     # Fast single-file check based on file extension
 ├── lib.sh            # Shared utilities for check.sh / check_file.sh, including has()
 ├── harness_config.py # Sole parser for .feedback/config.yaml (YAML subset, schema validation, 3-level resolution)
+├── feedback_store.py # Repository lock, atomic writes, and interrupted-transaction recovery
 ├── feedback_log.py   # Feedback CLI: record, promote, review, aggregate, and report by period
-├── audit.sh          # On-demand vulnerability audit (the only networked check; never called by Stop hooks)
+├── audit.sh          # On-demand vulnerability audit (the dedicated networked check; never called by Stop hooks)
 ├── init.sh           # Installer for environments without Hooks (not copied into target projects)
 └── hooks/
     ├── on_session_start.sh  # Claude Code / Codex SessionStart → initial .feedback/ seed
@@ -27,11 +29,11 @@ The scripts fall into three groups:
 
 | Group | Scripts | Role |
 |------|-----------|------|
-| Automated checks (offline) | `check.sh`, `check_file.sh`, `hooks/*` | Returns lint/test/build results to the agent so it can fix problems itself |
+| Automated checks | `check.sh`, `check_file.sh`, `hooks/*` | Returns lint/test/build results without adding downloads or remote lookups of its own |
 | Feedback accumulation and measurement | `feedback_log.py` | Records and generalizes human feedback for future sessions; produces metrics and period summaries |
 | On-demand audit (networked) | `audit.sh` | Checks dependencies for vulnerabilities; never called by Hooks |
 
-There are two distribution models. With a **plugin installation**, all files remain in the plugin. Codex uses `PLUGIN_ROOT` (Hooks also set the compatibility variable `CLAUDE_PLUGIN_ROOT`), while Claude Code uses `CLAUDE_PLUGIN_ROOT`. With an **`init.sh` installation**, `check.sh`, `check_file.sh`, `lib.sh`, `audit.sh`, `harness_config.py`, `feedback_log.py`, and all three language versions of this README are copied into the target project's `scripts/` directory. `hooks/` and `init.sh` itself are not copied: Hooks are plugin-only, and `init.sh` runs from the source repository.
+There are two distribution models. With a **plugin installation**, all files remain in the plugin. Codex uses `PLUGIN_ROOT` (Hooks also set the compatibility variable `CLAUDE_PLUGIN_ROOT`), while Claude Code uses `CLAUDE_PLUGIN_ROOT`. With an **`init.sh` installation**, `check.sh`, `checks/*.sh`, `check_file.sh`, `lib.sh`, `audit.sh`, `harness_config.py`, `feedback_store.py`, `feedback_log.py`, and all three language versions of this README are copied into the target project's `scripts/` directory. `hooks/` and `init.sh` itself are not copied: Hooks are plugin-only, and `init.sh` runs from the source repository.
 
 ## Shared design principles
 
@@ -40,7 +42,7 @@ There are two distribution models. With a **plugin installation**, all files rem
 3. **Declarations determine strictness:** A check declared by the project in configuration becomes `FAIL` and blocks completion. A check inferred by the harness becomes `WARN`, which is reported but keeps exit code 0. Blocking undeclared checks would make existing projects unusable on the first day. WARNs are recorded in `events.jsonl` and appear under frequent WARNs in `stats` and `report`.
 4. **Never install tools automatically:** Missing tools produce `SKIP` with a reason. The user decides whether to modify the environment.
 5. **Stack-independent operation:** Detect the project type automatically from manifests such as `pyproject.toml` and `package.json`; no configuration is required.
-6. **Keep state separate:** Scripts contain no embedded state. Everything is stored under `.feedback/`. Shared data such as `rules.md` and `log/` can be tracked by Git, while runtime state such as `events.jsonl`, `.last-check`, `.last-retro`, and `.last-audit` is ignored by Git and is not shared across machines.
+6. **Keep state separate:** Scripts contain no embedded state. Everything is stored under `.feedback/`. Shared data such as `rules.md` and `log/` can be tracked by Git, while runtime state such as `events.jsonl`, `.last-check`, `.last-retro`, `.last-audit`, `.state.lock`, and `.transaction.json` is ignored by Git and is not shared across machines. The lock intentionally persists so every process locks the same inode; an interrupted transaction journal is replayed on the next CLI invocation.
 
 ---
 
@@ -66,7 +68,7 @@ Every distributed script (`check.sh`, `check_file.sh`, `audit.sh`, `init.sh`, `h
 |---|---|---|---|---|---|---|
 | `lint` | `ruff check` | `run lint` / `npm ls --all` | `go vet` / `go mod verify` | `clippy` / `cargo metadata --offline` | — | `bash -n` / `shellcheck` |
 | `typecheck` | `mypy` (when declared) | `run typecheck` / `tsc --noEmit` | — | — | — | — |
-| `test` | `pytest` (+`--cov`) | `test` or `test:coverage` | `go test -cover` | `cargo test` | `mvn verify` / `gradle check` | — |
+| `test` | `pytest` (+`--cov`) | `test` or `test:coverage` | `go test -cover` | `cargo test` | `./mvnw` or `mvn verify` / `gradle check` | — |
 | `build` | — | `run build` | `go build` | `cargo check` (when clippy is absent) | — | — |
 | `format` | `ruff format` | `prettier` (when declared) | `gofmt -l` | `cargo fmt` | — | — |
 | `contract` | — | — | — | `cargo semver-checks` (`[lib]`) | — | — |
@@ -75,13 +77,14 @@ Every distributed script (`check.sh`, `check_file.sh`, `audit.sh`, `init.sh`, `h
 
 **What this script does not do:**
 
-- **Use the network** — vulnerability auditing is isolated in `audit.sh`. `npx` always includes `--no-install`, and a missing tool produces `SKIP` without downloading anything
+- **Initiate network access itself** — vulnerability auditing is isolated in `audit.sh`. `npx` always includes `--no-install`, and a missing tool produces `SKIP` without downloading anything. Project-defined commands and external tools may still access the network according to their own configuration
 - **Install tools** — a missing tool produces `SKIP` with a reason
 - **Run tests twice** — coverage comes from instrumenting the existing test command or replacing it with `test:coverage`
 - **Block completion on an undeclared check** — such findings are `WARN` and keep exit code 0
 - **Consult a remote** — the contract baseline is `git merge-base HEAD <FEEDBACK_CONTRACT_BASE:-main>`, falling back to `HEAD` when it cannot be resolved
 
 - **Detected targets:** Python (`pyproject.toml` / `setup.py` / `requirements.txt`; when absent but `*.py` exists, only `ruff` runs) / Node (`package.json`) / Go (`go.mod`) / Rust (`Cargo.toml`) / Java (`pom.xml` / `build.gradle`) / Shell (`*.sh`) / generic (`check` target in a `Makefile`)
+- **Maven projects:** For a root `pom.xml`, run `verify` once through the reactor entry point. Without a root POM, run every discovered `pom.xml` independently with `-f`. For each POM, prefer its adjacent `mvnw`, then the repository-root `mvnw`, then the global `mvn`. A present but non-executable wrapper is reported as `SKIP` instead of silently falling back. Maven `verify` includes compilation, tests, packaging, and integration-test lifecycle phases configured by the project; Maven may resolve dependencies and plugins from repositories according to that project's settings
 - **Cross-cutting checks (stack-independent):** Validate `*.json`, `*.yaml`, and `*.yml`. `tsconfig*.json`, `jsconfig*.json`, `devcontainer.json`, and files below `.vscode/` are excluded because comments (JSONC) are conventional there. YAML supports multiple documents separated by `---`, and unknown custom tags such as `!Ref` are not treated as syntax errors. If PyYAML is missing, YAML validation produces `SKIP` with a reason
 - **Documentation consistency:** Detect broken internal Markdown links in the `docs` stage. External URLs, `mailto:`, fragment-only links, and absolute paths are excluded to preserve offline operation. Link-like text inside code blocks and inline code is not validated
 - **Secrets (`security` stage):** Run `secretlint` when `.secretlintrc.*` exists. **Without configuration it produces SKIP**, because secretlint cannot run unconfigured. Values are masked by default and never appear in failure logs. Also run `gitleaks` when it is on PATH, but only versions that support `--no-git --redact`
@@ -95,7 +98,7 @@ Every distributed script (`check.sh`, `check_file.sh`, `audit.sh`, `init.sh`, `h
 - **Make recursion guard:** Only when running `make check`, pass `FEEDBACK_CHECK_RECURSION_GUARD` to descendants so a nested check.sh skips the Make fallback. This prevents an infinite loop where `CLAUDE_PROJECT_DIR` propagates into tests, a nested check.sh resolves the root back to this repository, and Make reruns the tests until the Stop hook times out. **Normal Make commands and direct lint/test/build stages are unaffected**
 - **SKIP reasons:** Output always includes a reason: `(<tool> not installed)`, `(<tool> cannot start — check the environment)`, `(not executable)`, `(env.FEEDBACK_CHECK_SKIP)` for environment-driven skipping, `(config: <key-path>)` for config-driven skipping, or a stack-level `(<stack>: all stages …)`. A missing or broken tool alone is **never a FAIL**, because it is not a problem in the user's code
 - **Files checked:** In a Git repository, use `git ls-files --cached --others --exclude-standard`. This includes **new uncommitted files** and excludes ignored files
-- **No network access:** The Node type-check fallback is `npx --no-install tsc`. If TypeScript is missing, it produces `SKIP` without trying to download it
+- **No implicit tool download:** The Node type-check fallback is `npx --no-install tsc`. If TypeScript is missing, it produces `SKIP` without trying to download it. Project commands such as Maven `verify` may still resolve their declared dependencies and plugins
 - **shellcheck severity:** Defaults to `warning` (`-S warning`). Including `style` and `info` findings would block existing projects on the first day. Set `FEEDBACK_SHELLCHECK_SEVERITY=style` for stricter checking
 - **Failure output:** Collect the final 40 log lines from every failed stage in `failures.txt`, then print them together at the end
 - **Final line** (except on FAIL; all of these exit 0):
@@ -150,8 +153,8 @@ Entries are stored as Markdown with frontmatter under `.feedback/log/`; generali
 | `close` | `<entry-id>` `[--reason "<reason>"]` | Marks an entry `closed` without promotion. Use for one-off feedback that cannot be generalized |
 | `retire` | `<source-entry-id>` `--reason "<retirement-reason>"` | **Removes a promoted rule** from rules.md and marks its source entries, including merged ones, as `retired`. Use after a human decision during rule review |
 | `rules` | (none) | Prints the current `rules.md` |
-| `stats` | `[--since <date>]` `[--days <N>]` | Aggregates Hook results and logs: PostToolUse first-pass rate, average recheck count, Stop first-pass rate, top failures, counts by signal/root cause, and **recurrence candidates** (a new failure in the same category after promotion — these are **material to investigate, not a verdict**: whether it is the same principle recurring is decided by an agent reading the entries. The number beside each candidate is surface character overlap, a reading-order hint only). Frequent WARNs and top failures carry a **last-seen date**, and an item that has not recurred for `feedback.stale_days` (default 7) is annotated as such. Transient files such as scratchpads are excluded. It also shows the **last audit date** and the **last retrospective date**; a recommendation appears once each exceeds `audit.interval_days` (default 7) or `feedback.retro_interval_days` (default 90, roughly one quarter) |
-| `report` | `--since <date\|yesterday>` or `--last`, `[--mark]` | Period digest (new entries, promote/close/retire activity, open review, recurrence candidates, and numbers). `--last` starts at `.feedback/.last-retro`; `--mark` advances that marker after the review |
+| `stats` | `[--since <date>]` `[--days <N>]` | Aggregates local data from this working copy only: PostToolUse first-pass rate, average recheck count, Stop first-pass rate, top failures, counts by signal/root cause, and **recurrence candidates** (a new failure in the same category after promotion — these are **material to investigate, not a verdict**: whether it is the same principle recurring is decided by an agent reading the entries. The number beside each candidate is surface character overlap, a reading-order hint only). Frequent WARNs and top failures carry a **last-seen date**, and an item that has not recurred for `feedback.stale_days` (default 7) is annotated as such. Transient files such as scratchpads are excluded. It also shows the **last audit date** and the **last retrospective date**; a recommendation appears once each exceeds `audit.interval_days` (default 7) or `feedback.retro_interval_days` (default 90, roughly one quarter) |
+| `report` | `--since <date\|yesterday>` or `--last`, `[--mark]` | Local-only period digest (new entries, promote/close/retire activity, open review, recurrence candidates, and numbers). `--last` starts at `.feedback/.last-retro`; `--mark` advances that marker after the review |
 
 - **category:** `style` / `architecture` / `testing` / `naming` / `workflow` / `domain`
 - **entry-id:** Recording time in `%Y%m%d-%H%M%S` format. Multiple entries in the same second receive `-2`, `-3`, and so on to remain unique; duplicates would otherwise make `promote` capture only the first entry and leave the rest impossible to promote
