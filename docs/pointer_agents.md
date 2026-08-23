@@ -7,8 +7,15 @@
 `.feedback/rules.md` を読み、蓄積されたルールを作業方針に反映する。ルールは過去に実際に起きた手戻りの記録である。
 
 ```bash
+# Bash / Linux / macOS
 python3 scripts/feedback_log.py rules
 python3 scripts/feedback_log.py list --status open
+```
+
+```powershell
+# Windows PowerShell
+py -3 scripts/feedback_log.py rules
+py -3 scripts/feedback_log.py list --status open
 ```
 
 未昇華の open エントリも確認し、作業に関係するものは考慮する。open エントリと rules.md が食い違う場合は、検証済みの rules.md を優先する。
@@ -21,6 +28,10 @@ Hooks が有効なら `PostToolUse` が編集したファイルを即時チェ�
 bash scripts/check_file.sh <編集したファイル>
 ```
 
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/check_file.ps1 <編集したファイル>
+```
+
 問題が出力されたら修正してから次の作業に進む。
 
 ### 3. 作業完了の前
@@ -29,6 +40,11 @@ Hooks が有効なら `Stop` がフルチェックを実行する。Hooks が無
 
 ```bash
 bash scripts/check.sh; echo "exit=$?"
+```
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/check.ps1
+Write-Output "exit=$LASTEXITCODE"
 ```
 
 FAIL（exit 1）がある状態で「完了しました」と報告してはならない。失敗ログは末尾に要約されるので、内容を確認して修正し、再実行する。
@@ -57,6 +73,8 @@ python3 scripts/feedback_log.py add --category <style|architecture|testing|namin
   --summary "<1文要約>" --detail "<文脈>" --source human \
   [--signal <context|instruction|workflow|failure>]
 ```
+
+Windows PowerShell では `python3` の代わりに `py -3` を使い、行継続が必要ならバッククォートを使う。
 
 再発しうる指摘は記録し、そのタスク限りの指示は記録しない。迷ったら記録する。次回も再現したい成功パターン(有効だった進め方・措辞)も同様に記録する。
 

@@ -45,6 +45,10 @@ check:
 #     min_confidence: 80      # 0-100。下げると検出が増える
 #   shellcheck:
 #     min_severity: warning   # style | info | warning | error
+#   powershell-syntax:
+#     severity: fail          # Windows PowerShell / PowerShell parser
+#   psscriptanalyzer:
+#     severity: fail          # Invoke-ScriptAnalyzer (未導入時は SKIP)
 #   oasdiff:
 #     base: main              # API契約差分のベースラインブランチ
 

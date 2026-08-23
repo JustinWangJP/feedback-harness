@@ -6,19 +6,22 @@ This directory contains the feedback harness's executable scripts. When a README
 
 The scripts and accumulated data (`.feedback/`) are **fully shared between Claude Code and Codex**. Only the entry point—who starts each script and when—is environment-specific, as described later.
 
+On native Windows, use `check.ps1`, `check_file.ps1`, `audit.ps1`, and `init.ps1`. They support Windows PowerShell 5.1+ and PowerShell 7+, require no Bash, and keep the same exit-code and PASS/FAIL/WARN/SKIP contract as the `.sh` entry points. `hooks/dispatch.cjs` selects PowerShell on Windows and Bash elsewhere.
+
 ## Layout
 
 ```text
 scripts/
+├── check.ps1        # Native Windows full check, including PowerShell parser/PSScriptAnalyzer
 ├── check.sh          # Full check: stack detection → 8 stages and cross-cutting checks, then summary
 ├── checks/*.sh       # Stack and cross-cutting runners; shared execution core stays in check.sh
-├── check_file.sh     # Fast single-file check based on file extension
+├── check_file.sh/.ps1 # Fast single-file check based on file extension
 ├── lib.sh            # Shared utilities for check.sh / check_file.sh, including has()
 ├── harness_config.py # Sole parser for .feedback/config.yaml (YAML subset, schema validation, 3-level resolution)
 ├── feedback_store.py # Repository lock, atomic writes, and interrupted-transaction recovery
 ├── feedback_log.py   # Feedback CLI: record, promote, review, aggregate, and report by period
-├── audit.sh          # On-demand vulnerability audit (the dedicated networked check; never called by Stop hooks)
-├── init.sh           # Installer for environments without Hooks (not copied into target projects)
+├── audit.sh/.ps1     # On-demand vulnerability audit (the dedicated networked check; never called by Stop hooks)
+├── init.sh/.ps1      # Installer for environments without Hooks (not copied into target projects)
 └── hooks/
     ├── on_session_start.sh  # Claude Code / Codex SessionStart → initial .feedback/ seed
     ├── post_edit.sh         # Claude Code / Codex PostToolUse → check_file.sh
@@ -232,7 +235,7 @@ In an `init.sh`-only installation or when Hooks are disabled or untrusted, Claud
 
 ## Required tools
 
-- **Required:** `bash`, `python3` (used for Hook JSON parsing, `feedback_log.py`, JSON/YAML validation, and internal-link validation)
+- **Required:** Python 3 plus `bash` on Linux/macOS or Windows PowerShell 5.1+ / PowerShell 7+ on Windows. Plugin Hooks also use the host's Node.js to select the OS-specific hook entry point.
 - **Optional — stack standards** (detected automatically; missing tools produce `SKIP`): `ruff`, `mypy`, `pytest` / `npm`/`pnpm`/`yarn`, `eslint`, `tsc` / `go`, `gofmt` / `cargo`, `rustfmt`, `clippy` / `mvn`, `gradle` / `shellcheck`
 - **Optional — extended checks:** `pytest-cov` (coverage) / `deptry`, `vulture`, `import-linter` (Python dependencies, dead code, architecture constraints) / `secretlint`, `dockerfilelint`, `knip`, `prettier` (through npm; this repository's `package.json` is an example) / `gitleaks`, `actionlint`, `hadolint`, `oasdiff`, `cargo-semver-checks` (used when OS-specific binaries are already on PATH)
 - **Optional — audit only** (`audit.sh`, networked): `pip-audit` / `npm` / `govulncheck` / `cargo-audit`

@@ -4,8 +4,10 @@
 from __future__ import annotations
 
 import argparse
+import base64
+import binascii
 import contextlib
-import fcntl
+import errno
 import hashlib
 import json
 import os
@@ -14,6 +16,16 @@ import tempfile
 import time
 from collections.abc import Callable, Iterable
 from pathlib import Path
+
+try:
+    import fcntl
+except ImportError:  # Windows
+    fcntl = None
+
+try:
+    import msvcrt
+except ImportError:  # POSIX
+    msvcrt = None
 
 LOCK_NAME = ".state.lock"
 JOURNAL_NAME = ".transaction.json"
@@ -132,23 +144,46 @@ def state_lock(root: Path, timeout_seconds: int):
     feedback_dir = root / ".feedback"
     feedback_dir.mkdir(parents=True, exist_ok=True)
     path = feedback_dir / LOCK_NAME
-    fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
+    flags = os.O_RDWR | os.O_CREAT
+    if hasattr(os, "O_BINARY"):
+        flags |= os.O_BINARY
+    fd = os.open(path, flags, 0o600)
     deadline = time.monotonic() + timeout_seconds
+    locked = False
     try:
+        # msvcrt.locking locks a byte range and cannot lock an empty file.
+        # The lock file is intentionally persistent, so reserving one byte is safe.
+        if msvcrt is not None and os.fstat(fd).st_size == 0:
+            os.write(fd, b"\0")
+            os.fsync(fd)
         while True:
             try:
-                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                os.lseek(fd, 0, os.SEEK_SET)
+                if fcntl is not None:
+                    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                elif msvcrt is not None:
+                    msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+                else:  # pragma: no cover - supported Python platforms provide one
+                    raise StoreError("このOSで利用できるfile lock実装がありません")
+                locked = True
                 break
-            except BlockingIOError:
+            except OSError as exc:
+                if exc.errno not in {errno.EACCES, errno.EAGAIN, errno.EDEADLK}:
+                    raise
                 if time.monotonic() >= deadline:
                     raise StoreError(
                         f"状態lockを{timeout_seconds}秒以内に取得できません: {path}"
-                    )
+                    ) from exc
                 time.sleep(0.05)
         yield
     finally:
         try:
-            fcntl.flock(fd, fcntl.LOCK_UN)
+            if locked:
+                os.lseek(fd, 0, os.SEEK_SET)
+                if fcntl is not None:
+                    fcntl.flock(fd, fcntl.LOCK_UN)
+                elif msvcrt is not None:
+                    msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
         finally:
             os.close(fd)
 
@@ -287,12 +322,20 @@ def main() -> None:
     )
     append.add_argument("root")
     append.add_argument("event_json")
+    append.add_argument(
+        "--base64",
+        action="store_true",
+        help="event_jsonをUTF-8 JSONのbase64として受け取る(PowerShell向け)",
+    )
     append.add_argument("--lock-timeout", type=int, default=10)
     args = parser.parse_args()
     try:
-        event = json.loads(args.event_json)
+        event_json = args.event_json
+        if args.base64:
+            event_json = base64.b64decode(event_json, validate=True).decode("utf-8")
+        event = json.loads(event_json)
         record_event(Path(args.root).resolve(), event, args.lock_timeout)
-    except (json.JSONDecodeError, StoreError) as exc:
+    except (binascii.Error, UnicodeError, json.JSONDecodeError, StoreError) as exc:
         parser.exit(1, f"ERROR: {exc}\n")
 
 

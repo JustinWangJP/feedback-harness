@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT}\"/scripts/hooks/on_session_start.sh",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/hooks/dispatch.cjs\" on_session_start",
             "timeout": 30
           }
         ]
@@ -17,7 +17,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT}\"/scripts/hooks/post_edit.sh",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/hooks/dispatch.cjs\" post_edit",
             "timeout": 60
           }
         ]
@@ -28,7 +28,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT}\"/scripts/hooks/on_stop.sh",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/hooks/dispatch.cjs\" on_stop",
             "timeout": 300
           }
         ]

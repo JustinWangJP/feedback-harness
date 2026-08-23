@@ -64,3 +64,54 @@ jobs:
 
       - name: Run the harness against itself
         run: bash scripts/check.sh
+
+  windows:
+    name: Windows PowerShell checks
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Validate PowerShell syntax
+        shell: powershell
+        run: |
+          $failed = $false
+          Get-ChildItem scripts, tests -Recurse -Include *.ps1, *.psm1, *.psd1 | ForEach-Object {
+            $errors = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile($_.FullName, [ref]$null, [ref]$errors)
+            if ($errors.Count) {
+              $failed = $true
+              $errors | ForEach-Object { Write-Error "$($_.Extent.File):$($_.Extent.StartLineNumber): $($_.Message)" }
+            }
+          }
+          if ($failed) { exit 1 }
+
+      - name: Validate Python syntax
+        shell: powershell
+        run: |
+          $files = Get-ChildItem scripts -File -Filter *.py | Select-Object -ExpandProperty FullName
+          python -m py_compile @files
+
+      - name: Validate cross-platform hook dispatcher
+        shell: powershell
+        run: node --check scripts/hooks/dispatch.cjs
+
+      - name: Run PowerShell regression tests
+        shell: powershell
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File tests/run_tests.ps1
+
+      - name: Run the PowerShell harness against itself
+        shell: powershell
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/check.ps1

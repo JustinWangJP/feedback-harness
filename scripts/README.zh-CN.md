@@ -6,19 +6,22 @@
 
 脚本和积累数据（`.feedback/`）在 **Claude Code 与 Codex 之间完全共享**。因环境而异的只有“由谁、在何时启动脚本”这一入口，详见后文。
 
+在原生 Windows 中请使用 `check.ps1`、`check_file.ps1`、`audit.ps1` 和 `init.ps1`。它们支持 Windows PowerShell 5.1+ / PowerShell 7+，不依赖 Bash；退出码以及 PASS/FAIL/WARN/SKIP 契约与 `.sh` 入口一致。`hooks/dispatch.cjs` 会在 Windows 选择 PowerShell，在其他系统选择 Bash。
+
 ## 目录结构
 
 ```text
 scripts/
+├── check.ps1        # Windows 原生完整检查（含 PowerShell parser/PSScriptAnalyzer）
 ├── check.sh          # 完整检查：自动检测技术栈 → 8 个阶段和横向检查，输出摘要
 ├── checks/*.sh       # 技术栈与横向runner（共用执行core保留在check.sh）
-├── check_file.sh     # 快速单文件检查：根据扩展名执行静态检查
+├── check_file.sh/.ps1 # 快速单文件检查：根据扩展名执行静态检查
 ├── lib.sh            # check.sh / check_file.sh 的共用工具函数（包括 has()）
 ├── harness_config.py # .feedback/config.yaml 的唯一解析器（YAML 子集、schema 验证、3 层解析）
 ├── feedback_store.py # repository lock、原子写入及中断事务恢复
 ├── feedback_log.py   # 反馈记录 CLI：记录、整理、盘点、统计和周期报告
-├── audit.sh          # 按需漏洞审计（工具链中专门联网的检查；Stop hook 不会调用）
-├── init.sh           # 安装脚本（为不支持 Hooks 的环境部署资源；不会复制到目标项目）
+├── audit.sh/.ps1     # 按需漏洞审计（工具链中专门联网的检查；Stop hook 不会调用）
+├── init.sh/.ps1      # 安装脚本（为不支持 Hooks 的环境部署资源；不会复制到目标项目）
 └── hooks/
     ├── on_session_start.sh  # Claude Code / Codex SessionStart → 首次初始化 .feedback/
     ├── post_edit.sh         # Claude Code / Codex PostToolUse → check_file.sh
@@ -232,7 +235,7 @@ Claude Code 和 Codex app / CLI 使用插件提供的 Hooks（`hooks/hooks.json`
 
 ## 所需工具
 
-- **必需：** `bash`、`python3`（用于解析 Hooks 中的 JSON、运行 `feedback_log.py`、验证 JSON/YAML 以及检查内部链接）
+- **必需：** Python 3，以及 Linux/macOS 上的 `bash` 或 Windows 上的 Windows PowerShell 5.1+ / PowerShell 7+。插件 Hooks 还会使用宿主 Node.js 选择对应操作系统的入口。
 - **可选 — 技术栈标准工具**（自动检测；未安装时标记为 `SKIP`）：`ruff`、`mypy`、`pytest` / `npm`/`pnpm`/`yarn`、`eslint`、`tsc` / `go`、`gofmt` / `cargo`、`rustfmt`、`clippy` / `mvn`、`gradle` / `shellcheck`
 - **可选 — 扩展检查：** `pytest-cov`（覆盖率）/ `deptry`、`vulture`、`import-linter`（Python 依赖、死代码、架构约束）/ `secretlint`、`dockerfilelint`、`knip`、`prettier`（通过 npm；本仓库的 `package.json` 是示例）/ `gitleaks`、`actionlint`、`hadolint`、`oasdiff`、`cargo-semver-checks`（系统相关二进制文件，仅在 PATH 中存在时使用）
 - **可选 — 仅审计**（只由 `audit.sh` 使用，会访问网络）：`pip-audit` / `npm` / `govulncheck` / `cargo-audit`

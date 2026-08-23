@@ -11,6 +11,8 @@ python3 scripts/feedback_log.py rules
 python3 scripts/feedback_log.py list --status open
 ```
 
+Windows PowerShell では `python3` を `py -3` に読み替える。
+
 未昇華の open エントリも確認し、作業に関係するものは考慮する。open エントリと rules.md が食い違う場合は、検証済みの rules.md を優先する。
 
 ## 2. コード変更のたび
@@ -21,6 +23,12 @@ Hooks が有効なら `PostToolUse` が編集したファイルを即時チェ�
 bash scripts/check_file.sh <編集したファイル>
 ```
 
+Windows PowerShell:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/check_file.ps1 <編集したファイル>
+```
+
 問題が出力されたら修正してから次の作業に進む。
 
 ## 3. 作業完了の前
@@ -29,6 +37,13 @@ Hooks が有効なら `Stop` がフルチェックを実行する。Hooks が無
 
 ```bash
 bash scripts/check.sh; echo "exit=$?"
+```
+
+Windows PowerShell:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/check.ps1
+Write-Output "exit=$LASTEXITCODE"
 ```
 
 FAIL（exit 1）がある状態で「完了しました」と報告してはならない。失敗ログは末尾に要約されるので、内容を確認して修正し、再実行する。

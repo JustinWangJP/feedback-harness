@@ -6,19 +6,22 @@
 
 スクリプトと蓄積データ(`.feedback/`)は **Claude Code / Codex 両環境で完全共有**。環境固有なのは「誰が・いつスクリプトを起動するか」のエントリポイントだけ(後述)。
 
+Windows ネイティブ環境では `check.ps1` / `check_file.ps1` / `audit.ps1` / `init.ps1` を使います。Windows PowerShell 5.1+ または PowerShell 7+ に対応し、Bash は不要です。終了コードと PASS/FAIL/WARN/SKIP の契約は `.sh` 版と同じです。`hooks/dispatch.cjs` が Windows では PowerShell、それ以外では Bash を選択します。
+
 ## 構成
 
 ```text
 scripts/
+├── check.ps1        # Windows ネイティブのフルチェック(PowerShell parser/PSScriptAnalyzer を含む)
 ├── check.sh          # フルチェック: スタック自動検出 → 8ステージと横断検査、要約出力
 ├── checks/*.sh       # stack・横断runner(共通実行coreはcheck.shに残す)
-├── check_file.sh     # 単一ファイル高速チェック: 拡張子ベースの静的チェック
+├── check_file.sh/.ps1 # 単一ファイル高速チェック: 拡張子ベースの静的チェック
 ├── lib.sh            # check.sh / check_file.sh の共有ユーティリティ(has() ほか)
 ├── harness_config.py # 設定(.feedback/config.yaml)の唯一のパーサ(YAMLサブセット・スキーマ検証・3層解決)
 ├── feedback_store.py # repository lock・atomic write・中断transaction回復
 ├── feedback_log.py   # フィードバック記録CLI: 記録・昇華・棚卸し・集計・期間レポート
-├── audit.sh          # オンデマンド脆弱性監査(ハーネスが意図して通信する専用検査。Stopフックからは呼ばれない)
-├── init.sh           # 導入スクリプト(Hooks 非対応環境向け資産の展開。導入先にはコピーされない)
+├── audit.sh/.ps1     # オンデマンド脆弱性監査(ハーネスが意図して通信する専用検査。Stopフックからは呼ばれない)
+├── init.sh/.ps1      # 導入スクリプト(Hooks 非対応環境向け資産の展開。導入先にはコピーされない)
 └── hooks/
     ├── on_session_start.sh  # Claude Code / Codex SessionStart → .feedback/ の初回シード
     ├── post_edit.sh         # Claude Code / Codex PostToolUse → check_file.sh
@@ -232,7 +235,7 @@ Claude Code と Codex app / CLI は、プラグインが提供する Hooks (`hoo
 
 ## 必要ツール
 
-- **必須**: `bash`, `python3`(hooks内のJSONパース・`feedback_log.py`・json/yaml検証・内部リンク検証で使用)
+- **必須**: Python 3 と、Linux/macOS では `bash`、Windows では Windows PowerShell 5.1+ または PowerShell 7+。プラグイン Hooks は、OS別の入口を選ぶためホストの Node.js も使う。
 - **任意 — スタック標準**(自動検出・未インストールなら `SKIP`): `ruff`, `mypy`, `pytest` / `npm`/`pnpm`/`yarn`, `eslint`, `tsc` / `go`, `gofmt` / `cargo`, `rustfmt`, `clippy` / `mvn`, `gradle` / `shellcheck`
 - **任意 — 拡張検査**: `pytest-cov`(カバレッジ)/ `deptry`, `vulture`, `import-linter`(Python の依存・デッドコード・アーキ制約)/ `secretlint`, `dockerfilelint`, `knip`, `prettier`(npm 経由。このリポジトリの `package.json` が例)/ `gitleaks`, `actionlint`, `hadolint`, `oasdiff`, `cargo-semver-checks`(OS固有バイナリのため PATH にあれば使う)
 - **任意 — 監査専用**(`audit.sh` のみ・ネットワーク使用): `pip-audit` / `npm` / `govulncheck` / `cargo-audit`

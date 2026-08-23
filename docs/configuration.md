@@ -93,7 +93,7 @@ checks:
 
 **出力がどう変わるか**: `check.sh` の該当行が `SKIP  python: vulture (config: checks.vulture)` になる。理由に `config: …` と付くため、自分で止めたのか既定の挙動なのかが区別できる。
 
-ステージ単位で停止することもできる（`check.skip: [security]` など。指定できる値は `lint` / `typecheck` / `test` / `build` / `format` / `security` / `docs` / `contract`）。ただし `lint` には18個の検査が含まれるため、構文エラー検出（`bash-syntax` / `json-syntax`）を残したい場合は、検査IDで個別に指定する。
+ステージ単位で停止することもできる（`check.skip: [security]` など。指定できる値は `lint` / `typecheck` / `test` / `build` / `format` / `security` / `docs` / `contract`）。ただし `lint` には20個の検査が含まれるため、構文エラー検出（`powershell-syntax` / `bash-syntax` / `json-syntax`）を残したい場合は、検査IDで個別に指定する。
 
 ### モノレポで言語ごとに事情が違う
 
@@ -109,7 +109,7 @@ check:
     warn_on: [lint]
 ```
 
-**出力がどう変わるか**: Python の test ステージだけ SKIP、Node の lint 群だけ WARN になる。**他スタックに漏れない**(`check.python.skip` を書いても Go の test は消えない)。スタックは `python` / `node` / `go` / `rust` / `java` / `shell` の6つ。
+**出力がどう変わるか**: Python の test ステージだけ SKIP、Node の lint 群だけ WARN になる。**他スタックに漏れない**(`check.python.skip` を書いても Go の test は消えない)。スタックは `python` / `node` / `go` / `rust` / `java` / `powershell` / `shell` の7つ。
 
 ### 生成物・ベンダコードを見せたくない
 
@@ -229,6 +229,7 @@ checks:
 | go | `go-vet` / `go-build` / `go-test` / `go-mod-verify` / `gofmt` |
 | rust | `clippy` / `cargo-check` / `cargo-test` / `cargo-metadata` / `cargo-fmt` / `cargo-semver-checks` |
 | java | `mvn` / `gradle` |
+| powershell | `powershell-syntax` / `psscriptanalyzer` |
 | shell | `bash-syntax` / `shellcheck` |
 | 横断 | `json-syntax` / `yaml-syntax` / `md-links` / `secretlint` / `gitleaks` / `actionlint` / `dockerfilelint` / `hadolint` / `oasdiff` / `make-check` |
 
@@ -265,7 +266,7 @@ ERROR: .feedback/config.yaml を読めませんでした。以下はすべて既
 
 ### `exclude` の効く範囲
 
-`exclude` が効くのは**ハーネス自身がファイルを列挙する検査**(`bash-syntax` / `shellcheck` / `json-syntax` / `yaml-syntax` / `md-links` 等)に限る。ruff / pytest / go test / vulture のように**自分でツリーを歩くツールには効かない** — それらはツール自身の無視設定(ruff の `exclude` / `per-file-ignores`、pytest の `testpaths` 等)に従う。ハーネスが各ツールの除外構文へ翻訳することはしない(ツールごとに意味が違い、翻訳は必ずずれるため)。
+`exclude` が効くのは**ハーネス自身がファイルを列挙する検査**(`powershell-syntax` / `psscriptanalyzer` / `bash-syntax` / `shellcheck` / `json-syntax` / `yaml-syntax` / `md-links` 等)に限る。ruff / pytest / go test / vulture のように**自分でツリーを歩くツールには効かない** — それらはツール自身の無視設定(ruff の `exclude` / `per-file-ignores`、pytest の `testpaths` 等)に従う。ハーネスが各ツールの除外構文へ翻訳することはしない(ツールごとに意味が違い、翻訳は必ずずれるため)。
 
 ### `--list-checks` に載らない検査がある
 

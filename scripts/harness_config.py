@@ -258,6 +258,8 @@ CHECKS = {
     "cargo-semver-checks": ("rust", "contract"),
     "mvn": ("java", "test"),
     "gradle": ("java", "test"),
+    "powershell-syntax": ("powershell", "lint"),
+    "psscriptanalyzer": ("powershell", "lint"),
     "bash-syntax": ("shell", "lint"),
     "shellcheck": ("shell", "lint"),
     "json-syntax": ("config", "lint"),
@@ -449,7 +451,9 @@ def load(root, relpath=CONFIG_RELPATH):
     if not os.path.isfile(path):
         return {}, None
     try:
-        with open(path, encoding="utf-8") as fh:
+        # Windows PowerShell 5.1 writes UTF-8 with a BOM by default.  Treat it as
+        # ordinary UTF-8 so config.yaml created with Set-Content remains portable.
+        with open(path, encoding="utf-8-sig") as fh:
             return validate(parse_yaml(fh.read(), relpath), relpath), None
     except ConfigError as exc:
         return {}, str(exc)
@@ -704,7 +708,10 @@ if __name__ == "__main__":
     if "--json" in args:
         rest = [a for a in args if not a.startswith("--")]
         root = rest[0] if rest else os.getcwd()
-        print(json.dumps(effective(root, os.environ), ensure_ascii=False, sort_keys=True))
+        # PowerShell 5.1 decodes redirected native-process output with the active
+        # Windows code page. ASCII-only JSON keeps this machine-readable channel
+        # stable even when Python is forced to UTF-8 with PYTHONUTF8=1.
+        print(json.dumps(effective(root, os.environ), ensure_ascii=True, sort_keys=True))
         sys.exit(0)
     sys.exit(_USAGE)
 # fmt: on

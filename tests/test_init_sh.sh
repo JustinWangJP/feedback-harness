@@ -19,6 +19,10 @@ assert_eq "0" "$?" "init.sh が成功する: $OUT"
 assert_file_exists "$WORK/target/scripts/check.sh" "check.sh"
 assert_file_exists "$WORK/target/scripts/check_file.sh" "check_file.sh"
 assert_file_exists "$WORK/target/scripts/lib.sh" "lib.sh"
+assert_file_exists "$WORK/target/scripts/check.ps1" "check.ps1"
+assert_file_exists "$WORK/target/scripts/check_file.ps1" "check_file.ps1"
+assert_file_exists "$WORK/target/scripts/lib.ps1" "lib.ps1"
+assert_file_exists "$WORK/target/scripts/audit.ps1" "audit.ps1"
 assert_file_exists "$WORK/target/scripts/feedback_log.py" "feedback_log.py"
 assert_file_exists "$WORK/target/scripts/feedback_store.py" "feedback_store.py"
 for runner in python node go rust java shell cross_cutting; do
@@ -31,6 +35,7 @@ assert_file_exists "$WORK/target/scripts/audit.sh" "audit.sh"
 # harness_config.py は全スクリプトが config(.feedback/config.yaml)を読むための
 # 唯一のパーサ。欠けると config が効かないまま導入先が動く
 assert_file_exists "$WORK/target/scripts/harness_config.py" "harness_config.py"
+assert_file_exists "$WORK/target/scripts/harness_validation.py" "harness_validation.py"
 assert_file_exists "$WORK/target/scripts/README.md" "English scripts README"
 assert_file_exists "$WORK/target/scripts/README.ja.md" "Japanese scripts README"
 assert_file_exists "$WORK/target/scripts/README.zh-CN.md" "Simplified Chinese scripts README"
@@ -48,8 +53,8 @@ assert_eq "1" "$(grep -c '<!-- feedback-harness:pointer:start -->' "$WORK/target
   "AGENTS.md に管理開始マーカーが1つある"
 assert_eq "1" "$(grep -c '<!-- feedback-harness:pointer:end -->' "$WORK/target/AGENTS.md")" \
   "AGENTS.md に管理終了マーカーが1つある"
-assert_contains "$(cat "$WORK/target/CLAUDE.md")" '`init.sh` だけで導入した場合' \
-  "CLAUDE.md が init.sh 単独導入を区別する"
+assert_contains "$(cat "$WORK/target/CLAUDE.md")" '`init.sh` / `init.ps1` だけで導入した場合' \
+  "CLAUDE.md が init.sh / init.ps1 単独導入を区別する"
 assert_contains "$(cat "$WORK/target/CLAUDE.md")" 'bash scripts/check_file.sh <編集したファイル>' \
   "CLAUDE.md に Hooks 無効時の手動チェックがある"
 assert_contains "$(cat "$WORK/target/CLAUDE.md")" '根因: <分類>' \

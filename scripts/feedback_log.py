@@ -33,6 +33,19 @@ import subprocess
 import sys
 from pathlib import Path
 
+# Windows PowerShell 5.1 commonly exposes a cp932 console.  Human feedback can
+# contain characters outside that code page, so reporting must degrade visibly
+# instead of crashing the CLI with UnicodeEncodeError.
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, "reconfigure"):
+        _stream.reconfigure(errors="replace")
+
+
+def audit_command_hint() -> str:
+    if os.name == "nt":
+        return "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/audit.ps1"
+    return "bash scripts/audit.sh"
+
 
 def project_root() -> Path:
     """状態(.feedback/)を置くプロジェクトルートを解決する。
@@ -663,7 +676,7 @@ def audit_status_lines() -> list:
     「未実行/期限切れ」表示が消えず修正を促し続ける。
     """
     if not LAST_AUDIT.exists():
-        return ["最終監査: 未実行 — bash scripts/audit.sh の実行を推奨"]
+        return [f"最終監査: 未実行 - {audit_command_hint()} の実行を推奨"]
     raw = LAST_AUDIT.read_text(encoding="utf-8").strip()
     try:
         d = datetime.date.fromisoformat(raw)
@@ -672,7 +685,7 @@ def audit_status_lines() -> list:
     days = (datetime.date.today() - d).days
     line = f"最終監査: {raw} ({days}日前)"
     if days > AUDIT_INTERVAL_DAYS:
-        line += f" — {AUDIT_INTERVAL_DAYS}日超過、監査を推奨(bash scripts/audit.sh)"
+        line += f" - {AUDIT_INTERVAL_DAYS}日超過、監査を推奨({audit_command_hint()})"
     return [line]
 
 

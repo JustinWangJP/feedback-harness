@@ -9,10 +9,10 @@ Claude Code と Codex の両方で使えるフィードバックハーネスで�
 
 ## 必要な環境
 
-- **必須:** `bash`、`python3`
+- **必須:** Python 3 と、対応する実行環境のいずれか（Linux/macOS は `bash`、Windows は Windows PowerShell 5.1+ または PowerShell 7+）
 - **任意:** プロジェクトで使う lint、型検査、テスト、ビルドなどのツール
 
-任意のツールは、すでに導入されているものだけを使います。見つからないツールは理由を示して `SKIP` し、ハーネスが自動でインストールすることはありません。
+任意のツールは、すでに導入されているものだけを使います。見つからないツールは理由を示して `SKIP` し、ハーネスが自動でインストールすることはありません。Windows の `.ps1` 入口は Bash を必要としません。
 
 ### このリポジトリの開発
 
@@ -22,10 +22,10 @@ Claude Code と Codex の両方で使えるフィードバックハーネスで�
 
 | 環境 | 自動チェック | ルール反映 |
 |------|-------------|-----------|
-| Claude Code（プラグイン導入） | プラグインの `hooks/hooks.json` が Hooks を提供する。ファイルを編集した直後に `check_file.sh`、応答を終える前に `check.sh` を実行する（`check.sh` は、前回の検査成功後に変更がある場合のみ実行）。失敗時は exit code 2 で結果をエージェントへ返す。設定ファイル（JSON/YAML）の構文、秘密情報、内部リンク、依存関係、CI 設定も検査する。設定で明示していない検査の指摘は WARN（処理を止めない警告）として `events.jsonl` に記録する。必要なツールが入っていない場合は SKIP とし、ハーネスが自動でインストールすることはない | `apply-feedback` スキルが `.feedback/rules.md` と未整理の指摘を読む |
-| Claude Code（`init.sh` のみ） | CLAUDE.md の規約に従い、変更ごとに `check_file.sh`、完了前に `check.sh` をエージェント自身が実行する | CLAUDE.md の規約により、作業前に `.feedback/rules.md` と未整理の指摘を読む |
+| Claude Code（プラグイン導入） | プラグインの `hooks/hooks.json` が Windows では `.ps1`、それ以外では `.sh` を選び、編集直後の単一ファイル検査と応答前のフル検査を実行する。失敗時は exit code 2 で結果をエージェントへ返す。必要なツールが無ければ理由付き SKIP とする | `apply-feedback` スキルが `.feedback/rules.md` と未整理の指摘を読む |
+| Claude Code（`init.sh` / `init.ps1` のみ） | CLAUDE.md の規約に従い、OS に合う `check_file` 入口を変更ごとに、`check` 入口を完了前にエージェント自身が実行する | CLAUDE.md の規約により、作業前に `.feedback/rules.md` と未整理の指摘を読む |
 | Codex（プラグイン導入） | 同じ `hooks/hooks.json` を Codex Hooks として読み込む。`apply_patch` のパッチ内容から対象ファイルを見つけてすぐに検査し、Stop の前に全体を検査する | `apply-feedback` スキルが `.feedback/rules.md` と未整理の指摘を読む |
-| Codex IDE 拡張・汎用エージェント（`scripts/init.sh` で導入） | AGENTS.md の規約に従い、変更ごとに `check_file.sh`、完了前に `check.sh` をエージェント自身が実行する | AGENTS.md の規約により、作業前に `.feedback/rules.md` を必ず読む |
+| Codex IDE 拡張・汎用エージェント（`scripts/init.sh` / `scripts/init.ps1` で導入） | AGENTS.md の規約に従い、OS に合う `check_file` 入口を変更ごとに、`check` 入口を完了前にエージェント自身が実行する | AGENTS.md の規約により、作業前に `.feedback/rules.md` を必ず読む |
 
 フィードバックは、どの環境でも各プロジェクトの `.feedback/` に保存します。Claude Code、ChatGPT デスクトップアプリの Codex、Codex CLI では、プラグインの Hooks が検査を自動実行します。`init.sh` だけで導入する場合は、Claude Code では CLAUDE.md、Codex IDE 拡張や汎用エージェントでは AGENTS.md の規約に従い、エージェント自身が検査を実行します。Codex では、初回に `/hooks` を開いて内容を確認し、信頼済みとして有効にする必要があります。このリポジトリの `.claude/settings.json` は Claude Code で開発するための設定であり、導入先には配布されません。
 
@@ -35,7 +35,7 @@ Claude Code と Codex の両方で使えるフィードバックハーネスで�
 
 | ステージ | 検査内容 | 対象 |
 |---|---|---|
-| `lint` | 静的解析 | ruff / eslint / go vet / clippy / shellcheck・bash -n |
+| `lint` | 静的解析 | ruff / eslint / go vet / clippy / PowerShell parser・PSScriptAnalyzer / shellcheck・bash -n |
 | `typecheck` | 型検査 | mypy(`[tool.mypy]` 宣言時)/ tsc |
 | `test` | テスト（既存のテスト実行に**カバレッジ計測を追加**） | pytest(`--cov`)/ go test `-cover` / npm `test:coverage` / cargo test / `./mvnw` または `mvn verify` |
 | `build` | ビルド | go build / npm run build / cargo check |
@@ -90,10 +90,10 @@ commands/
 hooks/
   hooks.json        # Claude Code / Codex 共通の配布用 Hooks 定義
 scripts/
-  check.sh          # スタック自動検出 (Python/Node/Go/Rust/Java/Shell/Make) → 8ステージ + 横断チェック
+  check.sh/.ps1     # スタック自動検出 (Python/Node/Go/Rust/Java/PowerShell/Shell/Make) → 各ステージ + 横断チェック
   checks/*.sh       # stack・横断runner（共通実行coreはcheck.shに残す）
-  check_file.sh     # 単一ファイルの高速チェック (拡張子ベース)
-  audit.sh          # 必要なときに実行する脆弱性監査 (意図的に通信する専用検査・Stopフック対象外)
+  check_file.sh/.ps1 # 単一ファイルの高速チェック (拡張子ベース)
+  audit.sh/.ps1     # 必要なときに実行する脆弱性監査 (意図的に通信する専用検査・Stopフック対象外)
   lib.sh            # 共有ユーティリティ (has / harness_project_root / harness_tree_changed /
                     #   harness_node_pm / harness_validate_json|yaml / harness_check_md_links /
                     #   harness_log_event|warn)
@@ -101,7 +101,7 @@ scripts/
   feedback_store.py # repository lock・atomic write・中断transaction回復
   feedback_log.py   # フィードバック記録CLI (add / list / search / promote / merge / close /
                     #   retire / rules / stats / report)
-  init.sh           # 導入スクリプト (Hooks 非対応環境向け資産の展開)
+  init.sh/.ps1      # 導入スクリプト (Hooks 非対応環境向け資産の展開)
   README.md         # 各スクリプトの詳しい仕様と必要ツール
   README.ja.md      # スクリプト仕様の日本語版
   README.zh-CN.md   # スクリプト仕様の簡体字中国語版
@@ -173,7 +173,7 @@ codex plugin marketplace add JustinWangJP/feedback-harness
 
 インストール後は新しいセッションを開始します。Codex で `/hooks` を開き、`SessionStart` / `PostToolUse` / `Stop` の各 Hook の内容を確認して、信頼済みとして有効にしてください。Codex IDE 拡張はプラグインに対応していないため、次の `init.sh` を使います。
 
-### `init.sh` で手動運用する場合（Claude Code / Codex IDE 拡張 / 汎用エージェント）
+### `init.sh` / `init.ps1` で手動運用する場合（Claude Code / Codex IDE 拡張 / 汎用エージェント）
 
 Claude Code プラグインから `init.sh` を併用する場合:
 
@@ -187,6 +187,15 @@ Claude Code プラグインから `init.sh` を併用する場合:
 git clone https://github.com/JustinWangJP/feedback-harness
 bash feedback-harness/scripts/init.sh /path/to/your-project
 cd /path/to/your-project && bash scripts/check.sh   # スタック検出の確認
+```
+
+Windows PowerShell（Bash 不要）:
+
+```powershell
+git clone https://github.com/JustinWangJP/feedback-harness
+powershell -NoProfile -ExecutionPolicy Bypass -File feedback-harness\scripts\init.ps1 C:\path\to\your-project
+Set-Location C:\path\to\your-project
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\check.ps1
 ```
 
 `scripts/` と `AGENTS.md` が導入先にコピーされます。`CLAUDE.md` / `AGENTS.md` には、feedback-harness が管理する範囲を示すコメント（管理マーカー）付きで案内文を追加します。`init.sh` を再実行すると、管理マーカーの内側だけを最新版に置き換え、外側にある利用者の記述は残します。`.feedback/rules.md` は空のテンプレートから始まります。
@@ -333,6 +342,14 @@ bash scripts/check.sh                    # 完了前の全体確認(CIでも同�
 bash scripts/check.sh /path/to/project   # 別プロジェクトを検査
 FEEDBACK_CHECK_SKIP="test build" bash scripts/check.sh   # 重いステージを外す
 bash scripts/audit.sh                    # 脆弱性監査(ネットワークを使うので手動)
+```
+
+Windows PowerShell では次を使います:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\check.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\check.ps1 C:\path\to\project
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\audit.ps1
 ```
 
 ### 指摘を記録する

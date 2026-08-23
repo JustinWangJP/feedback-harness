@@ -8,20 +8,30 @@ description: このプロジェクトへフィードバックハーネスの Hoo
 
 ## 手順
 
-1. 次のコマンドを実行する:
+1. OS に応じて次のいずれかを実行する:
 
 ```bash
 bash "${CLAUDE_PLUGIN_ROOT}/scripts/init.sh" "${CLAUDE_PROJECT_DIR}"
+```
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File "$env:CLAUDE_PLUGIN_ROOT\scripts\init.ps1" "$env:CLAUDE_PROJECT_DIR"
 ```
 
 2. 出力を読み、各項目が OK / 新規作成 / 追記 / 更新 / 移行 / スキップのいずれかで完了していることを確認する。
 
    既存の CLAUDE.md / AGENTS.md は `feedback-harness:pointer` 管理マーカー内だけが最新版へ置換され、マーカー外の記述は保持される。旧版のマーカーなしポインタは、既知の見出しと末尾を特定できる場合に管理ブロックへ移行する。安全に末尾を特定できない場合は処理を止め、手動で旧ポインタを削除して再実行するよう案内する。
 
-3. 展開された `scripts/check.sh` が動くことを確認する:
+3. 展開された `scripts/check.sh` または `scripts/check.ps1` が動くことを確認する:
 
 ```bash
 cd "${CLAUDE_PROJECT_DIR}" && bash scripts/check.sh; echo "exit=$?"
+```
+
+```powershell
+Set-Location "$env:CLAUDE_PROJECT_DIR"
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/check.ps1
+Write-Output "exit=$LASTEXITCODE"
 ```
 
 `exit=0` でなければ、出力された FAIL の内容をユーザーに報告する。スタック未検出(`検出できたスタックがありません`)は失敗ではない。

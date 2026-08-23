@@ -1,6 +1,6 @@
 ## ハーネス: フィードバックループ
 
-このプロジェクトにはフィードバックハーネスが導入されている。Claude Code プラグインの Hooks が有効なら、以下の変更時チェックと完了前チェックは自動実行される。`init.sh` だけで導入した場合、または Hooks が無効な場合は、この規約が自動フィードバックループの代わりとなる。**いずれの場合も完了条件として必ず従うこと。**
+このプロジェクトにはフィードバックハーネスが導入されている。Claude Code プラグインの Hooks が有効なら、以下の変更時チェックと完了前チェックは自動実行される。`init.sh` / `init.ps1` だけで導入した場合、または Hooks が無効な場合は、この規約が自動フィードバックループの代わりとなる。**いずれの場合も完了条件として必ず従うこと。**
 
 ### 1. セッション開始時
 
@@ -21,6 +21,8 @@ Hooks が有効なら `PostToolUse` が編集したファイルを即時チェ�
 bash scripts/check_file.sh <編集したファイル>
 ```
 
+Windows PowerShell: `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/check_file.ps1 <編集したファイル>`
+
 問題が出力されたら修正してから次の作業に進む。
 
 ### 3. 作業完了の前
@@ -30,6 +32,8 @@ Hooks が有効なら `Stop` がフルチェックを実行する。Hooks が無
 ```bash
 bash scripts/check.sh; echo "exit=$?"
 ```
+
+Windows PowerShell: `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/check.ps1` を実行し、続けて `Write-Output "exit=$LASTEXITCODE"` で確認する。
 
 FAIL（exit 1）がある状態で完了を報告してはならない。WARN は内容を確認して直せるものを直し、SKIP は未検証の理由を確認する。
 
@@ -66,4 +70,4 @@ signal と根因は別に判定する。誤った出力・行動は、原因に�
 |------|----------|------|------|
 | {{INSTALL_DATE}} | フィードバックハーネス導入 | 全体 | - |
 
-**ハーネス本体の更新:** Claude Code のスキル・エージェント・Hooks はプラグインが提供する。第三者マーケットプレイスは自動更新が既定で無効なので、`/plugin` → `Marketplaces` → `feedback-harness` で `Enable auto-update` を選んだ場合にのみ起動時に自動更新される。無効のまま更新する場合は `/plugin marketplace update feedback-harness` の後に `/plugin update feedback-harness@feedback-harness` を実行し、必要に応じて `/reload-plugins` する。`scripts/` を `init.sh` でベンダリングしている場合は、`init.sh` を再実行すると管理マーカー内のポインタも最新版へ置換される。
+**ハーネス本体の更新:** Claude Code のスキル・エージェント・Hooks はプラグインが提供する。第三者マーケットプレイスは自動更新が既定で無効なので、`/plugin` → `Marketplaces` → `feedback-harness` で `Enable auto-update` を選んだ場合にのみ起動時に自動更新される。無効のまま更新する場合は `/plugin marketplace update feedback-harness` の後に `/plugin update feedback-harness@feedback-harness` を実行し、必要に応じて `/reload-plugins` する。`scripts/` を `init.sh` / `init.ps1` でベンダリングしている場合は、同じ入口を再実行すると管理マーカー内のポインタも最新版へ置換される。

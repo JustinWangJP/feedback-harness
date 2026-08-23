@@ -9,10 +9,10 @@ A feedback harness for both Claude Code and Codex. It provides two mechanisms:
 
 ## Requirements
 
-- **Required:** `bash`, `python3`
+- **Required:** Python 3 plus one supported command environment: `bash` on Linux/macOS, or Windows PowerShell 5.1+ / PowerShell 7+
 - **Optional:** the linting, type-checking, testing, building, and other tools used by your project
 
-Optional tools are used only when they are already installed. Missing tools are reported as `SKIP` with a reason; the harness never installs them automatically.
+Optional tools are used only when they are already installed. Missing tools are reported as `SKIP` with a reason; the harness never installs them automatically. Native Windows `.ps1` entry points do not require Bash.
 
 ### Developing this repository
 
@@ -22,10 +22,10 @@ This repository pins its own check dependencies separately from the harness runt
 
 | Environment | Automated checks | Applying rules |
 |------|-------------|-----------|
-| Claude Code (plugin installed) | The plugin's `hooks/hooks.json` provides Hooks. It runs `check_file.sh` immediately after a file is edited and `check.sh` before the response ends (`check.sh` runs only when something has changed since the last successful check). On failure, exit code 2 returns the result to the agent. It also checks configuration syntax (JSON/YAML), secrets, internal links, dependencies, and CI configuration. Findings from checks that the project has not explicitly configured are recorded in `events.jsonl` as WARNs (non-blocking warnings). Missing tools produce SKIP; the harness never installs them automatically. | The `apply-feedback` skill reads `.feedback/rules.md` and unprocessed feedback. |
-| Claude Code (`init.sh` only) | Following the rules in CLAUDE.md, the agent runs `check_file.sh` after every change and `check.sh` before completion. | CLAUDE.md requires the agent to read `.feedback/rules.md` and unprocessed feedback before starting work. |
+| Claude Code (plugin installed) | The plugin's `hooks/hooks.json` provides Hooks. It selects `.ps1` on Windows and `.sh` elsewhere, running the single-file check immediately after an edit and the full check before the response ends. On failure, exit code 2 returns the result to the agent. Missing tools produce SKIP; the harness never installs them automatically. | The `apply-feedback` skill reads `.feedback/rules.md` and unprocessed feedback. |
+| Claude Code (`init.sh` / `init.ps1` only) | Following CLAUDE.md, the agent runs the OS-appropriate `check_file` entry point after every change and `check` before completion. | CLAUDE.md requires the agent to read `.feedback/rules.md` and unprocessed feedback before starting work. |
 | Codex (plugin installed) | Codex loads the same `hooks/hooks.json` as Codex Hooks. It identifies files from `apply_patch` patches and checks them immediately, then runs a full check before Stop. | The `apply-feedback` skill reads `.feedback/rules.md` and unprocessed feedback. |
-| Codex IDE extension or a general-purpose agent (installed with `scripts/init.sh`) | Following the rules in AGENTS.md, the agent runs `check_file.sh` after every change and `check.sh` before completion. | AGENTS.md requires the agent to read `.feedback/rules.md` before starting work. |
+| Codex IDE extension or a general-purpose agent (installed with `scripts/init.sh` / `scripts/init.ps1`) | Following AGENTS.md, the agent runs the OS-appropriate `check_file` entry point after every change and `check` before completion. | AGENTS.md requires the agent to read `.feedback/rules.md` before starting work. |
 
 In every environment, feedback is stored in each project's `.feedback/` directory. In Claude Code, Codex in the ChatGPT desktop app, and Codex CLI, plugin Hooks run checks automatically. With an `init.sh`-only installation, the agent runs checks itself by following CLAUDE.md in Claude Code or AGENTS.md in the Codex IDE extension and other general-purpose agents. In Codex, open `/hooks` the first time, review the contents, and enable them as trusted. This repository's `.claude/settings.json` is development configuration for working on the harness in Claude Code and is not distributed to target projects.
 
@@ -35,7 +35,7 @@ Checks **detect the project's technology stack automatically**. No advance confi
 
 | Stage | What it checks | Tools / targets |
 |---|---|---|
-| `lint` | Static analysis | ruff / eslint / go vet / clippy / shellcheck and bash -n |
+| `lint` | Static analysis | ruff / eslint / go vet / clippy / PowerShell parser and PSScriptAnalyzer / shellcheck and bash -n |
 | `typecheck` | Type checking | mypy (when `[tool.mypy]` is declared) / tsc |
 | `test` | Tests (**adds coverage measurement** to the existing test run) | pytest (`--cov`) / go test `-cover` / npm `test:coverage` / cargo test / `./mvnw` or `mvn verify` |
 | `build` | Build | go build / npm run build / cargo check |
@@ -90,10 +90,10 @@ commands/
 hooks/
   hooks.json        # Shared Claude Code / Codex Hooks definition for distribution
 scripts/
-  check.sh          # Detects stacks (Python/Node/Go/Rust/Java/Shell/Make) → 8 stages + cross-cutting checks
+  check.sh/.ps1     # Detects stacks (Python/Node/Go/Rust/Java/PowerShell/Shell/Make) → stages + cross-cutting checks
   checks/*.sh       # Stack and cross-cutting runners; check.sh keeps the shared execution core
-  check_file.sh     # Fast single-file checks based on file extension
-  audit.sh          # On-demand vulnerability audit (dedicated networked check; excluded from Stop hooks)
+  check_file.sh/.ps1 # Fast single-file checks based on file extension
+  audit.sh/.ps1     # On-demand vulnerability audit (dedicated networked check; excluded from Stop hooks)
   lib.sh            # Shared utilities (has / harness_project_root / harness_tree_changed /
                     #   harness_node_pm / harness_validate_json|yaml / harness_check_md_links /
                     #   harness_log_event|warn)
@@ -101,7 +101,7 @@ scripts/
   feedback_store.py # Repository lock, atomic writes, and interrupted-transaction recovery
   feedback_log.py   # Feedback CLI (add / list / search / promote / merge / close /
                     #   retire / rules / stats / report)
-  init.sh           # Installer (deploys assets for environments without Hooks)
+  init.sh/.ps1      # Installer (deploys assets for environments without Hooks)
   README.md         # Detailed script specifications and tool requirements
   README.ja.md      # Japanese version of the script documentation
   README.zh-CN.md   # Simplified Chinese version of the script documentation
@@ -173,7 +173,7 @@ After registering the marketplace, install the plugin in either of these ways:
 
 Start a new session after installation. In Codex, open `/hooks`, review the `SessionStart`, `PostToolUse`, and `Stop` hooks, and enable them as trusted. The Codex IDE extension does not support plugins, so use `init.sh` as described next.
 
-### Manual operation with `init.sh` (Claude Code / Codex IDE extension / general-purpose agents)
+### Manual operation with `init.sh` / `init.ps1` (Claude Code / Codex IDE extension / general-purpose agents)
 
 When combining `init.sh` with the Claude Code plugin:
 
@@ -187,6 +187,15 @@ Without the plugin, or when installing from outside Claude Code:
 git clone https://github.com/JustinWangJP/feedback-harness
 bash feedback-harness/scripts/init.sh /path/to/your-project
 cd /path/to/your-project && bash scripts/check.sh   # Verify stack detection
+```
+
+On Windows PowerShell (no Bash required):
+
+```powershell
+git clone https://github.com/JustinWangJP/feedback-harness
+powershell -NoProfile -ExecutionPolicy Bypass -File feedback-harness\scripts\init.ps1 C:\path\to\your-project
+Set-Location C:\path\to\your-project
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\check.ps1
 ```
 
 The installer copies `scripts/` and AGENTS.md into the target project. It adds guidance to CLAUDE.md and AGENTS.md inside management markers that identify the section maintained by feedback-harness. Running `init.sh` again replaces only the contents inside those markers and preserves user-authored text outside them. `.feedback/rules.md` starts from an empty template.
@@ -333,6 +342,14 @@ bash scripts/check.sh                    # Full pre-completion check (also used 
 bash scripts/check.sh /path/to/project   # Check another project
 FEEDBACK_CHECK_SKIP="test build" bash scripts/check.sh   # Exclude expensive stages
 bash scripts/audit.sh                    # Vulnerability audit (manual because it uses the network)
+```
+
+Windows PowerShell equivalents:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\check.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\check.ps1 C:\path\to\project
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\audit.ps1
 ```
 
 ### Record feedback

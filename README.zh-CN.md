@@ -9,10 +9,10 @@
 
 ## 环境要求
 
-- **必需：** `bash`、`python3`
+- **必需：** Python 3，以及一种受支持的命令环境（Linux/macOS 使用 `bash`；Windows 使用 Windows PowerShell 5.1+ 或 PowerShell 7+）
 - **可选：** 项目使用的 lint、类型检查、测试、构建等工具
 
-只会使用已经安装的可选工具。找不到的工具会在说明原因后标记为 `SKIP`，工具链不会自动安装任何工具。
+只会使用已经安装的可选工具。找不到的工具会在说明原因后标记为 `SKIP`，工具链不会自动安装任何工具。Windows 原生 `.ps1` 入口不依赖 Bash。
 
 ### 开发本仓库
 
@@ -22,10 +22,10 @@
 
 | 环境 | 自动检查 | 应用规则 |
 |------|-------------|-----------|
-| Claude Code（已安装插件） | 插件通过 `hooks/hooks.json` 提供 Hooks。编辑文件后立即运行 `check_file.sh`，结束响应前运行 `check.sh`（仅当上次成功检查后存在变更时才运行 `check.sh`）。检查失败时以退出码 2 将结果返回给代理。还会检查配置文件（JSON/YAML）语法、密钥、内部链接、依赖项和 CI 配置。项目未明确配置的检查所产生的问题会作为 WARN（不阻塞流程的警告）记录到 `events.jsonl`。缺少工具时标记为 SKIP，工具链不会自动安装工具。 | `apply-feedback` skill 读取 `.feedback/rules.md` 和尚未整理的反馈。 |
-| Claude Code（仅使用 `init.sh`） | 代理按照 CLAUDE.md 中的规则，在每次变更后运行 `check_file.sh`，并在完成前运行 `check.sh`。 | CLAUDE.md 要求在开始工作前读取 `.feedback/rules.md` 和尚未整理的反馈。 |
+| Claude Code（已安装插件） | `hooks/hooks.json` 在 Windows 选择 `.ps1`，在其他系统选择 `.sh`，并在编辑后运行单文件检查、在响应结束前运行完整检查。失败时以退出码 2 将结果返回代理；缺少工具时标记为 SKIP。 | `apply-feedback` skill 读取 `.feedback/rules.md` 和尚未整理的反馈。 |
+| Claude Code（仅使用 `init.sh` / `init.ps1`） | 代理按照 CLAUDE.md，使用适合当前操作系统的 `check_file` 和 `check` 入口。 | CLAUDE.md 要求在开始工作前读取 `.feedback/rules.md` 和尚未整理的反馈。 |
 | Codex（已安装插件） | Codex 将同一个 `hooks/hooks.json` 作为 Codex Hooks 加载。它从 `apply_patch` 的补丁中识别目标文件并立即检查，然后在 Stop 前执行完整检查。 | `apply-feedback` skill 读取 `.feedback/rules.md` 和尚未整理的反馈。 |
-| Codex IDE 扩展或通用代理（使用 `scripts/init.sh` 安装） | 代理按照 AGENTS.md 中的规则，在每次变更后运行 `check_file.sh`，并在完成前运行 `check.sh`。 | AGENTS.md 要求在开始工作前读取 `.feedback/rules.md`。 |
+| Codex IDE 扩展或通用代理（使用 `scripts/init.sh` / `scripts/init.ps1` 安装） | 代理按照 AGENTS.md，使用适合当前操作系统的 `check_file` 和 `check` 入口。 | AGENTS.md 要求在开始工作前读取 `.feedback/rules.md`。 |
 
 在所有环境中，反馈都保存在各项目的 `.feedback/` 目录中。在 Claude Code、ChatGPT 桌面应用中的 Codex 以及 Codex CLI 中，插件 Hooks 会自动执行检查。仅使用 `init.sh` 安装时，Claude Code 中的代理按照 CLAUDE.md，Codex IDE 扩展和其他通用代理则按照 AGENTS.md，自行执行检查。在 Codex 中，首次使用时需要打开 `/hooks`，检查其内容并将其设为受信任后启用。本仓库中的 `.claude/settings.json` 是使用 Claude Code 开发本工具链时的配置，不会分发到目标项目。
 
@@ -173,7 +173,7 @@ codex plugin marketplace add JustinWangJP/feedback-harness
 
 安装后请开始一个新会话。在 Codex 中打开 `/hooks`，检查 `SessionStart`、`PostToolUse` 和 `Stop` 各 Hook 的内容，并将其设为受信任后启用。Codex IDE 扩展不支持插件，因此请使用下一节介绍的 `init.sh`。
 
-### 使用 `init.sh` 手动运行（Claude Code / Codex IDE 扩展 / 通用代理）
+### 使用 `init.sh` / `init.ps1` 手动运行（Claude Code / Codex IDE 扩展 / 通用代理）
 
 将 `init.sh` 与 Claude Code 插件结合使用时：
 
@@ -187,6 +187,15 @@ codex plugin marketplace add JustinWangJP/feedback-harness
 git clone https://github.com/JustinWangJP/feedback-harness
 bash feedback-harness/scripts/init.sh /path/to/your-project
 cd /path/to/your-project && bash scripts/check.sh   # 验证技术栈检测
+```
+
+Windows PowerShell（无需 Bash）：
+
+```powershell
+git clone https://github.com/JustinWangJP/feedback-harness
+powershell -NoProfile -ExecutionPolicy Bypass -File feedback-harness\scripts\init.ps1 C:\path\to\your-project
+Set-Location C:\path\to\your-project
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\check.ps1
 ```
 
 安装程序会将 `scripts/` 和 AGENTS.md 复制到目标项目。它会在 CLAUDE.md / AGENTS.md 中加入带有管理标记的说明，用于标识 feedback-harness 管理的范围。再次运行 `init.sh` 时，只替换管理标记内的内容，并保留标记外的用户文本。`.feedback/rules.md` 从空模板开始。
@@ -333,6 +342,14 @@ bash scripts/check.sh                    # 完成前的完整检查（CI 也使�
 bash scripts/check.sh /path/to/project   # 检查其他项目
 FEEDBACK_CHECK_SKIP="test build" bash scripts/check.sh   # 排除耗时阶段
 bash scripts/audit.sh                    # 漏洞审计（使用网络，因此手动执行）
+```
+
+Windows PowerShell 等价命令：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\check.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\check.ps1 C:\path\to\project
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\audit.ps1
 ```
 
 ### 记录反馈

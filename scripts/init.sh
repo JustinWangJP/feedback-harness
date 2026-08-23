@@ -55,7 +55,9 @@ mkdir -p "$DEST/scripts/checks"
 # 設定(.feedback/config.yaml)の読み込みに使う唯一のパーサのため、欠けると config が
 # 読めないまま動く
 cp "$SRC/scripts/check.sh" "$SRC/scripts/check_file.sh" "$SRC/scripts/lib.sh" \
-   "$SRC/scripts/audit.sh" "$SRC/scripts/harness_config.py" \
+   "$SRC/scripts/audit.sh" "$SRC/scripts/check.ps1" "$SRC/scripts/check_file.ps1" \
+   "$SRC/scripts/lib.ps1" "$SRC/scripts/audit.ps1" "$SRC/scripts/harness_config.py" \
+   "$SRC/scripts/harness_validation.py" \
    "$SRC/scripts/feedback_store.py" "$SRC/scripts/feedback_log.py" "$SRC/scripts/README.md" \
    "$SRC/scripts/README.ja.md" "$SRC/scripts/README.zh-CN.md" \
    "$DEST/scripts/"
@@ -68,7 +70,7 @@ cp "$SRC/scripts/checks/"*.sh "$DEST/scripts/checks/"
 # `fmt: off`/`fmt: on` は format を丸ごと無効化する)。導入元(このリポジトリ)
 # の同名ファイルには入れない — 自己ドッグフーディングの検査対象から外れるため、
 # コピー後の $DEST 側だけに後挿入する
-for f in harness_config.py feedback_store.py feedback_log.py; do
+for f in harness_config.py harness_validation.py feedback_store.py feedback_log.py; do
   tmp="$(mktemp)"
   {
     head -n1 "$DEST/scripts/$f"
@@ -224,6 +226,7 @@ fi
 
 echo
 echo "導入完了。動作確認: cd \"$DEST\" && bash scripts/check.sh"
+echo "Windows PowerShell: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/check.ps1"
 echo "Claude Code を使う場合は、あわせてプラグインを導入してください:"
 echo "  /plugin marketplace add JustinWangJP/feedback-harness"
 echo "  /plugin install feedback-harness@feedback-harness"

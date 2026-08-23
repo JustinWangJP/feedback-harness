@@ -71,7 +71,7 @@ missing = []
 for entries in cfg["hooks"].values():
     for entry in entries:
         for hook in entry["hooks"]:
-            for path in re.findall(r'\$\{CLAUDE_PLUGIN_ROOT\}"?(/\S+\.sh)', hook["command"]):
+            for path in re.findall(r'\$\{CLAUDE_PLUGIN_ROOT\}(/[^"\s]+)', hook["command"]):
                 if not (repo / path.lstrip("/")).is_file():
                     missing.append(path)
 print(" ".join(missing))
@@ -98,8 +98,10 @@ def normalize(path):
             matcher = entry.get("matcher", "")
             hooks = []
             for hook in entry.get("hooks", []):
-                m = re.search(r"([a-z_]+\.sh)", hook.get("command", ""))
-                script = m.group(1) if m else None
+                command = hook.get("command", "")
+                m = re.search(r"([a-z_]+\.sh)", command)
+                dispatch = re.search(r"dispatch\.cjs\"?\s+([a-z_]+)", command)
+                script = m.group(1) if m else f"{dispatch.group(1)}.sh" if dispatch else None
                 hooks.append({"script": script, "timeout": hook.get("timeout")})
             hooks.sort(key=lambda h: (h["script"] or "", h["timeout"] if h["timeout"] is not None else -1))
             norm_entries.append({"matcher": matcher, "hooks": hooks})
@@ -122,8 +124,10 @@ def normalize(path):
             matcher = entry.get("matcher", "")
             hooks = []
             for hook in entry.get("hooks", []):
-                m = re.search(r"([a-z_]+\.sh)", hook.get("command", ""))
-                script = m.group(1) if m else None
+                command = hook.get("command", "")
+                m = re.search(r"([a-z_]+\.sh)", command)
+                dispatch = re.search(r"dispatch\.cjs\"?\s+([a-z_]+)", command)
+                script = m.group(1) if m else f"{dispatch.group(1)}.sh" if dispatch else None
                 hooks.append({"script": script, "timeout": hook.get("timeout")})
             hooks.sort(key=lambda h: (h["script"] or "", h["timeout"] if h["timeout"] is not None else -1))
             norm_entries.append({"matcher": matcher, "hooks": hooks})
