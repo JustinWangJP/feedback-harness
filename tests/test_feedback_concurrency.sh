@@ -157,35 +157,32 @@ assert_eq "0" "$?" "中断transaction回復とlock timeout診断が機能する"
 # 切り詰めた後も、同時に来た20イベントをlost updateせず全て保持する。
 python3 - "$REPO/scripts" "$WORK/events" <<'PY'
 import json
-import multiprocessing
+import subprocess
 import sys
 from pathlib import Path
 
-sys.path.insert(0, sys.argv[1])
-from feedback_store import record_event
-
+scripts = Path(sys.argv[1])
 root = Path(sys.argv[2])
 feedback = root / ".feedback"
 feedback.mkdir(parents=True)
 old = [json.dumps({"old": n, "padding": "x" * 500}) for n in range(30)]
 (feedback / "events.jsonl").write_text("\n".join(old) + "\n", encoding="utf-8")
 
-def append(index):
-    record_event(
-        root,
-        {"new": index},
-        5,
-        max_bytes=5000,
-        keep_lines=5,
+child_code = """
+import json
+import sys
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+from feedback_store import record_event
+record_event(Path(sys.argv[2]), {"new": int(sys.argv[3])}, 5, max_bytes=5000, keep_lines=5)
+"""
+processes = [
+    subprocess.Popen(
+        [sys.executable, "-c", child_code, str(scripts), str(root), str(n)]
     )
-
-context = multiprocessing.get_context("fork")
-processes = [context.Process(target=append, args=(n,)) for n in range(20)]
-for process in processes:
-    process.start()
-for process in processes:
-    process.join()
-assert all(process.exitcode == 0 for process in processes)
+    for n in range(20)
+]
+assert all(process.wait(timeout=10) == 0 for process in processes)
 events = [json.loads(line) for line in (feedback / "events.jsonl").read_text().splitlines()]
 assert {event["new"] for event in events if "new" in event} == set(range(20))
 assert not list(feedback.glob(".*.tmp"))

@@ -8,8 +8,8 @@
 # プラグインを利用できない環境が必要とする実ファイルと、各環境で共有する状態だけである。
 #
 # 動作:
-# - scripts/(check.sh / checks/*.sh / check_file.sh / lib.sh / audit.sh / harness_config.py /
-#   feedback_store.py / feedback_log.py / README.md / README.ja.md / README.zh-CN.md)をコピー
+# - scripts/(check.sh / checks/*.sh / check_file.sh / lib.sh / feedback.sh / audit.sh /
+#   harness_config.py / feedback_store.py / feedback_log.py / README各言語版)をコピー
 # - .feedback/ のシードを作成(rules.md は既存なら触らない。config.example.yaml
 #   は毎回上書き — 雛形は本体側の更新を常に受け取るため。手元の config.yaml
 #   は別ファイルなので上書きされない)
@@ -18,6 +18,8 @@
 set -euo pipefail
 
 SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=lib.sh
+. "$SRC/scripts/lib.sh"
 
 usage() {
   cat <<'USAGE'
@@ -55,7 +57,7 @@ mkdir -p "$DEST/scripts/checks"
 # 設定(.feedback/config.yaml)の読み込みに使う唯一のパーサのため、欠けると config が
 # 読めないまま動く
 cp "$SRC/scripts/check.sh" "$SRC/scripts/check_file.sh" "$SRC/scripts/lib.sh" \
-   "$SRC/scripts/audit.sh" "$SRC/scripts/harness_config.py" \
+   "$SRC/scripts/feedback.sh" "$SRC/scripts/audit.sh" "$SRC/scripts/harness_config.py" \
    "$SRC/scripts/feedback_store.py" "$SRC/scripts/feedback_log.py" "$SRC/scripts/README.md" \
    "$SRC/scripts/README.ja.md" "$SRC/scripts/README.zh-CN.md" \
    "$DEST/scripts/"
@@ -127,7 +129,7 @@ update_pointer() { # update_pointer <file> <heading> <fragment> <legacy-end-rege
   } > "$rendered_block"
 
   if [[ -f "$DEST/$file" ]]; then
-    action="$(python3 - "$DEST/$file" "$rendered_block" "$heading" "$legacy_end" <<'PY'
+    action="$(harness_python - "$DEST/$file" "$rendered_block" "$heading" "$legacy_end" <<'PY'
 import re
 import sys
 from pathlib import Path

@@ -181,7 +181,7 @@ run_cross_cutting_checks() {
 
   if [[ "$LIST_MODE" == "1" ]]; then
     if [[ "$LIST_JSON" == "1" ]]; then
-      python3 -c '
+      harness_python -c '
 import json, sys
 rows = []
 for line in sys.stdin:
@@ -191,7 +191,7 @@ for line in sys.stdin:
 print(json.dumps(rows, ensure_ascii=False, indent=2))
   ' < "$LOGDIR/list.txt"
     else
-      python3 "$LIBDIR/harness_config.py" --format-table < "$LOGDIR/list.txt"
+      harness_python "$LIBDIR/harness_config.py" --format-table < "$LOGDIR/list.txt"
     fi
     # config が壊れていると一覧は「すべて既定」を並べる。これは事実だが、
     # 打ち間違いを調べようと --list-checks を叩いた利用者には最も知りたい情報が

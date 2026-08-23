@@ -7,8 +7,8 @@
 `.feedback/rules.md` を読み、蓄積されたルールを作業方針に反映する。ルールは過去に実際に起きた手戻りの記録である。
 
 ```bash
-python3 scripts/feedback_log.py rules
-python3 scripts/feedback_log.py list --status open
+bash scripts/feedback.sh rules
+bash scripts/feedback.sh list --status open
 ```
 
 未昇華の open エントリも確認し、作業に関係するものは考慮する。open エントリと rules.md が食い違う場合は、検証済みの rules.md を優先する。
@@ -53,7 +53,7 @@ FAIL（exit 1）がある状態で「完了しました」と報告してはな�
 その場で記録する。これが次のセッションへ引き継ぐための唯一の手段である。
 
 ```bash
-python3 scripts/feedback_log.py add --category <style|architecture|testing|naming|workflow|domain> \
+bash scripts/feedback.sh add --category <style|architecture|testing|naming|workflow|domain> \
   --summary "<1文要約>" --detail "<文脈>" --source human \
   [--signal <context|instruction|workflow|failure>]
 ```

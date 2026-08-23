@@ -10,12 +10,12 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO="$(cd "$HERE/.." && pwd)"
 
 # 1: skills/ と agents/ に、ハーネス側スクリプトの裸参照が残っていない。
-# 対象は feedback_log.py と init.sh — どちらもプラグイン側にしか無く、
+# 対象は feedback.sh と init.sh — どちらもプラグイン側にしか無く、
 # 導入先の相対パスでは解決できない(init.sh に至っては導入先の scripts/ を
 # 作る側なので、実行時点では存在しない)。
 # check.sh / check_file.sh は init.sh が導入先へ展開した後に
 # 「導入先で」叩くものなので、相対パスのままが正しく、ここでは禁じない。
-BARE="$(grep -rnE 'scripts/(feedback_log\.py|init\.sh)' "$REPO/skills" "$REPO/agents" 2>/dev/null \
+BARE="$(grep -rnE 'scripts/(feedback\.sh|init\.sh)' "$REPO/skills" "$REPO/agents" 2>/dev/null \
   | grep -v 'CLAUDE_PLUGIN_ROOT' || true)"
 assert_eq "" "$BARE" "skills/agents に裸の scripts/ 参照が残っていない"
 
@@ -36,7 +36,7 @@ assert_eq "" "$BARE_CLAUDE" \
 
 # 3: Codex 向けポインタは据え置き(placeholder を書いてはいけない)
 POINTER="$(cat "$REPO/docs/pointer_agents.md")"
-assert_contains "$POINTER" "scripts/feedback_log.py" "ポインタはリポジトリ相対のまま"
+assert_contains "$POINTER" "scripts/feedback.sh" "ポインタはリポジトリ相対のまま"
 case "$POINTER" in
   *CLAUDE_PLUGIN_ROOT*) fail "pointer_agents.md に CLAUDE_PLUGIN_ROOT を書いてはいけない" ;;
 esac

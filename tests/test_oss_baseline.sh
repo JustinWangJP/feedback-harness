@@ -9,10 +9,10 @@ assert_file_exists "$REPO/LICENSE" "MIT Licenseが存在する"
 assert_contains "$(cat "$REPO/LICENSE")" "MIT License" "ライセンス本文がMITである"
 assert_contains "$(cat "$REPO/LICENSE")" "Copyright (c) 2026 JustinWangJP" "著作権表示がある"
 assert_eq "MIT" \
-  "$(python3 -c "import json; print(json.load(open('$REPO/package.json'))['license'])")" \
+  "$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['license'])" "$REPO/package.json")" \
   "package metadataのlicenseがMITである"
 assert_eq "MIT" \
-  "$(python3 -c "import json; print(json.load(open('$REPO/package-lock.json'))['packages']['']['license'])")" \
+  "$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['packages']['']['license'])" "$REPO/package-lock.json")" \
   "lockfileのroot package metadataもMITである"
 
 CI="$REPO/.github/workflows/ci.yml"
@@ -20,7 +20,7 @@ assert_file_exists "$CI" "Linux CI workflowが存在する"
 CI_BODY="$(cat "$CI")"
 assert_contains "$CI_BODY" "runs-on: ubuntu-latest" "Linux runnerを必須にする"
 assert_not_contains "$CI_BODY" "macos-" "macOS runnerを必須にしない"
-assert_not_contains "$CI_BODY" "windows-" "Windows runnerを必須にしない"
+assert_contains "$CI_BODY" "windows-git-bash" "Windows Git Bash runnerを必須にする"
 assert_contains "$CI_BODY" "bash tests/run_tests.sh" "回帰テストをCIで実行する"
 assert_contains "$CI_BODY" "bash scripts/check.sh" "ハーネス自身をCIで検査する"
 assert_contains "$CI_BODY" "scripts/checks/*.sh" "抽出したstack runnerもCIで構文検査する"

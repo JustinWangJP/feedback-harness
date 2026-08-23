@@ -16,6 +16,7 @@ REPO="$(cd "$HERE/.." && pwd)"
 CLIS=(
   "bash $REPO/scripts/check.sh"
   "bash $REPO/scripts/check_file.sh"
+  "bash $REPO/scripts/feedback.sh"
   "bash $REPO/scripts/audit.sh"
   "bash $REPO/scripts/init.sh"
   "python3 $REPO/scripts/harness_config.py"

@@ -1,8 +1,13 @@
 # check: — feedback-harness の check.sh から `make check` として呼ばれる。
 # check.sh 自身を呼び返さないこと(無限再帰になる)。
-PYTHON ?= python3
 DEV_VENV ?= .venv
+ifeq ($(OS),Windows_NT)
+PYTHON ?= python
+DEV_BIN := $(abspath $(DEV_VENV))/Scripts
+else
+PYTHON ?= python3
 DEV_BIN := $(abspath $(DEV_VENV))/bin
+endif
 
 .PHONY: check test install-dev-tools
 check: test

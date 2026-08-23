@@ -9,14 +9,16 @@ Claude Code と Codex の両方で使えるフィードバックハーネスで�
 
 ## 必要な環境
 
-- **必須:** `bash`、`python3`
+- **必須:** `bash`、Python 3.10 以上（`python3` または `python`）
 - **任意:** プロジェクトで使う lint、型検査、テスト、ビルドなどのツール
 
 任意のツールは、すでに導入されているものだけを使います。見つからないツールは理由を示して `SKIP` し、ハーネスが自動でインストールすることはありません。
 
+Windows では Git for Windows に付属する **Git Bash** を使います。既存の `*.sh` を Git Bash からそのまま実行し、`python3` が無ければ `python` を自動選択します。通常の利用に PowerShell 用スクリプトは不要です。
+
 ### このリポジトリの開発
 
-このリポジトリ自身の検査依存は、ハーネスの実行要件とは分けてバージョン固定しています。`make install-dev-tools` を実行すると、`requirements-dev.txt` の PyYAMLとRuff、`scripts/dev_tool_versions.sh` で宣言したactionlintを、リポジトリ内の `.venv` へ導入します。`scripts/check.sh` を直接実行する前は `source .venv/bin/activate` を実行してください。`make test` はこのローカルツールを自動的に優先します。Linux CIも同じ導入ターゲットを使い、検査前に3ツールすべてを確認しますが、導入先プロジェクトでハーネスがツールを自動インストールすることはありません。
+このリポジトリ自身の検査依存は、ハーネスの実行要件とは分けてバージョン固定しています。`make install-dev-tools` を実行すると、`requirements-dev.txt` の PyYAMLとRuff、`scripts/dev_tool_versions.sh` で宣言したactionlintを、リポジトリ内の `.venv` へ導入します。`scripts/check.sh` を直接実行する前は、Linux/macOS では `source .venv/bin/activate`、Windows の Git Bash では `source .venv/Scripts/activate` を実行してください。`make test` はこのローカルツールを自動的に優先します。Linux CI は固定した検査ツールを確認し、Windows CI は Git Bash と Windows Python で同じ回帰テストを実行します。導入先プロジェクトでハーネスがツールを自動インストールすることはありません。
 
 ## 仕組み
 
@@ -41,7 +43,7 @@ Claude Code と Codex の両方で使えるフィードバックハーネスで�
 | `build` | ビルド | go build / npm run build / cargo check |
 | `format` | コード整形のずれ | ruff format / prettier / gofmt / cargo fmt |
 | `security` | 秘密情報の混入 | secretlint(`.secretlintrc.*` 宣言時)/ gitleaks |
-| `docs` | Markdown の内部リンク切れ | 自前実装(python3 のみ) |
+| `docs` | Markdown の内部リンク切れ | 自前実装(Python のみ) |
 | `contract` | API の破壊的変更 | oasdiff(OpenAPI)/ cargo semver-checks(`[lib]` crate) |
 | — | 設定ファイルの構文 | `*.json` / `*.yaml`(JSONC・複数文書YAMLを誤検出しない) |
 | — | 依存関係の存在・整合性 | npm ls / go mod verify / cargo metadata / deptry |
@@ -52,7 +54,7 @@ Claude Code と Codex の両方で使えるフィードバックハーネスで�
 
 | 機能 | コマンド | 用途 |
 |---|---|---|
-| 指摘の記録 | `feedback_log.py add` | 人間からの指摘や、うまくいった進め方をその場で記録（signal も保存） |
+| 指摘の記録 | `feedback.sh add` | 人間からの指摘や、うまくいった進め方をその場で記録（signal も保存） |
 | ルール化 | `promote` / `merge` / `close` / `retire` | `rules.md` へのルール追加・統合・処理済み化・廃止 |
 | 測定 | `stats` | この作業コピー内だけの初回通過率・平均再チェック回数・よく出る WARN・**再発候補** |
 | 報告 | `report` | この作業コピー内だけの、朝会や振り返りに使う期間別の要約（前の期間との比較付き） |
@@ -99,7 +101,8 @@ scripts/
                     #   harness_log_event|warn)
   harness_config.py # .feedback/config.yaml の読み込みと検査設定の解決
   feedback_store.py # repository lock・atomic write・中断transaction回復
-  feedback_log.py   # フィードバック記録CLI (add / list / search / promote / merge / close /
+  feedback.sh       # OS共通のフィードバックCLI入口（Python executableを解決）
+  feedback_log.py   # フィードバックCLI実装 (add / list / search / promote / merge / close /
                     #   retire / rules / stats / report)
   init.sh           # 導入スクリプト (Hooks 非対応環境向け資産の展開)
   README.md         # 各スクリプトの詳しい仕様と必要ツール
@@ -195,7 +198,7 @@ cd /path/to/your-project && bash scripts/check.sh   # スタック検出の確�
 
 | 資産 | プラグイン | `init.sh` |
 |---|---|---|
-| `scripts/check.sh` `checks/*.sh` `check_file.sh` `audit.sh` `lib.sh` `harness_config.py` `feedback_store.py` `feedback_log.py` `README.md` `README.ja.md` `README.zh-CN.md` | プラグイン側に置かれる。Codex は `PLUGIN_ROOT`（Hooks では互換用の変数 `CLAUDE_PLUGIN_ROOT` も設定）、Claude Code は `CLAUDE_PLUGIN_ROOT` を使って実行する | 導入先の `scripts/` にファイルをコピー |
+| `scripts/check.sh` `checks/*.sh` `check_file.sh` `feedback.sh` `audit.sh` `lib.sh` `harness_config.py` `feedback_store.py` `feedback_log.py` `README.md` `README.ja.md` `README.zh-CN.md` | プラグイン側に置かれる。Codex は `PLUGIN_ROOT`（Hooks では互換用の変数 `CLAUDE_PLUGIN_ROOT` も設定）、Claude Code は `CLAUDE_PLUGIN_ROOT` を使って実行する | 導入先の `scripts/` にファイルをコピー |
 | Hooks(`hooks.json`) | ○（有効化後に自動起動） | ✗（CLAUDE.md / AGENTS.md の規約が代替） |
 | skills | ○（Claude Code / Codex） | ✗（CLAUDE.md / AGENTS.md の規約が代替） |
 | agents / commands | Claude Code のみ | ✗ |
@@ -250,7 +253,7 @@ cd /path/to/your-project && bash scripts/check.sh   # スタック検出の確�
 1. 指摘を1文の要約に整理する
 2. 失敗に関する指摘なら、根因を1行で分類する（`文脈欠落` / `指示欠陥` / `実行誤り` / `モデル限界` / `未判定`）
 3. signal（起きた出来事の種類）を決める。誤った出力や行動への指摘は、根因にかかわらず `failure` とする（省略した場合は CLI が自動で判断する）
-4. カテゴリを選び `feedback_log.py add` で記録する
+4. カテゴリを選び `feedback.sh add` で記録する
 5. open が3件以上になったら、共通ルールへの整理（`feedback-loop`）を提案する
 
 ```
@@ -339,12 +342,12 @@ bash scripts/audit.sh                    # 脆弱性監査(ネットワークを
 
 ```bash
 # 人間から指摘を受けたとき（失敗に関する指摘には根本原因を1行添える）
-python3 scripts/feedback_log.py add --category style --source human \
+bash scripts/feedback.sh add --category style --source human \
   --summary "エラーメッセージは日本語で書く" \
   --detail "日本語で統一する要件が指示になかった。根因: 指示欠陥"
 
 # うまくいった進め方や指示の言い回しを残すとき（signal は省略時に自動で判断される）
-python3 scripts/feedback_log.py add --category workflow --source agent \
+bash scripts/feedback.sh add --category workflow --source agent \
   --summary "設計を固めてから実装すると手戻りが無い"
 ```
 
@@ -353,19 +356,19 @@ Claude Code / Codex プラグインでは `capture-feedback` スキルが同じ�
 ### 溜まった指摘を整理する
 
 ```bash
-python3 scripts/feedback_log.py list                    # open エントリ一覧
-python3 scripts/feedback_log.py list --signal failure   # 失敗系だけ絞る
-python3 scripts/feedback_log.py promote <id> --rule "<一般化した1行>"
-python3 scripts/feedback_log.py merge <id> --into <既存ルールの出典id>   # 再発時
-python3 scripts/feedback_log.py retire <出典id> --reason "<退役理由>"    # 棚卸し
+bash scripts/feedback.sh list                    # open エントリ一覧
+bash scripts/feedback.sh list --signal failure   # 失敗系だけ絞る
+bash scripts/feedback.sh promote <id> --rule "<一般化した1行>"
+bash scripts/feedback.sh merge <id> --into <既存ルールの出典id>   # 再発時
+bash scripts/feedback.sh retire <出典id> --reason "<退役理由>"    # 棚卸し
 ```
 
 ### 効果を測る・共有する
 
 ```bash
-python3 scripts/feedback_log.py stats                 # 初回通過率・再発候補・最終監査日
-python3 scripts/feedback_log.py report --since yesterday   # 朝会の1問
-python3 scripts/feedback_log.py report --last --mark       # 振り返り後に次の集計期間の開始点を更新
+bash scripts/feedback.sh stats                 # 初回通過率・再発候補・最終監査日
+bash scripts/feedback.sh report --since yesterday   # 朝会の1問
+bash scripts/feedback.sh report --last --mark       # 振り返り後に次の集計期間の開始点を更新
 ```
 
 ### 環境変数
@@ -395,7 +398,7 @@ bash scripts/check.sh --list-checks --json    # 同じ内容を機械可読な J
 
 ```
 [記録]  人間からの指摘・修正 / 有効だった進め方 / 繰り返す check 失敗 / 完了前の振り返り
-          → feedback_log.py add   (capture-feedback スキル / AGENTS.md の規約)
+→ feedback.sh add       (capture-feedback スキル / AGENTS.md の規約)
              失敗に関する指摘は根因を --detail に1行:
                文脈欠落 | 指示欠陥 | 実行誤り | モデル限界 | 未判定
              signal(--signal)は出来事の種類:
@@ -415,8 +418,8 @@ bash scripts/check.sh --list-checks --json    # 同じ内容を機械可読な J
 [反映]  .feedback/rules.md → 次セッションの作業開始前に適用
                 ↓
 [棚卸]  定期審査 (feedback-loop Phase 4) → 古くなったルールは retire で廃止
-[測定]  feedback_log.py stats            — 初回通過率・再発候補(要求時のみ・テキスト出力)
-[報告]  feedback_log.py report --last → 朝会/振り返りの5分議題(実施後に --mark で集計期間の開始点を更新)
+[測定]  feedback.sh stats            — 初回通過率・再発候補(要求時のみ・テキスト出力)
+[報告]  feedback.sh report --last → 朝会/振り返りの5分議題(実施後に --mark で集計期間の開始点を更新)
 [監査]  bash scripts/audit.sh          — 脆弱性監査(必要なときに手動実行・ネットワーク使用)
                                           成功時のみ .last-audit を更新 → report が期限を見る
 ```

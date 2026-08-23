@@ -16,7 +16,8 @@ scripts/
 ├── lib.sh            # Shared utilities for check.sh / check_file.sh, including has()
 ├── harness_config.py # Sole parser for .feedback/config.yaml (YAML subset, schema validation, 3-level resolution)
 ├── feedback_store.py # Repository lock, atomic writes, and interrupted-transaction recovery
-├── feedback_log.py   # Feedback CLI: record, promote, review, aggregate, and report by period
+├── feedback.sh       # Cross-platform Feedback CLI entry point (resolves Python executable)
+├── feedback_log.py   # Feedback CLI implementation: record, promote, review, aggregate, and report
 ├── audit.sh          # On-demand vulnerability audit (the dedicated networked check; never called by Stop hooks)
 ├── init.sh           # Installer for environments without Hooks (not copied into target projects)
 └── hooks/
@@ -30,10 +31,10 @@ The scripts fall into three groups:
 | Group | Scripts | Role |
 |------|-----------|------|
 | Automated checks | `check.sh`, `check_file.sh`, `hooks/*` | Returns lint/test/build results without adding downloads or remote lookups of its own |
-| Feedback accumulation and measurement | `feedback_log.py` | Records and generalizes human feedback for future sessions; produces metrics and period summaries |
+| Feedback accumulation and measurement | `feedback.sh` | Records and generalizes human feedback for future sessions; produces metrics and period summaries |
 | On-demand audit (networked) | `audit.sh` | Checks dependencies for vulnerabilities; never called by Hooks |
 
-There are two distribution models. With a **plugin installation**, all files remain in the plugin. Codex uses `PLUGIN_ROOT` (Hooks also set the compatibility variable `CLAUDE_PLUGIN_ROOT`), while Claude Code uses `CLAUDE_PLUGIN_ROOT`. With an **`init.sh` installation**, `check.sh`, `checks/*.sh`, `check_file.sh`, `lib.sh`, `audit.sh`, `harness_config.py`, `feedback_store.py`, `feedback_log.py`, and all three language versions of this README are copied into the target project's `scripts/` directory. `hooks/` and `init.sh` itself are not copied: Hooks are plugin-only, and `init.sh` runs from the source repository.
+There are two distribution models. With a **plugin installation**, all files remain in the plugin. Codex uses `PLUGIN_ROOT` (Hooks also set the compatibility variable `CLAUDE_PLUGIN_ROOT`), while Claude Code uses `CLAUDE_PLUGIN_ROOT`. With an **`init.sh` installation**, `check.sh`, `checks/*.sh`, `check_file.sh`, `lib.sh`, `feedback.sh`, `audit.sh`, `harness_config.py`, `feedback_store.py`, `feedback_log.py`, and all three language versions of this README are copied into the target project's `scripts/` directory. `hooks/` and `init.sh` itself are not copied: Hooks are plugin-only, and `init.sh` runs from the source repository.
 
 ## Shared design principles
 
@@ -58,7 +59,7 @@ bash scripts/check.sh --list-checks --json    # Print the same information as JS
 bash scripts/check.sh --help                  # Print usage (exit 0)
 ```
 
-Every distributed script (`check.sh`, `check_file.sh`, `audit.sh`, `init.sh`, `harness_config.py`, `feedback_log.py`) prints usage and exits 0 for `--help` / `-h`. `check.sh`, `audit.sh`, and `init.sh` reject unknown options with **`exit 2`**, because treating an unknown option as a project root produces "directory not found" and hides the fact that the argument was the problem. `check_file.sh` is the exception: apart from `--help`, it treats a leading `-` as a filename, since a non-zero exit from this script feeds straight into a PostToolUse rejection.
+Every distributed script (`check.sh`, `check_file.sh`, `feedback.sh`, `audit.sh`, `init.sh`, `harness_config.py`, `feedback_log.py`) prints usage and exits 0 for `--help` / `-h`. `check.sh`, `audit.sh`, and `init.sh` reject unknown options with **`exit 2`**, because treating an unknown option as a project root produces "directory not found" and hides the fact that the argument was the problem. `check_file.sh` is the exception: apart from `--help`, it treats a leading `-` as a filename, since a non-zero exit from this script feeds straight into a PostToolUse rejection.
 
 **Behavior:** Runs stages for every detected stack, runs stack-independent cross-cutting checks, and prints a `PASS`/`FAIL`/`WARN`/`SKIP` summary.
 
@@ -126,19 +127,19 @@ bash scripts/check_file.sh <file-path>
 
 | Extension | Checks |
 |---|---|
-| `.py` | `ruff check`, falling back to `python3 -m py_compile` |
+| `.py` | `ruff check`, falling back to `-m py_compile` with the selected Python executable |
 | `.ts`/`.tsx`/`.js`/`.jsx`/`.mjs`/`.cjs` | `eslint` when configured; otherwise `.js`/`.mjs`/`.cjs` use `node --check` |
 | `.go` | `gofmt -l` (detects unformatted files) |
 | `.rs` | `rustfmt --check` |
 | `.sh` | `bash -n`, plus `shellcheck` when available |
-| `.json`/`.yaml`/`.yml` | Parse validation with `python3` |
+| `.json`/`.yaml`/`.yml` | Parse validation with the selected Python executable |
 
 - **Exit codes:** `0` = no issue, WARN only, no file argument, or target file does not exist / `1` = FAIL or invalid config (details are printed)
 
-### `feedback_log.py` — feedback recording CLI
+### `feedback.sh` — feedback recording CLI
 
 ```bash
-python3 scripts/feedback_log.py <subcommand> [arguments]
+bash scripts/feedback.sh <subcommand> [arguments]
 ```
 
 Entries are stored as Markdown with frontmatter under `.feedback/log/`; generalized rules are promoted into `.feedback/rules.md`. **Never create or edit log files directly; always use this CLI**, because inconsistent frontmatter breaks `list` and `promote`.
@@ -196,7 +197,7 @@ Claude Code and the Codex app / CLI use the Hooks supplied by the plugin (`hooks
 | Before response completion | `Stop` | `on_stop.sh` → `check.sh` | A FAIL blocks completion and correction continues; the check itself is skipped when nothing changed after the previous successful run |
 
 - **Apply rules:** The `apply-feedback` skill reads `.feedback/rules.md`. When `init.sh` is also in use, CLAUDE.md / AGENTS.md describes the manual fallback for disabled Hooks.
-- **Record feedback:** The `capture-feedback` and `feedback-loop` skills call `feedback_log.py`.
+- **Record feedback:** The `capture-feedback` and `feedback-loop` skills call `feedback.sh`.
 - See “Using Skills, Agents, and Commands (plugin installations)” in the project-root README.md for Skill and Agent triggers. That section is not distributed by `init.sh`; the rules-driven workflow below replaces it.
 - **Configuration:** The plugin uses `hooks/hooks.json` plus `skills/`. Claude Code reads `.claude-plugin/plugin.json`; Codex reads `.codex-plugin/plugin.json`. Rules in CLAUDE.md / AGENTS.md are added only when `init.sh` is also used.
 
@@ -206,11 +207,11 @@ In an `init.sh`-only installation or when Hooks are disabled or untrusted, Claud
 
 | Timing | Command | Basis |
 |---|---|---|
-| Session start | `python3 scripts/feedback_log.py rules` | Apply rules to the task (§1) |
+| Session start | `bash scripts/feedback.sh rules` | Apply rules to the task (§1) |
 | After every code change | `bash scripts/check_file.sh <edited-file>` | Immediate check and correction (§2) |
 | Before completion | `bash scripts/check.sh` | Confirm `ALL PASS` before completion; never report completion while FAIL remains (§3) |
-| After feedback | `python3 scripts/feedback_log.py add --category … --summary … --source human` | Record immediately—the only persistence mechanism (§4) |
-| Retrospective / stand-up | `python3 scripts/feedback_log.py report --last --mark` | Discuss the period digest, then advance its marker |
+| After feedback | `bash scripts/feedback.sh add --category … --summary … --source human` | Record immediately—the only persistence mechanism (§4) |
+| Retrospective / stand-up | `bash scripts/feedback.sh report --last --mark` | Discuss the period digest, then advance its marker |
 | When prompted to audit | `bash scripts/audit.sh` | Run when `stats` or `report` recommends an audit after seven days or when none has run |
 
 - **Apply rules:** CLAUDE.md / AGENTS.md §1 requires reading `.feedback/rules.md`.
@@ -232,12 +233,14 @@ In an `init.sh`-only installation or when Hooks are disabled or untrusted, Claud
 
 ## Required tools
 
-- **Required:** `bash`, `python3` (used for Hook JSON parsing, `feedback_log.py`, JSON/YAML validation, and internal-link validation)
+- **Required:** `bash`, Python 3.10+ (`python3` or `python`; used for Hook JSON parsing, the feedback CLI, JSON/YAML validation, and internal-link validation)
 - **Optional — stack standards** (detected automatically; missing tools produce `SKIP`): `ruff`, `mypy`, `pytest` / `npm`/`pnpm`/`yarn`, `eslint`, `tsc` / `go`, `gofmt` / `cargo`, `rustfmt`, `clippy` / `mvn`, `gradle` / `shellcheck`
 - **Optional — extended checks:** `pytest-cov` (coverage) / `deptry`, `vulture`, `import-linter` (Python dependencies, dead code, architecture constraints) / `secretlint`, `dockerfilelint`, `knip`, `prettier` (through npm; this repository's `package.json` is an example) / `gitleaks`, `actionlint`, `hadolint`, `oasdiff`, `cargo-semver-checks` (used when OS-specific binaries are already on PATH)
 - **Optional — audit only** (`audit.sh`, networked): `pip-audit` / `npm` / `govulncheck` / `cargo-audit`
 
 The harness never installs any of them. It uses `npx --no-install` so missing packages are not downloaded from the network without permission.
+
+On Windows, run the existing `*.sh` files from Git Bash bundled with Git for Windows. The shared runner resolves the Python executable name, so no PowerShell-specific scripts are required.
 
 ## Install in another project
 

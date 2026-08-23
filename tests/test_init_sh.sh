@@ -19,6 +19,7 @@ assert_eq "0" "$?" "init.sh が成功する: $OUT"
 assert_file_exists "$WORK/target/scripts/check.sh" "check.sh"
 assert_file_exists "$WORK/target/scripts/check_file.sh" "check_file.sh"
 assert_file_exists "$WORK/target/scripts/lib.sh" "lib.sh"
+assert_file_exists "$WORK/target/scripts/feedback.sh" "feedback.sh"
 assert_file_exists "$WORK/target/scripts/feedback_log.py" "feedback_log.py"
 assert_file_exists "$WORK/target/scripts/feedback_store.py" "feedback_store.py"
 for runner in python node go rust java shell cross_cutting; do

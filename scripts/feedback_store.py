@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import argparse
 import contextlib
-import fcntl
+import errno
 import hashlib
 import json
 import os
@@ -14,6 +14,11 @@ import tempfile
 import time
 from collections.abc import Callable, Iterable
 from pathlib import Path
+
+if os.name == "nt":
+    import msvcrt
+else:
+    import fcntl
 
 LOCK_NAME = ".state.lock"
 JOURNAL_NAME = ".transaction.json"
@@ -24,6 +29,32 @@ EVENT_KEEP_LINES = 2000
 
 class StoreError(RuntimeError):
     """状態保存または回復に失敗した。"""
+
+
+def _try_state_lock(fd: int) -> None:
+    """現在のplatformで排他lockを非blockで取得する。"""
+    if os.name == "nt":
+        if os.fstat(fd).st_size == 0:
+            os.write(fd, b"\0")
+            os.fsync(fd)
+        os.lseek(fd, 0, os.SEEK_SET)
+        try:
+            msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+        except OSError as exc:
+            if exc.errno in (errno.EACCES, errno.EAGAIN, errno.EDEADLK):
+                raise BlockingIOError from exc
+            raise
+        return
+    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+
+def _release_state_lock(fd: int) -> None:
+    """_try_state_lock で取得した排他lockを解放する。"""
+    if os.name == "nt":
+        os.lseek(fd, 0, os.SEEK_SET)
+        msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+        return
+    fcntl.flock(fd, fcntl.LOCK_UN)
 
 
 def _fsync_dir(path: Path) -> None:
@@ -134,10 +165,12 @@ def state_lock(root: Path, timeout_seconds: int):
     path = feedback_dir / LOCK_NAME
     fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
     deadline = time.monotonic() + timeout_seconds
+    locked = False
     try:
         while True:
             try:
-                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                _try_state_lock(fd)
+                locked = True
                 break
             except BlockingIOError:
                 if time.monotonic() >= deadline:
@@ -148,7 +181,8 @@ def state_lock(root: Path, timeout_seconds: int):
         yield
     finally:
         try:
-            fcntl.flock(fd, fcntl.LOCK_UN)
+            if locked:
+                _release_state_lock(fd)
         finally:
             os.close(fd)
 

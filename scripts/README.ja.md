@@ -16,7 +16,8 @@ scripts/
 ├── lib.sh            # check.sh / check_file.sh の共有ユーティリティ(has() ほか)
 ├── harness_config.py # 設定(.feedback/config.yaml)の唯一のパーサ(YAMLサブセット・スキーマ検証・3層解決)
 ├── feedback_store.py # repository lock・atomic write・中断transaction回復
-├── feedback_log.py   # フィードバック記録CLI: 記録・昇華・棚卸し・集計・期間レポート
+├── feedback.sh       # OS共通のフィードバックCLI入口（Python executableを解決）
+├── feedback_log.py   # フィードバックCLI実装: 記録・昇華・棚卸し・集計・期間レポート
 ├── audit.sh          # オンデマンド脆弱性監査(ハーネスが意図して通信する専用検査。Stopフックからは呼ばれない)
 ├── init.sh           # 導入スクリプト(Hooks 非対応環境向け資産の展開。導入先にはコピーされない)
 └── hooks/
@@ -30,10 +31,10 @@ scripts/
 | 系統 | スクリプト | 役割 |
 |------|-----------|------|
 | 自動チェック | `check.sh`, `check_file.sh`, `hooks/*` | 依存取得やリモート参照を追加せず lint/test/build 結果をエージェントに返し、自己修正させる |
-| フィードバック蓄積・測定 | `feedback_log.py` | 人間の指摘を記録・一般化し、次セッションに引き継ぐ。数字と期間ダイジェストを出す |
+| フィードバック蓄積・測定 | `feedback.sh` | 人間の指摘を記録・一般化し、次セッションに引き継ぐ。数字と期間ダイジェストを出す |
 | オンデマンド監査(ネットワーク) | `audit.sh` | 依存の脆弱性を調べる。フックからは呼ばれない |
 
-配布のされ方が2通りある。**プラグイン導入**では全ファイルがプラグイン側に置かれる。Codex は `PLUGIN_ROOT`（Hooks では互換変数 `CLAUDE_PLUGIN_ROOT` も設定）、Claude Code は `CLAUDE_PLUGIN_ROOT` を使う。**`init.sh` 導入**では `check.sh` / `checks/*.sh` / `check_file.sh` / `lib.sh` / `audit.sh` / `harness_config.py` / `feedback_store.py` / `feedback_log.py` / このREADMEの英語版・日本語版・簡体字中国語版が導入先の `scripts/` にコピーされる（`hooks/` と `init.sh` 自身はコピーされない — 前者はプラグイン専用、後者は配布元から実行するもの）。
+配布のされ方が2通りある。**プラグイン導入**では全ファイルがプラグイン側に置かれる。Codex は `PLUGIN_ROOT`（Hooks では互換変数 `CLAUDE_PLUGIN_ROOT` も設定）、Claude Code は `CLAUDE_PLUGIN_ROOT` を使う。**`init.sh` 導入**では `check.sh` / `checks/*.sh` / `check_file.sh` / `lib.sh` / `feedback.sh` / `audit.sh` / `harness_config.py` / `feedback_store.py` / `feedback_log.py` / このREADMEの英語版・日本語版・簡体字中国語版が導入先の `scripts/` にコピーされる（`hooks/` と `init.sh` 自身はコピーされない — 前者はプラグイン専用、後者は配布元から実行するもの）。
 
 ## 設計思想(共通)
 
@@ -58,7 +59,7 @@ bash scripts/check.sh --list-checks --json   # 同じ内容を JSON で出力
 bash scripts/check.sh --help          # 使い方を表示(exit 0)
 ```
 
-配布する各スクリプト(`check.sh` / `check_file.sh` / `audit.sh` / `init.sh` / `harness_config.py` / `feedback_log.py`)は `--help` / `-h` で使い方を表示して `exit 0` する。`check.sh` / `audit.sh` / `init.sh` は不明なオプションを **`exit 2`** で拒否する — 未知のオプションをプロジェクトルート扱いすると「ディレクトリが見つかりません」となり、原因が引数だと気づけないため。`check_file.sh` だけは例外で、`--help` 以外の `-` 始まりもファイル名として扱う(このスクリプトの非0は PostToolUse の差し戻しに直結するため)。
+配布する各スクリプト(`check.sh` / `check_file.sh` / `feedback.sh` / `audit.sh` / `init.sh` / `harness_config.py` / `feedback_log.py`)は `--help` / `-h` で使い方を表示して `exit 0` する。`check.sh` / `audit.sh` / `init.sh` は不明なオプションを **`exit 2`** で拒否する — 未知のオプションをプロジェクトルート扱いすると「ディレクトリが見つかりません」となり、原因が引数だと気づけないため。`check_file.sh` だけは例外で、`--help` 以外の `-` 始まりもファイル名として扱う(このスクリプトの非0は PostToolUse の差し戻しに直結するため)。
 
 **動作:** 検出したスタックごとにステージを走らせ、スタック非依存の横断チェックも実行して、`PASS`/`FAIL`/`WARN`/`SKIP` の要約を出す。
 
@@ -126,19 +127,19 @@ bash scripts/check_file.sh <ファイルパス>
 
 | 拡張子 | チェック内容 |
 |--------|-------------|
-| `.py` | `ruff check`(無ければ `python3 -m py_compile`) |
+| `.py` | `ruff check`(無ければ選択した Python の `-m py_compile`) |
 | `.ts`/`.tsx`/`.js`/`.jsx`/`.mjs`/`.cjs` | ESLint設定があれば `eslint`、無ければ `.js`/`.mjs`/`.cjs` を `node --check` |
 | `.go` | `gofmt -l`(未フォーマットを検出) |
 | `.rs` | `rustfmt --check` |
 | `.sh` | `bash -n` + `shellcheck`(あれば) |
-| `.json`/`.yaml`/`.yml` | `python3` でパース検証 |
+| `.json`/`.yaml`/`.yml` | 選択した Python でパース検証 |
 
 - **exit code**: `0` = 問題なし、WARN のみ、ファイル未指定、または対象ファイルが存在しない / `1` = FAIL、または config の設定エラー(内容を出力)
 
-### `feedback_log.py` — フィードバック記録CLI
+### `feedback.sh` — フィードバック記録CLI
 
 ```bash
-python3 scripts/feedback_log.py <サブコマンド> [引数]
+bash scripts/feedback.sh <サブコマンド> [引数]
 ```
 
 エントリは `.feedback/log/` に frontmatter 付き Markdown、一般化ルールは `.feedback/rules.md` に昇華される。**logファイルを直接作成・編集せず、必ずこのCLIを使うこと**(frontmatter形式が揃わないと `list`/`promote` が壊れる)。
@@ -196,7 +197,7 @@ Claude Code と Codex app / CLI は、プラグインが提供する Hooks (`hoo
 | 応答完了前 | `Stop` | `on_stop.sh` → `check.sh` | FAILがあれば完了をブロック → 修正を継続(前回の成功検査以降に変更が無ければ検査自体を省略) |
 
 - **ルールの反映**: `apply-feedback` スキルが `.feedback/rules.md` を読み込む。`init.sh` を併用している場合は、`CLAUDE.md` / `AGENTS.md` の規約が Hooks 無効時の手動手順も示す。
-- **指摘の記録**: `capture-feedback` / `feedback-loop` スキルが `feedback_log.py` を呼ぶ。
+- **指摘の記録**: `capture-feedback` / `feedback-loop` スキルが `feedback.sh` を呼ぶ。
 - スキル・エージェントの起動条件と手順はプロジェクトルート README.md の「Skills / Agents / Commands の使い方（プラグイン導入時）」節を参照（`init.sh` 導入では配られず、下記の規約駆動が代替）。
 - **設定ファイル**: プラグインの `hooks/hooks.json` + `skills/`。Claude Code は `.claude-plugin/plugin.json`、Codex は `.codex-plugin/plugin.json` を読む。`CLAUDE.md` / `AGENTS.md` の規約は `init.sh` 併用時に追加される。
 
@@ -206,11 +207,11 @@ Claude Code と Codex app / CLI は、プラグインが提供する Hooks (`hoo
 
 | タイミング | 実行コマンド | 根拠 |
 |-----------|-------------|------|
-| セッション開始時 | `python3 scripts/feedback_log.py rules` | ルールを作業方針に反映 (§1) |
+| セッション開始時 | `bash scripts/feedback.sh rules` | ルールを作業方針に反映 (§1) |
 | コード変更のたび | `bash scripts/check_file.sh <編集したファイル>` | 即時チェック、問題あれば修正 (§2) |
 | 完了前 | `bash scripts/check.sh` | `ALL PASS` を確認してから完了。FAILのまま報告してはならない (§3) |
-| 指摘を受けたら | `python3 scripts/feedback_log.py add --category … --summary … --source human` | その場で記録(引き継ぐ唯一の手段) (§4) |
-| 振り返り・朝会 | `python3 scripts/feedback_log.py report --last --mark` | 期間ダイジェストを議題にし、実施後に基点を更新 |
+| 指摘を受けたら | `bash scripts/feedback.sh add --category … --summary … --source human` | その場で記録(引き継ぐ唯一の手段) (§4) |
+| 振り返り・朝会 | `bash scripts/feedback.sh report --last --mark` | 期間ダイジェストを議題にし、実施後に基点を更新 |
 | 監査を促されたら | `bash scripts/audit.sh` | `stats`/`report` が「監査を推奨」を出したとき(7日超過・未実行) |
 
 - **ルールの反映**: `CLAUDE.md` / `AGENTS.md` §1 で `.feedback/rules.md` の必読を規定。
@@ -232,12 +233,14 @@ Claude Code と Codex app / CLI は、プラグインが提供する Hooks (`hoo
 
 ## 必要ツール
 
-- **必須**: `bash`, `python3`(hooks内のJSONパース・`feedback_log.py`・json/yaml検証・内部リンク検証で使用)
+- **必須**: `bash`, Python 3.10 以上（`python3` または `python`。Hooks 内の JSON パース・フィードバック CLI・JSON/YAML 検証・内部リンク検証で使用）
 - **任意 — スタック標準**(自動検出・未インストールなら `SKIP`): `ruff`, `mypy`, `pytest` / `npm`/`pnpm`/`yarn`, `eslint`, `tsc` / `go`, `gofmt` / `cargo`, `rustfmt`, `clippy` / `mvn`, `gradle` / `shellcheck`
 - **任意 — 拡張検査**: `pytest-cov`(カバレッジ)/ `deptry`, `vulture`, `import-linter`(Python の依存・デッドコード・アーキ制約)/ `secretlint`, `dockerfilelint`, `knip`, `prettier`(npm 経由。このリポジトリの `package.json` が例)/ `gitleaks`, `actionlint`, `hadolint`, `oasdiff`, `cargo-semver-checks`(OS固有バイナリのため PATH にあれば使う)
 - **任意 — 監査専用**(`audit.sh` のみ・ネットワーク使用): `pip-audit` / `npm` / `govulncheck` / `cargo-audit`
 
 いずれもハーネスが導入することはない。`npx --no-install` を使うのは、未導入時にネットワークから勝手に取得させないため。
+
+Windows では Git for Windows 付属の Git Bash から既存の `*.sh` を実行する。Python の executable 名は共通ランナーが解決するため、PowerShell 用スクリプトは不要。
 
 ## 他プロジェクトへの導入
 

@@ -98,20 +98,22 @@ assert_eq "aggregator|-q verify" "$(cat "$CALL_LOG")" "ルート集約 POM を�
 assert_not_contains "$OUT" "module/pom.xml" "配下 POM を重複して実行しない"
 
 # wrapper の権限不備はグローバル Maven へ黙って逃がさず、環境 SKIP にする。
-P5="$(new_project non_executable_wrapper)"
-printf '<project/>\n' > "$P5/pom.xml"
-make_wrapper "$P5/mvnw" non-executable no
-: > "$CALL_LOG"
-OUT="$(run_check "$P5")"; RC=$?
-assert_eq "0" "$RC" "実行不可 wrapper はコード失敗にしない"
-assert_contains "$OUT" "SKIP  java: mvnw verify (実行不可)" "wrapper の権限不備を可視化する"
-assert_eq "" "$(cat "$CALL_LOG")" "権限不備時にグローバル Maven を実行しない"
-: > "$CALL_LOG"
-OUT="$(run_check "$P5" --list-checks)"; RC=$?
-assert_eq "0" "$RC" "実行不可 wrapper の一覧表示は exit 0"
-assert_contains "$OUT" "skip" "一覧でも wrapper の権限不備を SKIP にする"
-assert_contains "$OUT" "Maven wrapper 実行不可" "一覧に wrapper の権限不備を表示する"
-assert_eq "" "$(cat "$CALL_LOG")" "権限不備の一覧表示でも Maven を起動しない"
+if [[ -z "${MSYSTEM:-}" ]]; then
+  P5="$(new_project non_executable_wrapper)"
+  printf '<project/>\n' > "$P5/pom.xml"
+  make_wrapper "$P5/mvnw" non-executable no
+  : > "$CALL_LOG"
+  OUT="$(run_check "$P5")"; RC=$?
+  assert_eq "0" "$RC" "実行不可 wrapper はコード失敗にしない"
+  assert_contains "$OUT" "SKIP  java: mvnw verify (実行不可)" "wrapper の権限不備を可視化する"
+  assert_eq "" "$(cat "$CALL_LOG")" "権限不備時にグローバル Maven を実行しない"
+  : > "$CALL_LOG"
+  OUT="$(run_check "$P5" --list-checks)"; RC=$?
+  assert_eq "0" "$RC" "実行不可 wrapper の一覧表示は exit 0"
+  assert_contains "$OUT" "skip" "一覧でも wrapper の権限不備を SKIP にする"
+  assert_contains "$OUT" "Maven wrapper 実行不可" "一覧に wrapper の権限不備を表示する"
+  assert_eq "" "$(cat "$CALL_LOG")" "権限不備の一覧表示でも Maven を起動しない"
+fi
 
 # Maven 自体が起動できない環境は明示的な SKIP にする。
 P6="$(new_project missing_maven)"

@@ -23,7 +23,7 @@ run_python_checks() {
     # pytest-cov は設定の --cov-fail-under を exit code で強制するため、
     # 閾値宣言があるプロジェクトは自動的に FAIL ゲートになる
     PYTEST_ARGS=(-q -x)
-    if python3 -c "import pytest_cov" >/dev/null 2>&1; then
+    if harness_python -c "import pytest_cov" >/dev/null 2>&1; then
       PYTEST_ARGS+=(--cov --cov-report=term-missing)
     fi
     if [[ -d tests ]] || compgen -G "test_*.py" >/dev/null 2>&1 \

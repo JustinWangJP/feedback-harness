@@ -279,7 +279,7 @@ bash scripts/check.sh --list-checks --json
 
 ### それでも分からなければ
 
-`python3 scripts/harness_config.py --json` で解決済みの全実効値を出せる。「[YAML の書ける記法・書けない記法](#yaml-の書ける記法書けない記法)」に該当しないかも確認すること。
+`bash -c '. scripts/lib.sh; harness_python scripts/harness_config.py --json'` で解決済みの全実効値を出せる。「[YAML の書ける記法・書けない記法](#yaml-の書ける記法書けない記法)」に該当しないかも確認すること。
 
 ## YAML の書ける記法・書けない記法
 

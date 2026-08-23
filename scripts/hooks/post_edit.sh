@@ -16,7 +16,7 @@ INPUT="$(cat)"
 FILES=()
 while IFS= read -r file; do
   [[ -n "$file" ]] && FILES[${#FILES[@]}]="$file"
-done < <(printf '%s' "$INPUT" | python3 -c '
+done < <(printf '%s' "$INPUT" | harness_python -c '
 import json,re,sys
 try:
     d = json.load(sys.stdin)
@@ -48,7 +48,7 @@ try:
             print(path)
 except Exception:
     pass
-')
+' | tr -d '\r')
 
 if [[ ${#FILES[@]} -eq 0 ]]; then
   exit 0
@@ -59,6 +59,7 @@ FAILED=0
 FAIL_OUTPUT=""
 
 for FILE in "${FILES[@]}"; do
+  FILE="$(harness_bash_path "$FILE")"
   case "$FILE" in
     /*) CHECK_PATH="$FILE" ;;
     *) CHECK_PATH="$ROOT/$FILE" ;;

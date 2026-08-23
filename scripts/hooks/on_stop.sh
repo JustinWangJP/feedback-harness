@@ -25,13 +25,14 @@ log_warns() { # log_warns <check.shの出力>
 }
 
 INPUT="$(cat)"
-ACTIVE="$(printf '%s' "$INPUT" | python3 -c '
+ACTIVE="$(printf '%s' "$INPUT" | harness_python -c '
 import json,sys
 try:
     print(str(json.load(sys.stdin).get("stop_hook_active", False)).lower())
 except Exception:
     print("false")
 ')"
+ACTIVE="${ACTIVE%$'\r'}"
 
 # 検査ルートを明示的に渡す。省略するとカレントディレクトリが検査対象になり、
 # サブディレクトリ起動やCI流用時に沈黙して誤ったツリーを検査する。
@@ -64,5 +65,5 @@ log_warns "$OUT"
 harness_log_event "$ROOT" stop fail
 echo "$OUT" >&2
 # 反復する失敗はルール/自動チェック改善の材料(失敗シグナル)。単発の失敗は記録不要
-echo "HINT: 同種の失敗がこのセッションで繰り返されている場合は、修正後に python3 \"$DIR/../feedback_log.py\" add --source hook で記録を検討すること" >&2
+echo "HINT: 同種の失敗がこのセッションで繰り返されている場合は、修正後に bash \"$DIR/../feedback.sh\" add --source hook で記録を検討すること" >&2
 exit 2

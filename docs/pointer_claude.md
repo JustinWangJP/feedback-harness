@@ -7,8 +7,8 @@
 `.feedback/rules.md` と、まだルール化されていない open エントリを確認し、今回の作業方針へ反映する。
 
 ```bash
-python3 scripts/feedback_log.py rules
-python3 scripts/feedback_log.py list --status open
+bash scripts/feedback.sh rules
+bash scripts/feedback.sh list --status open
 ```
 
 open エントリと rules.md が食い違う場合は、検証済みの rules.md を優先する。
@@ -42,7 +42,7 @@ FAIL（exit 1）がある状態で完了を報告してはならない。WARN �
 再発しうる指摘と、次回も再現したい成功パターンをその場で記録する。そのタスク限りの指示は記録しない。
 
 ```bash
-python3 scripts/feedback_log.py add --category <style|architecture|testing|naming|workflow|domain> \
+bash scripts/feedback.sh add --category <style|architecture|testing|naming|workflow|domain> \
   --summary "<1文要約>" --detail "<文脈>" --source human \
   [--signal <context|instruction|workflow|failure>]
 ```

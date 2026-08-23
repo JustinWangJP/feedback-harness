@@ -151,7 +151,7 @@ assert_contains "$(python3 "$CFG" --keys)" "ruff-format" "--keys がハイフン
 # 実効値は --json で確認する。出所(どの層で決まったか)も一緒に返る
 mkdir -p "$WORK/proj/.feedback"
 resolve_json() { # resolve_json [環境変数の代入...]
-  env "$@" python3 "$CFG" --json "$WORK/proj"
+  env "$@" "$TEST_PYTHON" "$(native_path "$CFG")" --json "$(native_path "$WORK/proj")"
 }
 get() { python3 -c 'import json,sys; d=json.load(sys.stdin); print(json.dumps(d, sort_keys=True, ensure_ascii=False))'; }
 

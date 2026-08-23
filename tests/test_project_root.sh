@@ -29,12 +29,13 @@ assert_eq "$WORK/from-env" \
 # 4: CLAUDE_PROJECT_DIR が実在しないディレクトリなら無視して次段へ
 mkdir -p "$WORK/repo/sub"
 ( cd "$WORK/repo" && git init -q . )
-assert_eq "$WORK/repo" \
+GIT_ROOT="$(harness_bash_path "$(git -C "$WORK/repo/sub" rev-parse --show-toplevel)")"
+assert_eq "$GIT_ROOT" \
   "$(cd "$WORK/repo/sub" && CLAUDE_PROJECT_DIR="$WORK/no-such-dir" harness_project_root)" \
   "壊れた CLAUDE_PROJECT_DIR は git にフォールバック"
 
 # 5: 環境変数が無ければ git のトップレベル(サブディレクトリからでもリポジトリルート)
-assert_eq "$WORK/repo" \
+assert_eq "$GIT_ROOT" \
   "$(cd "$WORK/repo/sub" && unset CLAUDE_PROJECT_DIR; harness_project_root)" \
   "git rev-parse --show-toplevel を使う"
 

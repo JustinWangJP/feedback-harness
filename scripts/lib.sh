@@ -20,6 +20,67 @@ has() {
   return 0
 }
 
+# harness_python <args...> — Python 3.10+ を実行する。
+#
+# Unix では python3、Windows の Git Bash では python だけが PATH にある構成が
+# 一般的なので、全入口で同じ順序で解決する。HARNESS_PYTHON には明示したい
+# executable 名または Git Bash から実行できる path を指定できる。
+_harness_python_works() {
+  command -v "$1" >/dev/null 2>&1 || return 1
+  "$1" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)' \
+    >/dev/null 2>&1
+}
+
+_harness_python_exec() {
+  local executable="$1"
+  shift
+  local args=()
+  local arg
+  for arg in "$@"; do
+    # Git Bash の /c/... や /tmp/... は Windows Python には存在しない。
+    # MSYS の自動変換は Bash function/command形によって効かない場合があるため、
+    # Pythonへ渡す独立した絶対path引数だけを境界で明示変換する。
+    if [[ -n "${MSYSTEM:-}" && "$arg" == /* ]] && command -v cygpath >/dev/null 2>&1; then
+      args+=("$(cygpath -w -- "$arg")")
+    else
+      args+=("$arg")
+    fi
+  done
+  "$executable" "${args[@]}"
+}
+
+harness_has_python() {
+  if [[ -n "${HARNESS_PYTHON:-}" ]]; then
+    _harness_python_works "$HARNESS_PYTHON"
+  else
+    _harness_python_works python3 || _harness_python_works python
+  fi
+}
+
+harness_python() {
+  if [[ -n "${HARNESS_PYTHON:-}" ]]; then
+    _harness_python_works "$HARNESS_PYTHON" || return 127
+    _harness_python_exec "$HARNESS_PYTHON" "$@"
+  elif _harness_python_works python3; then
+    _harness_python_exec python3 "$@"
+  elif _harness_python_works python; then
+    _harness_python_exec python "$@"
+  else
+    return 127
+  fi
+}
+
+# harness_bash_path <path> — Windows native pathをGit Bash pathへ正規化する。
+harness_bash_path() {
+  local path="$1"
+  if [[ -n "${MSYSTEM:-}" && "$path" =~ ^[A-Za-z]:[\\/].* ]] \
+     && command -v cygpath >/dev/null 2>&1; then
+    cygpath -u -- "$path"
+  else
+    printf '%s\n' "$path"
+  fi
+}
+
 # 重大度しきい値(shellcheck の -S に渡す)。既定は warning。
 # style/info まで拾うと、導入初日のプロジェクトが既存コードのSC2086等で
 # 完了をブロックされ続けるため、既定では拾わない。
@@ -42,16 +103,19 @@ SHELLCHECK_SEVERITY="${FEEDBACK_SHELLCHECK_SEVERITY:-warning}"
 harness_project_root() {
   local explicit="${1:-}"
   if [[ -n "$explicit" ]]; then
+    explicit="$(harness_bash_path "$explicit")"
     (cd "$explicit" 2>/dev/null && pwd) || return 1
     return 0
   fi
-  if [[ -n "${CLAUDE_PROJECT_DIR:-}" && -d "${CLAUDE_PROJECT_DIR}" ]]; then
-    (cd "$CLAUDE_PROJECT_DIR" && pwd)
+  local project_dir="${CLAUDE_PROJECT_DIR:-}"
+  project_dir="$(harness_bash_path "$project_dir")"
+  if [[ -n "$project_dir" && -d "$project_dir" ]]; then
+    (cd "$project_dir" && pwd)
     return 0
   fi
   local top
   if top="$(git rev-parse --show-toplevel 2>/dev/null)" && [[ -n "$top" ]]; then
-    printf '%s\n' "$top"
+    harness_bash_path "$top"
     return 0
   fi
   pwd
@@ -67,12 +131,12 @@ harness_load_config() {
   [[ -n "$root" ]] || root="$(harness_project_root)"
   local libdir="${BASH_SOURCE[0]%/*}"
   local shell_out
-  if ! shell_out="$(python3 "$libdir/harness_config.py" --shell "$root" 2>/dev/null)"; then
-    # ローダー自体が起動できない(python3 不在等)。既定値で続行するが、
+  if ! shell_out="$(harness_python "$libdir/harness_config.py" --shell "$root" 2>/dev/null)"; then
+    # ローダー自体が起動できない(Python 3.10+ 不在等)。既定値で続行するが、
     # FEEDBACK_CHECK_SKIP 等の環境変数による上書きは失われるため、
     # 黙って挙動を変えず HARNESS_CONFIG_ERROR で可視化する(既存の
     # 「config壊れているがFAILを立てて続行する」経路に乗せる)
-    HARNESS_CONFIG_ERROR="設定ローダー(harness_config.py)を起動できませんでした(python3 を確認してください)。既定値で続行します — FEEDBACK_CHECK_SKIP 等の環境変数による上書きは適用されません。"
+    HARNESS_CONFIG_ERROR="設定ローダー(harness_config.py)を起動できませんでした(Python 3.10+ を確認してください)。既定値で続行します — FEEDBACK_CHECK_SKIP 等の環境変数による上書きは適用されません。"
     HARNESS_EXCLUDE=""
     HARNESS_LOG_TAIL_LINES=40
     HARNESS_SHELLCHECK_MIN_SEVERITY=warning
@@ -150,6 +214,8 @@ harness_node_pm() {
 # 渡す前に同じ形へ揃える必要がある。
 harness_relpath() {
   local path="$1" root="$2" abs
+  path="$(harness_bash_path "$path")"
+  root="$(harness_bash_path "$root")"
   case "$path" in
     /*) abs="$path" ;;
     *) abs="$PWD/$path" ;;
@@ -228,7 +294,7 @@ harness_log_event() {
       "$ts" "$hook" "$result")" || return 0
   fi
   local libdir="${BASH_SOURCE[0]%/*}"
-  python3 "$libdir/feedback_store.py" append-event "$root" "$event_json" \
+  harness_python "$libdir/feedback_store.py" append-event "$root" "$event_json" \
     --lock-timeout "${HARNESS_FEEDBACK_LOCK_TIMEOUT_SECONDS:-10}" >/dev/null 2>&1 || true
   return 0
 }
@@ -248,7 +314,7 @@ harness_log_warn() {
   event_json="$(printf '{"ts":"%s","hook":"stop","result":"warn","check":"%s"}' \
     "$ts" "$(harness_json_escape "$label")")" || return 0
   local libdir="${BASH_SOURCE[0]%/*}"
-  python3 "$libdir/feedback_store.py" append-event "$root" "$event_json" \
+  harness_python "$libdir/feedback_store.py" append-event "$root" "$event_json" \
     --lock-timeout "${HARNESS_FEEDBACK_LOCK_TIMEOUT_SECONDS:-10}" >/dev/null 2>&1 || true
   return 0
 }
@@ -276,20 +342,20 @@ harness_is_jsonc() {
 # harness_has_pyyaml — YAML 検証が可能か。
 # PyYAML は標準ライブラリではない。未導入を「ファイルの問題」として報告しない。
 harness_has_pyyaml() {
-  has python3 && python3 -c "import yaml" >/dev/null 2>&1
+  harness_has_python && harness_python -c "import yaml" >/dev/null 2>&1
 }
 
 # harness_validate_json <file...> — JSON 構文を検証する。
-# 壊れていれば "path: 理由" を出力して非0。python3 不在時は検証せず成功。
+# 壊れていれば "path: 理由" を出力して非0。Python 不在時は検証せず成功。
 harness_validate_json() {
-  has python3 || return 0
+  harness_has_python || return 0
   local targets=()
   local f
   for f in "$@"; do
     harness_is_jsonc "$f" || targets+=("$f")
   done
   [[ ${#targets[@]} -eq 0 ]] && return 0
-  python3 -c '
+  harness_python -c '
 import json, sys
 bad = 0
 for p in sys.argv[1:]:
@@ -307,10 +373,10 @@ sys.exit(bad)
 # 壊れていれば "path: 理由" を出力して非0。PyYAML 不在時は検証せず成功。
 harness_validate_yaml() {
   # 引数ゼロの判定を先に済ませる。検証すべきファイルが無いのに
-  # PyYAML 検出のため python3 を起動するのは無駄(フックは毎編集で走る)
+  # PyYAML 検出のため Python を起動するのは無駄(フックは毎編集で走る)
   [[ $# -eq 0 ]] && return 0
   harness_has_pyyaml || return 0
-  python3 -c '
+  harness_python -c '
 import sys, yaml
 bad = 0
 for p in sys.argv[1:]:
@@ -339,9 +405,9 @@ sys.exit(bad)
 # コードブロック(``` / ~~~)とコードスパン(`...`)の中はリンクとして扱わない
 # (文書がリンク記法そのものを説明している箇所を拾わないため)。
 harness_check_md_links() {
-  has python3 || return 0
+  harness_has_python || return 0
   [[ $# -eq 0 ]] && return 0
-  python3 -c '
+  harness_python -c '
 import re, sys
 from pathlib import Path
 
