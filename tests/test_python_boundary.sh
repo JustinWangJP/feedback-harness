@@ -50,20 +50,46 @@ assert_eq "0" "$?" "ambient ascii でも feedback.sh --help が成功する: $OU
 
 # --- 2. LF only ---------------------------------------------------------
 # フックは harness_python の出力を文字列比較(on_stop の stop_hook_active)と
-# 行読み(post_edit の path 抽出)に使う。CR が混ざると比較が黙って外れるため、
-# 経路ごとに CR を落とす防御ではなく「境界が LF しか出さない」契約で担保する。
+# 行読み(post_edit の path 抽出)に使い、harness_load_config は eval する。
+# Windows の Python は sys.stdout へ CRLF を書き出す(2026-08-24 の Windows CI
+# で実測)ため、境界の harness_python が一度だけ CR を落とす契約にしている。
+# capture 側それぞれで落とす形にすると、足し忘れた経路だけが静かに壊れる。
+
+# 実出力に CR が無いこと。Windows CI ではこれが正規化の実地検証になる。
 CR_PROBE="$(bash -c '
   . "$1"
   harness_python -c "print(\"true\"); print(\"/a/b\")" | od -An -c | tr -d " \n"
 ' _ "$LIB")"
 assert_not_contains "$CR_PROBE" '\r' "harness_python の出力に CR が混ざらない: $CR_PROBE"
 
-# 契約を守る代わりに個別の CR 除去を足すと、抜けた経路(harness_load_config の
-# eval など)だけが静かに壊れる。走査で書き戻しを捕まえる。
-CR_STRIPPERS="$(grep -rn "tr -d '\\\\r'" \
-  "$REPO/scripts" 2>/dev/null || true)"
-assert_eq "" "$CR_STRIPPERS" \
-  "scripts/ に場当たりの CR 除去を足さない(境界の LF 契約で担保する)"
+# Windows を持たない開発機でも正規化そのものを検証する。MSYSTEM を立てたうえで
+# Python に CRLF を明示的に書かせ、境界が落とすことを確かめる。
+CRLF_PROBE="$(MSYSTEM=MINGW64 bash -c '
+  . "$1"
+  harness_python -c "
+import sys
+sys.stdout.buffer.write(b\"true\r\n/a/b\r\n\")
+" | od -An -c | tr -d " \n"
+' _ "$LIB")"
+assert_not_contains "$CRLF_PROBE" '\r' \
+  "Python が CRLF を書いても境界が LF へ正規化する: $CRLF_PROBE"
+assert_contains "$CRLF_PROBE" "true" "正規化しても本文は失われない: $CRLF_PROBE"
+
+# 正規化は pipeline で行うため、終了ステータスの取りこぼしが起きやすい。
+MSYSTEM=MINGW64 bash -c '. "$1"; harness_python -c "raise SystemExit(3)"' _ "$LIB" >/dev/null 2>&1
+assert_eq "3" "$?" "正規化経路でも Python の終了ステータスを保つ"
+MSYSTEM=MINGW64 bash -c '. "$1"; harness_python -c "pass"' _ "$LIB" >/dev/null 2>&1
+assert_eq "0" "$?" "正規化経路でも成功時は 0 を返す"
+
+# 契約が「境界で一度だけ」であること。フック側が自前で CR を落とし始めると
+# 「どこで落ちているのか」が経路ごとに分かれ、抜けが生まれる。
+for hook in "$REPO"/scripts/hooks/*.sh; do
+  HOOK_BODY="$(cat "$hook")"
+  assert_not_contains "$HOOK_BODY" "tr -d '\\r'" \
+    "$(basename "$hook") は自前で CR を落とさない(境界の正規化に任せる)"
+  assert_not_contains "$HOOK_BODY" "%\$'\\r'" \
+    "$(basename "$hook") は自前で CR を削らない(境界の正規化に任せる)"
+done
 
 # --- 3. path 変換の範囲 -------------------------------------------------
 # MSYSTEM と cygpath を差し替えて Git Bash を模す。fake cygpath は受け取った

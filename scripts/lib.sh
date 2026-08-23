@@ -26,12 +26,13 @@ has() {
 # 一般的なので、全入口で同じ順序で解決する。HARNESS_PYTHON には明示したい
 # executable 名または Git Bash から実行できる path を指定できる。
 #
-# 出力の改行はどの platform でも LF である。CPython の sys.stdout は
-# create_stdio() が newline="\n" を渡して生成するため、Windows でも CRLF へ
-# 変換しない。したがって capture 側(eval / 文字列比較 / read)は CR 除去を
-# 行わない — 経路ごとに CR を落とす防御を足すと「どこが CR を運ぶのか」の
-# 想定が場所ごとに食い違い、抜けた経路だけが静かに壊れる。この契約は
-# tests/test_python_boundary.sh が Windows CI 上で直接検証する。
+# 出力の改行は呼び出し側から見て常に LF である。Windows の Python は
+# sys.stdout へ CRLF を書き出す(2026-08-24 の Windows CI で実測。当初
+# newline="\n" で書くと考えて capture 側の CR 除去を外したところ、
+# tests/test_python_boundary.sh が実出力 "true\r\n" を捕まえた)。CR が
+# 混ざると eval・文字列比較・行読みが静かに外れるため、経路ごとに落とすのでは
+# なくこの境界で一度だけ正規化する — 経路ごとの防御は、足し忘れた経路だけが
+# 壊れる形になる。
 _harness_python_works() {
   command -v "$1" >/dev/null 2>&1 || return 1
   "$1" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)' \
@@ -109,7 +110,20 @@ harness_has_python() {
 
 harness_python() {
   _harness_python_resolve || return 127
-  _harness_python_exec "$_HARNESS_PYTHON_CACHED" "$@"
+  if [[ -z "${MSYSTEM:-}" ]]; then
+    # Unix の Python は LF しか書かない。毎編集フックで走るため、
+    # 不要な tr プロセスを挟まない
+    _harness_python_exec "$_HARNESS_PYTHON_CACHED" "$@"
+    return $?
+  fi
+  # PIPESTATUS を読むため local 宣言はパイプラインより前に置く
+  # (local 自体が $? を潰すが PIPESTATUS はパイプラインが設定する)。
+  # 正規化するのは stdout だけ。呼び出し側が 2>&1 で stderr を混ぜる場合は
+  # その capture 側で落とす(check_file.sh の py_compile 経路が該当)。
+  local status
+  _harness_python_exec "$_HARNESS_PYTHON_CACHED" "$@" | tr -d '\r'
+  status="${PIPESTATUS[0]}"
+  return "$status"
 }
 
 # harness_bash_path <path> — Windows native pathをGit Bash pathへ正規化する。

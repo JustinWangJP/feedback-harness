@@ -82,6 +82,10 @@ case "$FILE" in
         cur="$(ruff check --output-format=concise "$FILE" 2>&1)" && cur=""
       elif harness_has_python; then
         cur="$(harness_python -m py_compile "$FILE" 2>&1)" && cur=""
+        # harness_python の CR 正規化は stdout だけを通す。ここは 2>&1 で
+        # stderr(py_compile の SyntaxError 本文)を取り込むため、この経路の
+        # CR は capture 側で落とす
+        cur="${cur//$'\r'/}"
       fi
       emit "$sev" "$cur"
     fi
