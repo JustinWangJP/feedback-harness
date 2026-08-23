@@ -21,7 +21,7 @@ exec "${TEST_PYTHON:?}" "$@"
 SH
 chmod +x "$FAKEBIN/python3" "$FAKEBIN/python"
 
-OUT="$(PATH="$FAKEBIN:$PATH" HARNESS_PYTHON= bash -c '
+OUT="$(PATH="$FAKEBIN:$PATH" HARNESS_PYTHON='' bash -c '
   unset -f python3 2>/dev/null || true
   . "$1"
   harness_python -c "print(\"python-fallback-ok\")"
@@ -29,7 +29,7 @@ OUT="$(PATH="$FAKEBIN:$PATH" HARNESS_PYTHON= bash -c '
 assert_eq "0" "$?" "python3 から python へのfallbackが成功する: $OUT"
 assert_contains "$OUT" "python-fallback-ok" "fallback先のPythonが実行される"
 
-OUT="$(PATH="$FAKEBIN:$PATH" HARNESS_PYTHON= bash -c '
+OUT="$(PATH="$FAKEBIN:$PATH" HARNESS_PYTHON='' bash -c '
   unset -f python3 2>/dev/null || true
   bash "$1" --help
 ' _ "$REPO/scripts/feedback.sh" 2>&1)"
