@@ -72,6 +72,9 @@ jobs:
     defaults:
       run:
         shell: bash
+    env:
+      PYTHONIOENCODING: utf-8
+      PYTHONLEGACYWINDOWSSTDIO: "1"
     steps:
       - name: Check out repository
         uses: actions/checkout@v6

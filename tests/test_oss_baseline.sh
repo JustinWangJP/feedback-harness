@@ -18,9 +18,14 @@ assert_eq "MIT" \
 CI="$REPO/.github/workflows/ci.yml"
 assert_file_exists "$CI" "Linux CI workflowが存在する"
 CI_BODY="$(cat "$CI")"
+WINDOWS_CI_BODY="$(sed -n '/^  windows-git-bash:/,/^  [[:alnum:]_-][[:alnum:]_-]*:/p' "$CI")"
 assert_contains "$CI_BODY" "runs-on: ubuntu-latest" "Linux runnerを必須にする"
 assert_not_contains "$CI_BODY" "macos-" "macOS runnerを必須にしない"
 assert_contains "$CI_BODY" "windows-git-bash" "Windows Git Bash runnerを必須にする"
+assert_contains "$WINDOWS_CI_BODY" "PYTHONIOENCODING: utf-8" \
+  "Windows Git Bash runnerのPython標準入出力をUTF-8にする"
+assert_contains "$WINDOWS_CI_BODY" 'PYTHONLEGACYWINDOWSSTDIO: "1"' \
+  "WindowsコンソールでもPythonの入出力エンコーディング指定を有効にする"
 assert_contains "$CI_BODY" "bash tests/run_tests.sh" "回帰テストをCIで実行する"
 assert_contains "$CI_BODY" "bash scripts/check.sh" "ハーネス自身をCIで検査する"
 assert_contains "$CI_BODY" "scripts/checks/*.sh" "抽出したstack runnerもCIで構文検査する"
