@@ -22,12 +22,28 @@ WINDOWS_CI_BODY="$(sed -n '/^  windows-git-bash:/,/^  [[:alnum:]_-][[:alnum:]_-]
 assert_contains "$CI_BODY" "runs-on: ubuntu-latest" "Linux runnerを必須にする"
 assert_not_contains "$CI_BODY" "macos-" "macOS runnerを必須にしない"
 assert_contains "$CI_BODY" "windows-git-bash" "Windows Git Bash runnerを必須にする"
-assert_contains "$WINDOWS_CI_BODY" 'PYTHONUTF8: "1"' \
-  "Windows Git Bash runnerのPython既定エンコーディングをUTF-8にする"
-assert_contains "$WINDOWS_CI_BODY" "PYTHONIOENCODING: utf-8" \
-  "Windows Git Bash runnerのPython標準入出力をUTF-8にする"
-assert_contains "$WINDOWS_CI_BODY" 'PYTHONLEGACYWINDOWSSTDIO: "1"' \
-  "WindowsコンソールでもPythonの入出力エンコーディング指定を有効にする"
+# Python のencoding設定を job env で与えない。利用者の Git Bash にはこれらが
+# 無いため、CI に置くと「誰も使っていない環境」を検証することになり、
+# _harness_python_exec 側の指定が消えても CI が緑のままになる(masking)。
+# encoding の担保は tests/test_python_boundary.sh が ambient を潰して検証する。
+# 判定はコメントを除いた実効行に対して行う(理由を書いたコメントが
+# 変数名を含むだけで検出しては、説明を書けなくなる)
+CI_CODE="$(printf '%s\n' "$CI_BODY" | sed 's/#.*//')"
+WINDOWS_CI_CODE="$(printf '%s\n' "$WINDOWS_CI_BODY" | sed 's/#.*//')"
+assert_not_contains "$WINDOWS_CI_CODE" "PYTHONUTF8" \
+  "Windows CIがPYTHONUTF8をjob envで与えない(ハーネス側の指定を隠さない)"
+assert_not_contains "$WINDOWS_CI_CODE" "PYTHONIOENCODING" \
+  "Windows CIがPYTHONIOENCODINGをjob envで与えない(ハーネス側の指定を隠さない)"
+# PYTHONLEGACYWINDOWSSTDIO は Unicode console API を無効化する。pipe 出力の CI
+# では無害だが、利用者が workflow から写すと実コンソールで文字化けを招く。
+assert_not_contains "$CI_CODE" "PYTHONLEGACYWINDOWSSTDIO" \
+  "Unicode console APIを無効化する設定をCIへ書かない"
+# 日本語を出力する経路を Windows CI が実際に通ること(通らないと上の非設定が
+# 「検証していないから緑」になる)
+assert_contains "$WINDOWS_CI_BODY" "scripts/feedback.sh list" \
+  "Windows CIが日本語を出力するCLI経路を実行する"
+assert_contains "$WINDOWS_CI_BODY" "scripts/check.sh --list-checks >" \
+  "Windows CIが日本語の検査一覧テーブルを実行する"
 assert_contains "$CI_BODY" "bash tests/run_tests.sh" "回帰テストをCIで実行する"
 assert_contains "$CI_BODY" "bash scripts/check.sh" "ハーネス自身をCIで検査する"
 assert_contains "$CI_BODY" "scripts/checks/*.sh" "抽出したstack runnerもCIで構文検査する"

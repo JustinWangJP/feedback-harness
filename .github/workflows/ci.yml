@@ -72,10 +72,10 @@ jobs:
     defaults:
       run:
         shell: bash
-    env:
-      PYTHONUTF8: "1"
-      PYTHONIOENCODING: utf-8
-      PYTHONLEGACYWINDOWSSTDIO: "1"
+    # PYTHONUTF8 / PYTHONIOENCODING は job env に置かない。
+    # 利用者の Git Bash にはこれらが無いため、workflow で与えると CI だけが
+    # 「誰も使っていない環境」を検証することになる。ハーネスの Python 実行は
+    # scripts/lib.sh の _harness_python_exec が自分で UTF-8 を指定する。
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
@@ -90,6 +90,11 @@ jobs:
           set -eu
           HARNESS_PYTHON=python bash scripts/feedback.sh --help >/dev/null
           HARNESS_PYTHON=python bash scripts/check.sh --list-checks --json >/dev/null
+          # 日本語を出力する経路。job env で UTF-8 を与えていないため、
+          # ここが通ることが「利用者の Git Bash でも文字化け・例外なく動く」証拠になる
+          HARNESS_PYTHON=python bash scripts/check.sh --list-checks >/dev/null
+          HARNESS_PYTHON=python bash scripts/feedback.sh list >/dev/null
+          HARNESS_PYTHON=python bash scripts/feedback.sh rules >/dev/null
 
       - name: Validate shell and Python syntax
         run: |

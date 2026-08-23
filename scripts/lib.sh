@@ -25,10 +25,53 @@ has() {
 # Unix では python3、Windows の Git Bash では python だけが PATH にある構成が
 # 一般的なので、全入口で同じ順序で解決する。HARNESS_PYTHON には明示したい
 # executable 名または Git Bash から実行できる path を指定できる。
+#
+# 出力の改行はどの platform でも LF である。CPython の sys.stdout は
+# create_stdio() が newline="\n" を渡して生成するため、Windows でも CRLF へ
+# 変換しない。したがって capture 側(eval / 文字列比較 / read)は CR 除去を
+# 行わない — 経路ごとに CR を落とす防御を足すと「どこが CR を運ぶのか」の
+# 想定が場所ごとに食い違い、抜けた経路だけが静かに壊れる。この契約は
+# tests/test_python_boundary.sh が Windows CI 上で直接検証する。
 _harness_python_works() {
   command -v "$1" >/dev/null 2>&1 || return 1
   "$1" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)' \
     >/dev/null 2>&1
+}
+
+# 解決結果の process 内 cache。
+#
+# harness_python は PostToolUse フック(毎編集)から何度も呼ばれ、
+# _harness_python_works は判定のたびに Python を追加起動する。Windows の
+# Python 起動は 200-400ms あり、1編集あたり秒単位の遅延になるため一度だけ解決する。
+# cache は HARNESS_PYTHON の値で key し、同一 process 内で指定が変わったら
+# 解決し直す(テストが HARNESS_PYTHON を切り替えて検証するため)。
+_HARNESS_PYTHON_RESOLVED=0
+_HARNESS_PYTHON_CACHE_KEY=""
+_HARNESS_PYTHON_CACHED=""
+
+# _harness_python_resolve — 使用する実行可能名を $_HARNESS_PYTHON_CACHED に入れる。
+# 見つからなければ非0。command substitution から呼ぶと subshell で cache が
+# 捨てられるため、値は戻り値ではなく変数で返す。
+_harness_python_resolve() {
+  local key="${HARNESS_PYTHON:-}"
+  if [[ "$_HARNESS_PYTHON_RESOLVED" != "1" || "$_HARNESS_PYTHON_CACHE_KEY" != "$key" ]]; then
+    if [[ -n "$key" ]]; then
+      if _harness_python_works "$key"; then
+        _HARNESS_PYTHON_CACHED="$key"
+      else
+        _HARNESS_PYTHON_CACHED=""
+      fi
+    elif _harness_python_works python3; then
+      _HARNESS_PYTHON_CACHED="python3"
+    elif _harness_python_works python; then
+      _HARNESS_PYTHON_CACHED="python"
+    else
+      _HARNESS_PYTHON_CACHED=""
+    fi
+    _HARNESS_PYTHON_RESOLVED=1
+    _HARNESS_PYTHON_CACHE_KEY="$key"
+  fi
+  [[ -n "$_HARNESS_PYTHON_CACHED" ]]
 }
 
 _harness_python_exec() {
@@ -40,34 +83,33 @@ _harness_python_exec() {
     # Git Bash の /c/... や /tmp/... は Windows Python には存在しない。
     # MSYS の自動変換は Bash function/command形によって効かない場合があるため、
     # Pythonへ渡す独立した絶対path引数だけを境界で明示変換する。
-    if [[ -n "${MSYSTEM:-}" && "$arg" == /* ]] && command -v cygpath >/dev/null 2>&1; then
+    #
+    # 「/ で始まる」だけを条件にすると、自由テキストを取る CLI
+    # (feedback.sh add --summary "/docs 配下は…" 等)の引数まで書き換わり、
+    # 記録内容が静かに壊れる。実在する path だけに限定する。
+    if [[ -n "${MSYSTEM:-}" && "$arg" == /* && -e "$arg" ]] \
+       && command -v cygpath >/dev/null 2>&1; then
       args+=("$(cygpath -w -- "$arg")")
     else
       args+=("$arg")
     fi
   done
-  "$executable" "${args[@]}"
+  # ハーネスの出力・ログは日本語を含む。Windows の Python は stdout が
+  # console/pipe のとき ANSI コードページ(cp932 / cp1252 等)で符号化するため、
+  # 何も指定しないと feedback.sh list や --list-checks が UnicodeEncodeError で
+  # 落ちる。CI の workflow ではなくここで固定する — workflow に置くと利用者の
+  # 環境には届かず、CI だけが「誰も使っていない環境」を検証することになる。
+  # 周囲の環境変数は尊重せず上書きする(ハーネスの入出力は常に UTF-8)。
+  PYTHONUTF8=1 PYTHONIOENCODING=utf-8 "$executable" "${args[@]}"
 }
 
 harness_has_python() {
-  if [[ -n "${HARNESS_PYTHON:-}" ]]; then
-    _harness_python_works "$HARNESS_PYTHON"
-  else
-    _harness_python_works python3 || _harness_python_works python
-  fi
+  _harness_python_resolve
 }
 
 harness_python() {
-  if [[ -n "${HARNESS_PYTHON:-}" ]]; then
-    _harness_python_works "$HARNESS_PYTHON" || return 127
-    _harness_python_exec "$HARNESS_PYTHON" "$@"
-  elif _harness_python_works python3; then
-    _harness_python_exec python3 "$@"
-  elif _harness_python_works python; then
-    _harness_python_exec python "$@"
-  else
-    return 127
-  fi
+  _harness_python_resolve || return 127
+  _harness_python_exec "$_HARNESS_PYTHON_CACHED" "$@"
 }
 
 # harness_bash_path <path> — Windows native pathをGit Bash pathへ正規化する。

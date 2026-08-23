@@ -17,6 +17,9 @@ elif command -v python >/dev/null 2>&1 \
    && python -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)' \
      >/dev/null 2>&1; then
   TEST_PYTHON="$(command -v python)"
+  # 変換条件が _harness_python_exec(実在pathのみ)より広いのは意図的。
+  # ここへ渡るのはテストが組み立てた引数だけで、まだ存在しない出力pathも含む。
+  # 自由テキストが来ることは無いため、実在判定で絞ると逆に変換漏れになる。
   python3() {
     local args=()
     local arg

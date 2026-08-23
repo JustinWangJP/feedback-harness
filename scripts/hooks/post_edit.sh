@@ -48,7 +48,7 @@ try:
             print(path)
 except Exception:
     pass
-' | tr -d '\r')
+')
 
 if [[ ${#FILES[@]} -eq 0 ]]; then
   exit 0

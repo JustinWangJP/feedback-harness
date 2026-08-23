@@ -31,12 +31,32 @@ class StoreError(RuntimeError):
     """状態保存または回復に失敗した。"""
 
 
-def _try_state_lock(fd: int) -> None:
-    """現在のplatformで排他lockを非blockで取得する。"""
-    if os.name == "nt":
+def _prepare_state_lock_file(fd: int) -> None:
+    """Windowsでlock対象になる1バイト目を確保する。
+
+    msvcrt.locking は現在位置から1バイトをlockするため、空fileのままでは
+    lock範囲が定まらない。この書き込みは retry loop の外で一度だけ行う —
+    loop の中で行うと、別processが既に byte 0 をlockしている状況で
+    ERROR_LOCK_VIOLATION(PermissionError)が上がり、BlockingIOError へ
+    変換されないまま loop を抜けて command 全体が traceback で落ちる。
+    書き込みに失敗した場合は他processが先に確保済み(=非空)なので何もしない。
+    """
+    if os.name != "nt":
+        return
+    try:
         if os.fstat(fd).st_size == 0:
             os.write(fd, b"\0")
             os.fsync(fd)
+    except OSError:
+        pass
+    finally:
+        with contextlib.suppress(OSError):
+            os.lseek(fd, 0, os.SEEK_SET)
+
+
+def _try_state_lock(fd: int) -> None:
+    """現在のplatformで排他lockを非blockで取得する。"""
+    if os.name == "nt":
         os.lseek(fd, 0, os.SEEK_SET)
         try:
             msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
@@ -164,6 +184,7 @@ def state_lock(root: Path, timeout_seconds: int):
     feedback_dir.mkdir(parents=True, exist_ok=True)
     path = feedback_dir / LOCK_NAME
     fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
+    _prepare_state_lock_file(fd)
     deadline = time.monotonic() + timeout_seconds
     locked = False
     try:
