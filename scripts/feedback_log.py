@@ -983,9 +983,25 @@ def main():
     r.set_defaults(func=cmd_rules)
 
     args = p.parse_args()
+    # 状態を書き換えないコマンドは、回復に失敗しても使えなければならない。
+    # 回復は main() の入口で全コマンド共通に走るため、壊れた journal が1つ
+    # 残っているだけで list / search / rules / stats / report まで巻き添えで
+    # 死んでいた — 調べるための道具が、調べたい状況でだけ使えなくなる。
+    # 読み取りが見るのは transaction 適用前の内容で、それ自体は自己整合している。
+    read_only = args.func in (cmd_list, cmd_search, cmd_rules, cmd_stats, cmd_report)
     try:
         with state_lock(ROOT, LOCK_TIMEOUT_SECONDS):
-            recovered = recover_transaction(ROOT)
+            try:
+                recovered = recover_transaction(ROOT)
+            except StoreError as exc:
+                if not read_only:
+                    raise
+                print(f"WARNING: {exc}", file=sys.stderr)
+                print(
+                    "WARNING: 中断された更新が残っています。以下は回復前の内容です。",
+                    file=sys.stderr,
+                )
+                recovered = False
             if recovered:
                 print("NOTE: 中断されたfeedback transactionを回復しました", file=sys.stderr)
             args.func(args)

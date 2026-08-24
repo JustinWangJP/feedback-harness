@@ -299,6 +299,21 @@ def _apply_payload(
             after_write(index)
 
 
+def recovery_hint(root: Path) -> str:
+    """回復不能なjournalから復帰する手順。
+
+    「何が起きたか」だけでは利用者が動けない。journal は .feedback/ 配下の
+    単一ファイルなので、内容を確認して削除すれば必ず復帰できる。
+    その手順を例外と警告の両方へ載せる。
+    """
+    journal = root / ".feedback" / JOURNAL_NAME
+    return (
+        f"\n  中断された更新の記録: {journal}\n"
+        "  内容を確認のうえ、対象ファイルを意図した状態に直してから"
+        "この記録を削除して再実行してください。"
+    )
+
+
 def recover_transaction(root: Path) -> bool:
     """中断されたtransactionを同じ最終内容へroll-forwardする。"""
     journal = root / ".feedback" / JOURNAL_NAME
@@ -307,8 +322,13 @@ def recover_transaction(root: Path) -> bool:
     try:
         payload = json.loads(journal.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
-        raise StoreError(f"transaction journalを読み取れません: {journal}") from exc
-    _apply_payload(root, payload)
+        raise StoreError(
+            f"transaction journalを読み取れません: {journal}{recovery_hint(root)}"
+        ) from exc
+    try:
+        _apply_payload(root, payload)
+    except StoreError as exc:
+        raise StoreError(f"{exc}{recovery_hint(root)}") from exc
     journal.unlink()
     _fsync_dir(journal.parent)
     return True
