@@ -381,6 +381,7 @@ Environment variables are **temporary overrides that take precedence over config
 | `FEEDBACK_SHELLCHECK_SEVERITY` | `warning` | shellcheck severity threshold; use `style` for stricter checking |
 | `FEEDBACK_CONTRACT_BASE` | `main` | Baseline branch for API contract differences |
 | `CLAUDE_PROJECT_DIR` | (automatic) | Project root set by Claude Code. Codex resolves the root from the Hook's working directory |
+| `HARNESS_PYTHON` | (automatic) | Python executable to run (resolved as `python3` then `python` by default). Set it when Git Bash or a virtualenv exposes Python under a different name or path |
 
 ### Configuration file
 

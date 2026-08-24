@@ -381,6 +381,7 @@ bash scripts/feedback.sh report --last --mark       # 复盘后推进下一个�
 | `FEEDBACK_SHELLCHECK_SEVERITY` | `warning` | shellcheck 严重程度阈值；使用 `style` 可执行更严格的检查 |
 | `FEEDBACK_CONTRACT_BASE` | `main` | API 契约差异的基线分支 |
 | `CLAUDE_PROJECT_DIR` | （自动） | Claude Code 设置的检查目标根目录。Codex 根据 Hook 执行时的当前目录解析 |
+| `HARNESS_PYTHON` | （自动） | 要运行的 Python 可执行文件（默认按 `python3` → `python` 的顺序解析）。当 Git Bash 或虚拟环境中的名称或路径不同时，可显式指定 |
 
 ### 配置文件
 

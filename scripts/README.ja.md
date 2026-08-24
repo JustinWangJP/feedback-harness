@@ -240,7 +240,7 @@ Claude Code と Codex app / CLI は、プラグインが提供する Hooks (`hoo
 
 いずれもハーネスが導入することはない。`npx --no-install` を使うのは、未導入時にネットワークから勝手に取得させないため。
 
-Windows では Git for Windows 付属の Git Bash から既存の `*.sh` を実行する。Python の executable 名は共通ランナーが解決するため、PowerShell 用スクリプトは不要。
+Windows では Git for Windows 付属の Git Bash から既存の `*.sh` を実行する。Python の executable 名は共通ランナーが解決するため、PowerShell 用スクリプトは不要。 `python3` / `python` と異なる名前・パスの Python を使う場合は `HARNESS_PYTHON` で明示する。
 
 ## 他プロジェクトへの導入
 

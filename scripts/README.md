@@ -240,7 +240,7 @@ In an `init.sh`-only installation or when Hooks are disabled or untrusted, Claud
 
 The harness never installs any of them. It uses `npx --no-install` so missing packages are not downloaded from the network without permission.
 
-On Windows, run the existing `*.sh` files from Git Bash bundled with Git for Windows. The shared runner resolves the Python executable name, so no PowerShell-specific scripts are required.
+On Windows, run the existing `*.sh` files from Git Bash bundled with Git for Windows. The shared runner resolves the Python executable name, so no PowerShell-specific scripts are required. Set `HARNESS_PYTHON` when Python is exposed under a different name or path than `python3` / `python`.
 
 ## Install in another project
 

@@ -240,7 +240,7 @@ Claude Code 和 Codex app / CLI 使用插件提供的 Hooks（`hooks/hooks.json`
 
 工具链不会安装其中任何工具。使用 `npx --no-install` 是为了避免在工具未安装时未经许可从网络下载。
 
-在 Windows 上，请从 Git for Windows 附带的 Git Bash 运行现有 `*.sh` 文件。共用运行器会解析 Python 可执行文件名，因此不需要 PowerShell 专用脚本。
+在 Windows 上，请从 Git for Windows 附带的 Git Bash 运行现有 `*.sh` 文件。共用运行器会解析 Python 可执行文件名，因此不需要 PowerShell 专用脚本。如果 Python 的名称或路径与 `python3` / `python` 不同，请通过 `HARNESS_PYTHON` 显式指定。
 
 ## 安装到其他项目
 

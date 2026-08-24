@@ -381,6 +381,7 @@ bash scripts/feedback.sh report --last --mark       # 振り返り後に次の�
 | `FEEDBACK_SHELLCHECK_SEVERITY` | `warning` | shellcheck の重大度しきい値。`style` で厳しくする |
 | `FEEDBACK_CONTRACT_BASE` | `main` | API 契約差分のベースラインブランチ |
 | `CLAUDE_PROJECT_DIR` | (自動) | Claude Code が設定する検査対象ルート。Codex では Hook 実行時のカレントディレクトリから解決する |
+| `HARNESS_PYTHON` | (自動) | 実行する Python の executable(既定は `python3` → `python` の順に解決)。Git Bash や仮想環境で名前・パスが異なる場合に明示する |
 
 ### 設定ファイル
 
