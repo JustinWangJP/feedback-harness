@@ -140,4 +140,30 @@ LIST_OUT="$(PATH="$FAKEBIN:$PATH" MSYSTEM=MINGW64 CLAUDE_PROJECT_DIR="$PROJECT" 
 assert_contains "$LIST_OUT" "/docs 配下は英語で書く" \
   "記録した summary が原文のまま保存される: $LIST_OUT"
 
+# --- 4. shell function に乗っ取られない -------------------------------
+# command -v は export された shell function も解決する。tests/assert.sh は
+# python3 が無い環境で `export -f python3` の shim を定義するため、対策が無いと
+# 実 Git Bash 上で harness_python が本番コードではなく shim を呼び、上の
+# セクション3(自由テキストを変換しない)が shim の挙動を検査してしまう
+# — 「アサーションが本番の入力に触れていない」型の欠陥(PR #13 レビュー由来)。
+SHIMBIN="$WORK/shimbin"
+mkdir -p "$SHIMBIN"
+cat > "$SHIMBIN/python" <<SH
+#!/usr/bin/env bash
+exec "$TEST_PYTHON" "\$@"
+SH
+chmod +x "$SHIMBIN/python"
+
+HIJACK="$(PATH="$SHIMBIN:/usr/bin:/bin" HARNESS_PYTHON='' bash -c '
+  python3() { echo "SHIM-WAS-USED"; }
+  export -f python3
+  . "$1"
+  _harness_python_resolve && echo "resolved=$_HARNESS_PYTHON_CACHED"
+  harness_python -c "print(\"real-interpreter\")"
+' _ "$LIB" 2>&1)"
+assert_not_contains "$HIJACK" "SHIM-WAS-USED" \
+  "export された python3 関数が interpreter として選ばれない: $HIJACK"
+assert_contains "$HIJACK" "resolved=python" "実ファイルの python へ解決する: $HIJACK"
+assert_contains "$HIJACK" "real-interpreter" "解決先の実 interpreter が実行される: $HIJACK"
+
 assert_summary

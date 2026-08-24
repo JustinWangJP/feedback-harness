@@ -19,6 +19,17 @@ BARE="$(grep -rnE 'scripts/(feedback\.sh|init\.sh)' "$REPO/skills" "$REPO/agents
   | grep -v 'CLAUDE_PLUGIN_ROOT' || true)"
 assert_eq "" "$BARE" "skills/agents に裸の scripts/ 参照が残っていない"
 
+# 1b: skills/ と agents/ が Python スクリプトを直接実行させない。
+# feedback_log.py は shebang(#!/usr/bin/env python3)+実行ビット付きなので
+# 「そのまま実行」の表記でも Unix では動いてしまうが、python3 が無く
+# python.exe だけの Git Bash では env: python3: No such file or directory になる。
+# 入口は bash .../feedback.sh に一本化する(interpreter 解決は harness_python の役目)。
+# PR #13 で skills/ は移行したが agents/feedback-curator.md だけ残り、
+# promote / add / list — キュレーション経路が丸ごと Windows で落ちていた。
+DIRECT_PY="$(grep -rnE 'scripts/[A-Za-z_]+\.py' "$REPO/skills" "$REPO/agents" 2>/dev/null || true)"
+assert_eq "" "$DIRECT_PY" \
+  "skills/agents が Python スクリプトを直接実行させない(bash 経由の入口を使う)"
+
 # 2: 置換後の表記が実際に使われている
 HAS_PLUGIN_ROOT="$(grep -rl 'CLAUDE_PLUGIN_ROOT' "$REPO/skills" "$REPO/agents" | wc -l | tr -d ' ')"
 if [[ "$HAS_PLUGIN_ROOT" -lt 3 ]]; then

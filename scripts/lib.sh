@@ -34,7 +34,13 @@ has() {
 # なくこの境界で一度だけ正規化する — 経路ごとの防御は、足し忘れた経路だけが
 # 壊れる形になる。
 _harness_python_works() {
-  command -v "$1" >/dev/null 2>&1 || return 1
+  # interpreter として掴んでよいのは実ファイルだけ。command -v は export された
+  # shell function も解決するため、これが無いと同名の wrapper 関数が本番の
+  # 解決経路を乗っ取る。実際 tests/assert.sh は python3 が無い環境で
+  # `export -f python3` の shim を定義しており、その shim は cygpath 変換を
+  # 独自に行うので、Windows 経路の検証テストが本番コードではなく shim を
+  # 検査してしまっていた(PR #13 レビュー由来)。
+  [[ "$(type -t "$1" 2>/dev/null)" == "file" ]] || return 1
   "$1" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)' \
     >/dev/null 2>&1
 }
