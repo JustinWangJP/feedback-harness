@@ -125,13 +125,32 @@ def atomic_write_text(path: Path, content: str) -> None:
 
 
 def atomic_create_text(path: Path, content: str) -> None:
-    """既存pathを上書きせず、完全に書けた内容だけを公開する。"""
+    """既存pathを上書きせず、完全に書けた内容だけを公開する。
+
+    第一手段は os.link — 「存在したら失敗する」を filesystem 側が保証するため、
+    lock を取れていない writer が居ても上書きしない。ただし hardlink は
+    exFAT/FAT32(USBメモリ)・多くのSMB共有・一部のWindows構成で使えず、
+    FileExistsError でも StoreError でもない OSError(EPERM/ENOTSUP)が上がる。
+    そこで落ちると `feedback.sh add` がtracebackで死に、そのcheckoutでは
+    記録そのものができなくなる。
+
+    代替経路の排他は repository 単位の state_lock が担保する — この関数の
+    呼び出し元(cmd_add)は main() が握る lock の中で動くため、存在確認と
+    os.replace の間に別のCLI processが割り込むことはない。os.replace を使うのは
+    原子性を保つため(open(path,"x") へ直接書くと、途中で落ちた時に frontmatter が
+    壊れたエントリが残る)。
+    """
     tmp = _write_temp(path, content)
     try:
         try:
             os.link(tmp, path)
         except FileExistsError as exc:
             raise StoreError(f"既存ファイルを上書きしません: {path}") from exc
+        except OSError:
+            # hardlink 非対応の filesystem。lock 済みなので存在確認で足りる
+            if path.exists():
+                raise StoreError(f"既存ファイルを上書きしません: {path}") from None
+            os.replace(tmp, path)
         _fsync_dir(path.parent)
     finally:
         tmp.unlink(missing_ok=True)
