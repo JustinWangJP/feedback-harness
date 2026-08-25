@@ -217,17 +217,38 @@ harness_load_config() {
 # harness_check_severity <検査ID> <呼び出し側の既定> — 実効判定(fail/warn/skip)。
 # config が触っていない検査は、呼び出し側が宣言ゲートで決めた既定をそのまま返す。
 harness_check_severity() {
-  local id="$1" default="$2" key value
-  key="HARNESS_CHECK_${id//-/_}_SEVERITY"
-  value="${!key:-}"
+  local id="$1" default="$2"
+  local value
+  value="$(_harness_check_field "$id" SEVERITY)"
   printf '%s\n' "${value:-$default}"
+}
+
+# _harness_check_field <検査ID> <SEVERITY|SOURCE> — 派生IDの継承込みで値を引く。
+#
+# モジュールごとに枝分かれする検査(mvn-<module> 等)は、明示設定が無ければ
+# base(mvn)の設定を継ぐ。継がないと `check.skip: [test]` や
+# FEEDBACK_CHECK_SKIP=test がモジュール側に届かず、「ステージごと止めたのに
+# 動き続ける」という最も気づきにくい壊れ方になる。
+_harness_check_field() {
+  local id="$1" field="$2" key value base
+  key="HARNESS_CHECK_${id//-/_}_${field}"
+  value="${!key:-}"
+  if [[ -z "$value" ]]; then
+    for base in ${HARNESS_DERIVABLE_CHECKS:-}; do
+      [[ "$id" == "$base-"* ]] || continue
+      key="HARNESS_CHECK_${base//-/_}_${field}"
+      value="${!key:-}"
+      break
+    done
+  fi
+  printf '%s\n' "$value"
 }
 
 # harness_check_source <検査ID> — 判定がどこで決まったか(--list-checks 用)。
 harness_check_source() {
-  local id="$1" key value
-  key="HARNESS_CHECK_${id//-/_}_SOURCE"
-  value="${!key:-}"
+  local id="$1"
+  local value
+  value="$(_harness_check_field "$id" SOURCE)"
   printf '%s\n' "${value:-既定}"
 }
 

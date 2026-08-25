@@ -85,7 +85,7 @@ bash scripts/check.sh --help          # 显示用法（exit 0）
 - **访问远程仓库** — 契约差异基线为 `git merge-base HEAD <FEEDBACK_CONTRACT_BASE:-main>`；无法解析时使用 `HEAD`
 
 - **检测对象：** Python（`pyproject.toml` / `setup.py` / `requirements.txt`；即使没有这些文件，只要存在 `*.py` 也会仅运行 `ruff`）/ Node（`package.json`）/ Go（`go.mod`）/ Rust（`Cargo.toml`）/ Java（`pom.xml` / `build.gradle`）/ Shell（`*.sh`）/ 通用（`Makefile` 的 `check` target）
-- **Maven 项目：** 根目录存在 `pom.xml` 时，将其作为 reactor 入口，只运行一次 `verify`。没有根 POM 时，对检测到的每个 `pom.xml` 使用 `-f` 独立运行。每个 POM 依次优先使用同目录的 `mvnw`、仓库根目录的 `mvnw`，最后才使用全局 `mvn`。wrapper 存在但不可执行时会标记为 `SKIP`，不会静默回退。Maven `verify` 包含项目配置的编译、测试、打包和 integration-test 生命周期阶段；Maven 可能会按照项目设置从仓库解析依赖项和插件
+- **Maven 项目：** 根目录存在 `pom.xml` 时，将其作为 reactor 入口，只运行一次 `verify`。没有根 POM 时，对检测到的每个 `pom.xml` 使用 `-f` 独立运行。每个 POM 依次优先使用同目录的 `mvnw`、仓库根目录的 `mvnw`，最后才使用全局 `mvn`。wrapper 存在但不可执行时会标记为 `SKIP`，不会静默回退。Maven `verify` 包含项目配置的编译、测试、打包和 integration-test 生命周期阶段；Maven 可能会按照项目设置从仓库解析依赖项和插件。没有根 POM 时检测到的每个模块都拥有独立的检查 ID `mvn-<模块 slug>`（例如 `services/api/pom.xml` → `mvn-services-api`；slug 冲突时会追加序号）。判定按「该派生 ID 的显式设置 → `mvn` 的设置」顺序解析，因此 `check.skip: [test]` 会作用于所有模块，而 `checks.mvn-tools-cli.severity: skip` 只停止该模块
 - **横向检查（与技术栈无关）：** 验证 `*.json`、`*.yaml` 和 `*.yml` 的语法。`tsconfig*.json`、`jsconfig*.json`、`devcontainer.json` 以及 `.vscode/` 下的文件通常允许注释（JSONC），因此不检查。YAML 支持由 `---` 分隔的多文档格式，`!Ref` 等未知自定义标签不视为语法错误。未安装 PyYAML 时，YAML 检查标记为 `SKIP` 并说明原因
 - **文档一致性：** 在 `docs` 阶段检测 Markdown 内部链接失效。为保持离线运行，不检查外部 URL、`mailto:`、仅锚点链接和绝对路径。代码块和行内代码中的链接状文本不参与验证
 - **密钥（`security` 阶段）：** 存在 `.secretlintrc.*` 时运行 `secretlint`。**未配置时标记为 SKIP**，因为 secretlint 无法在没有配置的情况下启动。值默认会被屏蔽，不会出现在失败日志中。PATH 中存在 `gitleaks` 时也会运行，但仅支持带有 `--no-git --redact` 的版本

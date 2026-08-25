@@ -341,7 +341,17 @@ for stage, cid in calls:
         issues.append(f"未登録ID: {cid}")
     elif keys[cid] != stage:
         issues.append(f"ステージ不一致: {cid} は {keys[cid]} だが {stage} で呼ばれている")
-missing = sorted(set(keys) - {cid for _s, cid in calls})
+# 派生検査ID(mvn-<module> 等)の base は run_stage へ変数で渡るため呼び出し行から
+# 拾えない。未使用扱いにはしないが、checks/ に literal で現れることは要求する
+# — 本当に死んだ登録を見逃さないため。ステージの対応は個別テストが固定する。
+config_src = pathlib.Path(sys.argv[2]).read_text()
+derivable = re.findall(
+    r'"([a-z0-9-]+)"', re.search(r"DERIVABLE_CHECKS\s*=\s*\(([^)]*)\)", config_src).group(1)
+)
+for base in derivable:
+    if f'"{base}"' not in src:
+        issues.append(f"派生元IDが checks/ に literal で現れない: {base}")
+missing = sorted(set(keys) - {cid for _s, cid in calls} - set(derivable))
 issues += [f"CHECKSにあるが未使用: {cid}" for cid in missing]
 print("; ".join(issues))
 PY

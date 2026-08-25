@@ -234,6 +234,12 @@ checks:
 
 `gradle` は `./gradlew check` と `gradle check` の両方を指す(起動方法の違いであって別の検査ではない)。
 
+**派生検査ID(モジュール単位)**
+
+ルート `pom.xml` が無い Maven monorepo では、検出した各 `pom.xml` が `mvn-<モジュールslug>` という独立した検査IDを持つ(例 `services/api/pom.xml` → `mvn-services-api`)。slug は英小文字・数字・ハイフンだけに落とし、別のモジュールが同じ slug になる場合は連番が付く(`mvn-services-api-2`)。実際のIDは `--list-checks` の左端で確認できる。
+
+判定は **その派生IDの明示設定 → `mvn` の設定** の順に解決される。つまり `check.skip: [test]` や `checks.mvn.severity: skip` は全モジュールへ届き、`checks.mvn-tools-cli.severity: skip` はそのモジュールだけを止める。重いモジュールを1つ外すために Maven 検査を丸ごと切る必要はない。
+
 ## 効かないとき
 
 ### まず `--list-checks` で出所を見る
