@@ -118,4 +118,41 @@ assert_contains "$EV" '"result":"warn"' "WARN イベントが記録される"
 assert_contains "$EV" '"check":"python: ruff format"' "WARN のラベルが check として記録される"
 assert_contains "$EV" '"result":"pass"' "同じ実行の stop 成功イベントも残る"
 
+# --- 追記は追記のままであること -----------------------------------------
+# 毎回ファイル全体を読み直して書き戻すと、post_edit が編集ファイルごとに呼ぶ
+# 経路で最大512KBの読み書きとfsyncが件数分積み上がる。rotation が要らない間は
+# 既存内容がそのまま先頭に残る(= 追記しかしていない)ことで固定する。
+: > "$EVENTS"
+harness_log_event "$WORK/proj" post_edit pass "$WORK/proj/sub/code.py"
+# 内容の prefix 判定では「同じ内容で全文書き戻す」と区別できないため、
+# 置き換え(os.replace = 別 inode)そのものを見る。検出器が働く環境かを
+# 先に control で確かめ、判定できない環境では黙って通さず SKIP と表示する。
+inode_of() { ls -i "$1" | awk '{print $1}'; }
+CTRL="$WORK/inode-control"
+: > "$CTRL"; CTRL_BEFORE="$(inode_of "$CTRL")"
+: > "$CTRL.tmp"; mv "$CTRL.tmp" "$CTRL"; CTRL_AFTER="$(inode_of "$CTRL")"
+
+BEFORE_INODE="$(inode_of "$EVENTS")"
+harness_log_event "$WORK/proj" post_edit fail "$WORK/proj/sub/code.py"
+AFTER_INODE="$(inode_of "$EVENTS")"
+if [[ "$CTRL_BEFORE" != "$CTRL_AFTER" && "$CTRL_BEFORE" != "0" ]]; then
+  assert_eq "$BEFORE_INODE" "$AFTER_INODE" \
+    "rotation不要な追記でファイルを置き換えない(全文書き換えをしない)"
+else
+  echo "  SKIP: inode で置き換えを判定できない環境"
+fi
+assert_eq "2" "$(wc -l < "$EVENTS" | tr -d ' ')" "追記で行数が1つずつ増える"
+
+# --- Python 経路が使えなくてもイベントを落とさない -----------------------
+# 記録が黙って消えると stats/report の初回通過率が「上がったように見える」形で
+# 壊れる。Python 不在・ロック競合のどちらでも計測を守る。
+: > "$EVENTS"
+HARNESS_PYTHON="$WORK/no-such-python" harness_log_event "$WORK/proj" post_edit fail \
+  "$WORK/proj/sub/code.py"
+assert_eq "1" "$(wc -l < "$EVENTS" | tr -d ' ')" \
+  "Python を解決できなくてもイベントが残る: $(cat "$EVENTS")"
+assert_contains "$(cat "$EVENTS")" '"result":"fail"' "フォールバック追記の内容が正しい"
+HARNESS_PYTHON="$WORK/no-such-python" harness_log_warn "$WORK/proj" "python: ruff"
+assert_contains "$(tail -n 1 "$EVENTS")" '"result":"warn"' "WARN もフォールバックで残る"
+
 assert_summary

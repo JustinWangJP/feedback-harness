@@ -163,19 +163,38 @@ def _append_jsonl_event(
     max_bytes: int = EVENT_MAX_BYTES,
     keep_lines: int = EVENT_KEEP_LINES,
 ) -> None:
-    """lock取得済みの状態でJSONLへ追記し、必要なら原子的にrotationする。"""
+    """lock取得済みの状態でJSONLへ追記し、必要なら原子的にrotationする。
+
+    通常は追記だけで済ませる。毎回ファイル全体を読み直して書き戻すと、
+    post_edit フックが編集ファイルごとに1回呼ぶ経路で最大 max_bytes の
+    読み書きと fsync が件数分積み上がる(rotation の閾値は 512KB)。
+    全体を書き換えるのは、実際に rotation が要るときだけでよい。
+    """
     if not isinstance(event, dict):
         raise StoreError("eventはJSON objectである必要があります")
     path = root / ".feedback" / "events.jsonl"
+    line = json.dumps(event, ensure_ascii=False, separators=(",", ":"))
+    try:
+        size = path.stat().st_size if path.exists() else 0
+    except OSError as exc:
+        raise StoreError(f"event logを読み取れません: {path}") from exc
+
+    if size + len(line.encode("utf-8")) + 1 <= max_bytes:
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with open(path, "a", encoding="utf-8", newline="\n") as stream:
+                stream.write(line + "\n")
+        except OSError as exc:
+            raise StoreError(f"event logへ追記できません: {path}") from exc
+        return
+
+    # rotation。ここだけは全体を読み直し、原子的に置き換える
     try:
         lines = path.read_text(encoding="utf-8").splitlines() if path.exists() else []
     except OSError as exc:
         raise StoreError(f"event logを読み取れません: {path}") from exc
-    lines.append(json.dumps(event, ensure_ascii=False, separators=(",", ":")))
-    content = "\n".join(lines) + "\n"
-    if len(content.encode("utf-8")) > max_bytes:
-        content = "\n".join(lines[-keep_lines:]) + "\n"
-    atomic_write_text(path, content)
+    lines.append(line)
+    atomic_write_text(path, "\n".join(lines[-keep_lines:]) + "\n")
 
 
 def record_event(

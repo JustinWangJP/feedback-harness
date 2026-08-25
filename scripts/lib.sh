@@ -333,10 +333,30 @@ harness_json_escape() {
   printf '%s' "$s"
 }
 
+# _harness_append_event <ルート> <event JSON> — events.jsonl へ1行足す。
+#
+# 通常経路は feedback_store.py — repository lock の中で追記し、必要なら
+# rotation する。ただし失敗を握り潰すと、Python 不在やロック競合
+# (feedback_log.py はコマンド全体の間 lock を保持する。既定 timeout 10秒)で
+# イベントが黙って消え、stats/report の初回通過率が過少計上される。
+# 「記録が減る」ではなく「合格率が上がったように見える」形で壊れるため、
+# 追記に失敗したら shell から直接足して計測を守る(rotation は次の成功時に働く)。
+# 記録がフック本体を壊してはならないので、どちらも失敗は無視して 0 を返す。
+_harness_append_event() {
+  local root="$1" event_json="$2"
+  local libdir="${BASH_SOURCE[0]%/*}"
+  if ! harness_python "$libdir/feedback_store.py" append-event "$root" "$event_json" \
+      --lock-timeout "${HARNESS_FEEDBACK_LOCK_TIMEOUT_SECONDS:-10}" >/dev/null 2>&1; then
+    printf '%s\n' "$event_json" >> "$root/.feedback/events.jsonl" 2>/dev/null || true
+  fi
+  return 0
+}
+
 # harness_log_event <ルート> <hook> <result> [ファイル] — フック合否を
 # .feedback/events.jsonl に1行追記する(stats/report の原料。ローカル状態で共有しない)。
 #
-# 記録がフック本体を壊してはならないため、すべての失敗は黙って無視する。
+# 記録がフック本体を壊してはならないため、失敗してもフックは止めない。
+# 追記経路と欠落時の扱いは _harness_append_event を参照。
 # 無限増長を防ぐため 512KB を超えたら末尾2000行に切り詰める。
 harness_log_event() {
   local root="$1" hook="$2" result="$3" file="${4:-}"
@@ -355,9 +375,7 @@ harness_log_event() {
     event_json="$(printf '{"ts":"%s","hook":"%s","result":"%s"}' \
       "$ts" "$hook" "$result")" || return 0
   fi
-  local libdir="${BASH_SOURCE[0]%/*}"
-  harness_python "$libdir/feedback_store.py" append-event "$root" "$event_json" \
-    --lock-timeout "${HARNESS_FEEDBACK_LOCK_TIMEOUT_SECONDS:-10}" >/dev/null 2>&1 || true
+  _harness_append_event "$root" "$event_json"
   return 0
 }
 
@@ -375,9 +393,7 @@ harness_log_warn() {
   local event_json
   event_json="$(printf '{"ts":"%s","hook":"stop","result":"warn","check":"%s"}' \
     "$ts" "$(harness_json_escape "$label")")" || return 0
-  local libdir="${BASH_SOURCE[0]%/*}"
-  harness_python "$libdir/feedback_store.py" append-event "$root" "$event_json" \
-    --lock-timeout "${HARNESS_FEEDBACK_LOCK_TIMEOUT_SECONDS:-10}" >/dev/null 2>&1 || true
+  _harness_append_event "$root" "$event_json"
   return 0
 }
 
