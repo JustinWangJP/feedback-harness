@@ -21,23 +21,36 @@ LIBDIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # 出力の左端がそのまま config のキーになる
 LIST_MODE=0
 LIST_JSON=0
+# フックが渡す上限秒の既定。config が明示していればそちらが優先される
+# (利用者の指定が、呼び出し側の都合より強い)
+STAGE_TIMEOUT_FALLBACK=0
 ARGS=()
 usage() {
   cat <<'USAGE'
-使い方: check.sh [プロジェクトルート] [--list-checks [--json]]
+使い方: check.sh [プロジェクトルート] [--list-checks [--json]] [--stage-timeout=<秒>]
 
-  (引数なし)      プロジェクトを自動検出してフル検査を実行する
-  --list-checks   検査を実行せず、実効設定(判定と出所)を一覧する
-  --json          --list-checks の出力を JSON にする(単独では使えない)
-  -h, --help      この使い方を表示する
+  (引数なし)          プロジェクトを自動検出してフル検査を実行する
+  --list-checks       検査を実行せず、実効設定(判定と出所)を一覧する
+  --json              --list-checks の出力を JSON にする(単独では使えない)
+  --stage-timeout=<秒> config が指定していないときに使う1ステージの上限秒。
+                      Stop フックがフック制限より短い値を渡すために使う
+                      (config の check.stage_timeout_seconds が優先)
+  -h, --help          この使い方を表示する
 
-exit 0 = 全PASS(SKIP含む) / 1 = FAILあり / 2 = 引数・環境の誤り
+exit 0 = 全PASS(SKIP含む) / 1 = FAIL・TIMEOUTあり / 2 = 引数・環境の誤り
 USAGE
 }
 for arg in "$@"; do
   case "$arg" in
     --list-checks) LIST_MODE=1 ;;
     --json) LIST_JSON=1 ;;
+    --stage-timeout=*)
+      STAGE_TIMEOUT_FALLBACK="${arg#*=}"
+      if [[ ! "$STAGE_TIMEOUT_FALLBACK" =~ ^[0-9]+$ ]]; then
+        echo "ERROR: --stage-timeout には0以上の整数を指定します: ${arg#*=}" >&2
+        exit 2
+      fi
+      ;;
     -h|--help) usage; exit 0 ;;
     # 未知のオプションはプロジェクトルートとして扱わない。打ち間違いが
     # 「ディレクトリが見つかりません」になると、原因が引数だと気づけない
@@ -58,6 +71,23 @@ ROOT="$(harness_project_root "${1:-}")" \
 cd "$ROOT" || { echo "ERROR: ディレクトリへ移動できません: $ROOT"; exit 2; }
 harness_load_config "$ROOT"
 
+# ステージの上限秒。config が 0(=ハーネスに任せる)なら呼び出し側の既定を使う。
+# timeout(1) が無い環境では打ち切らない — 打ち切れないことを黙って
+# 「打ち切った」ように見せないため、その旨は使う直前で判定する
+STAGE_TIMEOUT="$HARNESS_STAGE_TIMEOUT_SECONDS"
+[[ "$STAGE_TIMEOUT" -eq 0 ]] && STAGE_TIMEOUT="$STAGE_TIMEOUT_FALLBACK"
+HAS_TIMEOUT_CMD=0
+if [[ "$STAGE_TIMEOUT" -gt 0 ]] && has timeout; then
+  # 存在だけでは使えない。BusyBox(Alpine)の timeout は --kill-after を持たず、
+  # Windows の System32\timeout.exe は同名の別ツールである。渡せないフラグを
+  # 渡すと使用法エラー(非0)が「ステージの失敗」として報告される — 環境の
+  # 問題をユーザーのコードの失敗にしないという check.sh の契約に反する。
+  # gitleaks と同じく、必要なフラグがヘルプに出ることを確認してから使う
+  if timeout --help 2>&1 | grep -q -- "--kill-after"; then
+    HAS_TIMEOUT_CMD=1
+  fi
+fi
+
 RESULTS=()
 FAILED=0
 WARNED=0
@@ -72,9 +102,9 @@ trap 'rm -rf "$LOGDIR"' EXIT
 # 他の検査まで止めると、直すべき箇所が見えなくなる(既定値のまま続行する)
 if [[ -n "${HARNESS_CONFIG_ERROR:-}" ]]; then
   FAILED=1
-  RESULTS+=("FAIL  config: .feedback/config.yaml")
+  RESULTS+=("FAIL  config: 設定エラー")
   {
-    echo "----- FAIL: config: .feedback/config.yaml -----"
+    echo "----- FAIL: config: 設定エラー -----"
     echo "$HARNESS_CONFIG_ERROR"
   } >> "$LOGDIR/failures.txt"
 fi
@@ -132,11 +162,47 @@ run_stage() {
     fi
   fi
   local log="$LOGDIR/${label//[^a-zA-Z0-9]/_}.log"
-  local rc
-  "$@" >"$log" 2>&1
-  rc=$?
+  local rc timed_out=0
+  # 包めるのは外部コマンドだけ。timeout(1) は別プロセスを exec するため、
+  # shell 関数(harness_validate_json / harness_validate_yaml /
+  # harness_check_md_links)を渡すと "No such file or directory" で 127 になり、
+  # run_stage の 126/127 判定によって検査が黙って SKIP へ落ちる — 打ち切りを
+  # 足したせいで検査が消える、という最悪の壊れ方になる。関数側はいずれも
+  # 短時間の Python 呼び出しで、時間切れの対象は導入先のビルドツールである
+  if [[ "$HAS_TIMEOUT_CMD" -eq 1 && "$(type -t "$1")" == "file" ]]; then
+    # --kill-after: TERM を無視するビルドツール(gradle daemon 等)を確実に止める。
+    # 打ち切りは 124(TERM で止まった)か 137(KILL まで要した)で戻る。137 は
+    # OOM kill でも起きるため、包んだ実行に限って打ち切り扱いとする — どちらも
+    # 完了をブロックする結果で、判断材料のログ末尾も同じように出す
+    timeout --kill-after=10 "$STAGE_TIMEOUT" "$@" >"$log" 2>&1
+    rc=$?
+    [[ $rc -eq 124 || $rc -eq 137 ]] && timed_out=1
+  else
+    "$@" >"$log" 2>&1
+    rc=$?
+  fi
   if [[ $rc -eq 0 ]]; then
     RESULTS+=("PASS  $label")
+  elif [[ $timed_out -eq 1 ]]; then
+    # 打ち切りを FAIL と同じ見た目にしない。「テストが落ちた」と
+    # 「時間内に終わらなかった」は次にやることが違う(前者は修正、
+    # 後者は分割・除外・上限の見直し)。判定は severity に従う
+    if [[ "$sev" == "warn" ]]; then
+      WARNED=1
+      RESULTS+=("WARN  $label (${STAGE_TIMEOUT}秒で打ち切り)")
+      {
+        echo "----- TIMEOUT: $label ($*) — ${STAGE_TIMEOUT}秒で打ち切り・末尾${HARNESS_LOG_TAIL_LINES}行 -----"
+        tail -n "$HARNESS_LOG_TAIL_LINES" "$log"
+      } >> "$LOGDIR/warnings.txt"
+    else
+      FAILED=1
+      RESULTS+=("TIMEOUT  $label (${STAGE_TIMEOUT}秒)")
+      {
+        echo "----- TIMEOUT: $label ($*) — ${STAGE_TIMEOUT}秒で打ち切り・末尾${HARNESS_LOG_TAIL_LINES}行 -----"
+        tail -n "$HARNESS_LOG_TAIL_LINES" "$log"
+        echo "(この上限は check.stage_timeout_seconds で変更できます)"
+      } >> "$LOGDIR/failures.txt"
+    fi
   elif [[ $rc -eq 126 || $rc -eq 127 ]]; then
     # 起動そのものに失敗(実行不可・未検出)。ユーザーのコードの問題ではない
     RESULTS+=("SKIP  $label (実行不可)")
@@ -248,7 +314,7 @@ fi
 
 if [[ $FAILED -eq 1 ]]; then
   echo
-  echo "以下の失敗を修正してから完了とすること:"
+  echo "以下の失敗(TIMEOUT を含む)を修正してから完了とすること:"
   cat "$LOGDIR/failures.txt"
   exit 1
 fi

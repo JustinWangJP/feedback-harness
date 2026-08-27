@@ -191,6 +191,7 @@ checks:
 | `warn_on` | 阶段列表 | `[]` | — | 把会 FAIL 的阶段降为 WARN |
 | `exclude` | glob 列表 | `[]` | — | 从工具链枚举的文件中排除（生效范围见上文） |
 | `log_tail_lines` | 整数 | `40` | — | FAIL / WARN 时输出的日志行数。直接影响 agent 的上下文量 |
+| `stage_timeout_seconds` | 整数 | `0` | 0-3600 | 单个阶段的时间上限(秒)。`0` 表示交给 harness 决定 —— 从 CLI / CI 运行时不限时,只有 Stop hook 会在 240 秒(短于 hook 自身的限制)处中断,从而仍能把「哪个阶段没跑完」返回给 agent。显式设置的值对所有运行路径生效。中断会报告为 `TIMEOUT` 而非 `FAIL` |
 
 **② 按技术栈（`check.<stack>`）**
 
@@ -269,11 +270,13 @@ ERROR: .feedback/config.yaml を読めませんでした。以下はすべて既
 .feedback/config.yaml: check.skip の 'lnit' は未知のステージです。使えるのは lint / typecheck / test / build / format / security / docs / contract
 ```
 
-这比悄悄退回默认值更安全 —— 它会告诉你「设置不生效」的原因正是 config 本身有误。在 `check.sh` 的正常运行中也会出现 `FAIL  config: .feedback/config.yaml`。
+这比悄悄退回默认值更安全 —— 它会告诉你「设置不生效」的原因正是 config 本身有误。在 `check.sh` 的正常运行中也会出现 `FAIL  config: 設定エラー`,其下方的详情会指明来源(配置文件还是环境变量)。
 
 ### `exclude` 的生效范围
 
 `exclude` 只对**工具链自己枚举文件的检查**（`bash-syntax` / `shellcheck` / `json-syntax` / `yaml-syntax` / `md-links` 等）生效。对 ruff、pytest、go test、vulture 这类**自己遍历目录树的工具无效** —— 它们遵循工具自身的忽略配置（ruff 的 `exclude` / `per-file-ignores`、pytest 的 `testpaths` 等）。工具链不会把配置翻译成各工具的排除语法（各工具语义不同，翻译必然产生偏差）。
+
+有一处不对称需要知道：`check_file.sh`（PostToolUse hook）接收的是单个文件，因此总会应用 `exclude`。也就是说被排除的 `vendor/foo.py` 在编辑后会悄悄通过，而 Stop hook 的 `ruff check .` 仍会报告它。若希望两条路径一致，请同时写上工具自身的忽略设置。
 
 ### 有些检查不出现在 `--list-checks` 中
 

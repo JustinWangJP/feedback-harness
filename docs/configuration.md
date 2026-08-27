@@ -191,6 +191,7 @@ A chapter to look things up in. There is no need to read it through. Copy check 
 | `warn_on` | stage list | `[]` | — | Demote failing stages to WARN |
 | `exclude` | glob list | `[]` | — | Exclude from the files the harness enumerates (scope as described above) |
 | `log_tail_lines` | integer | `40` | — | How many log lines to print on FAIL / WARN. Directly affects how much context the agent receives |
+| `stage_timeout_seconds` | integer | `0` | 0-3600 | Per-stage time limit. `0` leaves it to the harness: runs from the CLI / CI are unlimited, while the Stop hook cuts each stage off at 240s — shorter than its own hook limit, so the agent still learns which stage never finished. A value you set applies to every run path. A cut-off is reported as `TIMEOUT`, not `FAIL` |
 
 **② Per stack (`check.<stack>`)**
 
@@ -269,11 +270,13 @@ ERROR: .feedback/config.yaml を読めませんでした。以下はすべて既
 .feedback/config.yaml: check.skip の 'lnit' は未知のステージです。使えるのは lint / typecheck / test / build / format / security / docs / contract
 ```
 
-This is safer than silently falling back to defaults — it tells you that the reason "the settings do not work" is an error in the config itself. A normal `check.sh` run also raises `FAIL  config: .feedback/config.yaml`.
+This is safer than silently falling back to defaults — it tells you that the reason "the settings do not work" is an error in the config itself. A normal `check.sh` run also raises `FAIL  config: 設定エラー`; the detail block below it names the source — the config file or the environment variable.
 
 ### The scope of `exclude`
 
 `exclude` applies only to **checks where the harness itself enumerates the files** (`bash-syntax` / `shellcheck` / `json-syntax` / `yaml-syntax` / `md-links`, and so on). It **does not apply to tools that walk the tree themselves**, such as ruff, pytest, go test, or vulture — those follow their own ignore settings (ruff's `exclude` / `per-file-ignores`, pytest's `testpaths`, and so on). The harness does not translate into each tool's exclusion syntax, because the semantics differ per tool and any translation would drift.
+
+One asymmetry is worth knowing: `check_file.sh` (the PostToolUse hook) always applies `exclude`, because it is handed a single file. So an excluded `vendor/foo.py` passes silently right after you edit it, while the Stop hook's `ruff check .` still reports it. Set the tool's own ignore rules too when you want both paths to agree.
 
 ### Some checks do not appear in `--list-checks`
 

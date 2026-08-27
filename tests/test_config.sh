@@ -144,8 +144,8 @@ checks:
     severity: skip' >/dev/null 2>&1; echo $?)" "妥当な設定は検証を通る"
 
 # 検査IDの一覧が取れる(check.sh との突き合わせに使う)
-assert_contains "$(python3 "$CFG" --keys)" "vulture" "--keys が検査IDを出す"
-assert_contains "$(python3 "$CFG" --keys)" "ruff-format" "--keys がハイフン付きIDを出す"
+assert_contains "$(tpy "$CFG" --keys)" "vulture" "--keys が検査IDを出す"
+assert_contains "$(tpy "$CFG" --keys)" "ruff-format" "--keys がハイフン付きIDを出す"
 
 # --- 解決規則(3層 + 環境変数)---
 # 実効値は --json で確認する。出所(どの層で決まったか)も一緒に返る
@@ -219,7 +219,7 @@ check:
     - "vendor dir/**"
     - "$(touch /tmp/harness_pwned); echo x"
 EOF
-SHELL_OUT="$(python3 "$CFG" --shell "$WORK/proj")"
+SHELL_OUT="$(tpy "$CFG" --shell "$WORK/proj")"
 assert_not_contains "$SHELL_OUT" "HARNESS_CHECK_SEVERITY=" \
   "検査設定を区切り文字入りの単一変数へ詰めない"
 eval "$SHELL_OUT"
@@ -244,7 +244,7 @@ assert_eq "既定" "$(harness_check_source ruff)" "指定が無ければ出所�
 
 # source は構造化された別フィールドなので、旧形式の区切り文字・空白・タブ・
 # Unicode を含んでも欠落しない。Python生成→shell eval→lookupを端から端まで試す
-SPECIAL_SHELL_OUT="$(python3 - "$REPO/scripts" "$WORK/proj" <<'PY'
+SPECIAL_SHELL_OUT="$(tpy - "$REPO/scripts" "$WORK/proj" <<'PY'
 import sys
 
 sys.path.insert(0, sys.argv[1])
@@ -343,7 +343,7 @@ done
 # check.sh の呼び出しID と CHECKS のドリフトも防ぐ(設計書 §8)。
 # 行頭アンカーの grep は "cmd && run_stage ..." 形式の行を拾えないため
 # 非アンカーで抽出する。ID の過不足と、ステージ引数の取り違えの両方を見る
-DRIFT="$(python3 - "$REPO/scripts/check.sh" "$CFG" <<'PY'
+DRIFT="$(tpy - "$REPO/scripts/check.sh" "$CFG" <<'PY'
 import pathlib, re, subprocess, sys
 check_sh = pathlib.Path(sys.argv[1])
 src = check_sh.read_text()

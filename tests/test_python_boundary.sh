@@ -81,6 +81,17 @@ assert_eq "3" "$?" "正規化経路でも Python の終了ステータスを保�
 MSYSTEM=MINGW64 bash -c '. "$1"; harness_python -c "pass"' _ "$LIB" >/dev/null 2>&1
 assert_eq "0" "$?" "正規化経路でも成功時は 0 を返す"
 
+# テスト側の捕捉も同じ契約に乗せる。ハーネス本体は harness_python が境界で
+# 正規化するが、テストが素の python3 を $( ) で捕まえるとその境界を通らず、
+# Windows では期待値だけに CR が混ざって「表示は同じなのに一致しない」失敗になる。
+# 走査で禁止する — 21箇所を移行したあと、次に足される1箇所を止められるのは
+# 一覧ではなく走査だけである(比較に使わない直接実行は対象外)。
+# パターンは分割して組み立てる。走査対象にこのファイル自身が含まれるため、
+# 探している並びをそのまま書くと自分の1行に当たって常に落ちる
+PY_CAPTURE_PATTERN='\$\(python'"3 "
+CAPTURES="$(grep -rnE "$PY_CAPTURE_PATTERN" "$REPO"/tests/*.sh || true)"
+assert_eq "" "$CAPTURES" "テストは Python 出力の捕捉に tpy を使う(素の python3 は CR が残る)"
+
 # 契約が「境界で一度だけ」であること。フック側が自前で CR を落とし始めると
 # 「どこで落ちているのか」が経路ごとに分かれ、抜けが生まれる。
 for hook in "$REPO"/scripts/hooks/*.sh; do

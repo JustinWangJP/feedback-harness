@@ -19,23 +19,23 @@ done
 
 # 2: Claude / Codex のプラグイン名・バージョンとマーケットプレイス名
 assert_eq "feedback-harness" \
-  "$(python3 -c "import json,sys;print(json.load(open(sys.argv[1]))['name'])" "$REPO/.claude-plugin/plugin.json")" \
+  "$(tpy -c "import json,sys;print(json.load(open(sys.argv[1]))['name'])" "$REPO/.claude-plugin/plugin.json")" \
   "Claude プラグイン名"
 assert_eq "feedback-harness" \
-  "$(python3 -c "import json,sys;print(json.load(open(sys.argv[1]))['name'])" "$REPO/.codex-plugin/plugin.json")" \
+  "$(tpy -c "import json,sys;print(json.load(open(sys.argv[1]))['name'])" "$REPO/.codex-plugin/plugin.json")" \
   "Codex プラグイン名"
 assert_eq "feedback-harness" \
-  "$(python3 -c "import json,sys;print(json.load(open(sys.argv[1]))['name'])" "$REPO/.claude-plugin/marketplace.json")" \
+  "$(tpy -c "import json,sys;print(json.load(open(sys.argv[1]))['name'])" "$REPO/.claude-plugin/marketplace.json")" \
   "マーケットプレイス名"
 assert_eq \
-  "$(python3 -c "import json,sys;print(json.load(open(sys.argv[1]))['version'])" "$REPO/.claude-plugin/plugin.json")" \
-  "$(python3 -c "import json,sys;print(json.load(open(sys.argv[1]))['version'])" "$REPO/.codex-plugin/plugin.json")" \
+  "$(tpy -c "import json,sys;print(json.load(open(sys.argv[1]))['version'])" "$REPO/.claude-plugin/plugin.json")" \
+  "$(tpy -c "import json,sys;print(json.load(open(sys.argv[1]))['version'])" "$REPO/.codex-plugin/plugin.json")" \
   "Claude / Codex のプラグインバージョンが一致する"
 assert_eq "0.1.9" \
-  "$(python3 -c "import json,sys;print(json.load(open(sys.argv[1]))['version'])" "$REPO/.claude-plugin/plugin.json")" \
+  "$(tpy -c "import json,sys;print(json.load(open(sys.argv[1]))['version'])" "$REPO/.claude-plugin/plugin.json")" \
   "公開プラグインバージョンが0.1.9である"
 
-CODEX_MANIFEST_ERROR="$(python3 - "$REPO/.codex-plugin/plugin.json" <<'PY'
+CODEX_MANIFEST_ERROR="$(tpy - "$REPO/.codex-plugin/plugin.json" <<'PY'
 import json
 import sys
 
@@ -63,7 +63,7 @@ assert_file_absent "$REPO/.claude/skills" "旧 .claude/skills が残っていな
 assert_file_absent "$REPO/.claude/agents" "旧 .claude/agents が残っていない"
 
 # 4: hooks.json が参照するスクリプトが実在する
-MISSING="$(python3 - "$REPO" <<'PY'
+MISSING="$(tpy - "$REPO" <<'PY'
 import json, re, sys, pathlib
 repo = pathlib.Path(sys.argv[1])
 cfg = json.load(open(repo / "hooks" / "hooks.json"))
@@ -86,7 +86,7 @@ assert_eq "" "$MISSING" "hooks.json の参照先が実在する"
 #     ドリフトを見逃すため、イベントごとに正規化した構造で突き合わせる。
 #     ${CLAUDE_PLUGIN_ROOT} と $CLAUDE_PROJECT_DIR のプレフィックス差は
 #     正当な差異なので、コマンド全体ではなくスクリプトのベース名だけを比較する)
-NORM_A="$(python3 - "$REPO/.claude/settings.json" <<'PY'
+NORM_A="$(tpy - "$REPO/.claude/settings.json" <<'PY'
 import json, re, sys
 
 def normalize(path):
@@ -110,7 +110,7 @@ def normalize(path):
 print(json.dumps(normalize(sys.argv[1]), sort_keys=True))
 PY
 )"
-NORM_B="$(python3 - "$REPO/hooks/hooks.json" <<'PY'
+NORM_B="$(tpy - "$REPO/hooks/hooks.json" <<'PY'
 import json, re, sys
 
 def normalize(path):

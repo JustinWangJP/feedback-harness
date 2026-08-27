@@ -201,6 +201,7 @@ harness_load_config() {
     HARNESS_CONFIG_ERROR="設定ローダー(harness_config.py)を起動できませんでした(Python 3.10+ を確認してください)。既定値で続行します — FEEDBACK_CHECK_SKIP 等の環境変数による上書きは適用されません。"
     HARNESS_EXCLUDE=""
     HARNESS_LOG_TAIL_LINES=40
+    HARNESS_STAGE_TIMEOUT_SECONDS=0
     HARNESS_SHELLCHECK_MIN_SEVERITY=warning
     HARNESS_VULTURE_MIN_CONFIDENCE=80
     HARNESS_OASDIFF_BASE=main

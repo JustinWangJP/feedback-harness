@@ -200,7 +200,7 @@ OUT="$(fb stats)"
 assert_contains "$OUT" "最終棚卸し: " "期限内でも最終棚卸し日は表示する"
 assert_not_contains "$OUT" "棚卸しを推奨" "期限内なら推奨行は出ない"
 
-printf '%s\n' "$(python3 -c 'import datetime; print(datetime.date.today().isoformat())')" \
+printf '%s\n' "$(tpy -c 'import datetime; print(datetime.date.today().isoformat())')" \
   > "$WORK/project/.feedback/.last-audit"
 OUT="$(fb stats)"
 assert_contains "$OUT" "最終監査:" "当日でも表示される"

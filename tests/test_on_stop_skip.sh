@@ -73,11 +73,18 @@ fake_check() { # fake_check <exit code>
 # 出力は $HOOK_OUT に置き、終了コードは返り値で返す。コマンド置換で呼ぶと
 # フックの終了コードがサブシェルに閉じて親に伝わらない
 HOOK_OUT=""
-run_hook() { # run_hook <stop_hook_active>
+run_hook() { # run_hook <stop_hook_active> [HARNESS_PYTHON の値]
+  local active="$1" py="${2:-}" rc
   rm -f "$RAN"
-  printf '{"stop_hook_active": %s}' "$1" \
-    | CLAUDE_PROJECT_DIR="$WORK/proj" bash "$WORK/fake/hooks/on_stop.sh" >"$WORK/out.txt" 2>&1
-  local rc=$?
+  if [[ -n "$py" ]]; then
+    printf '{"stop_hook_active": %s}' "$active" \
+      | CLAUDE_PROJECT_DIR="$WORK/proj" HARNESS_PYTHON="$py" \
+        bash "$WORK/fake/hooks/on_stop.sh" >"$WORK/out.txt" 2>&1
+  else
+    printf '{"stop_hook_active": %s}' "$active" \
+      | CLAUDE_PROJECT_DIR="$WORK/proj" bash "$WORK/fake/hooks/on_stop.sh" >"$WORK/out.txt" 2>&1
+  fi
+  rc=$?
   HOOK_OUT="$(cat "$WORK/out.txt")"
   return $rc
 }
@@ -89,6 +96,18 @@ fake_check 1
 run_hook true; RC=$?
 assert_eq "0" "$RC" "2周目はブロックしない"
 assert_file_absent "$RAN" "2周目は check.sh を再実行しない"
+
+# ループ防止が Python の可用性に依存しないこと。judge を Python だけに任せると、
+# Python 3.10+ が無い環境で判定が空になり「アクティブでない」と読まれて再び
+# ブロックする — check.sh は bash 主体で動くため、失敗が残る限りループが続く
+run_hook true "/nonexistent/python"; RC=$?
+assert_eq "0" "$RC" "Python が使えなくても2周目はブロックしない"
+assert_file_absent "$RAN" "Python が使えなくても2周目は再実行しない"
+
+# フォールバックが「常に素通し」になっていないこと(1周目は検査する)
+run_hook false "/nonexistent/python"; RC=$?
+assert_eq "2" "$RC" "Python が使えなくても1周目は検査してブロックする"
+assert_file_exists "$RAN" "Python が使えなくても1周目は check.sh を実行する"
 
 # 1周目: 変更があり検査が失敗したらブロックし、スタンプを進めない
 run_hook false; RC=$?

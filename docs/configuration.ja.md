@@ -191,6 +191,7 @@ checks:
 | `warn_on` | ステージリスト | `[]` | — | FAIL するステージを WARN に落とす |
 | `exclude` | glob リスト | `[]` | — | ハーネスが列挙するファイルから除外する(効く範囲は上記) |
 | `log_tail_lines` | 整数 | `40` | — | FAIL / WARN 時に出すログ行数。エージェントの文脈量に直結する |
+| `stage_timeout_seconds` | 整数 | `0` | 0-3600 | 1ステージの上限秒。`0` はハーネスに任せる — CLI / CI からの実行は無制限、Stop フックからの実行だけがフック制限より短い 240 秒で打ち切り、「どのステージが終わらなかったか」をエージェントへ返す。明示した値はすべての実行経路に効く。打ち切りは `FAIL` ではなく `TIMEOUT` として出る |
 
 **② スタック単位(`check.<stack>`)**
 
@@ -269,11 +270,13 @@ ERROR: .feedback/config.yaml を読めませんでした。以下はすべて既
 .feedback/config.yaml: check.skip の 'lnit' は未知のステージです。使えるのは lint / typecheck / test / build / format / security / docs / contract
 ```
 
-これは黙って既定値に落ちるより安全な挙動である — 「設定が効かない」の原因が config 自体の誤りであることを教えてくれる。`check.sh` の通常実行でも `FAIL  config: .feedback/config.yaml` が立つ。
+これは黙って既定値に落ちるより安全な挙動である — 「設定が効かない」の原因が config 自体の誤りであることを教えてくれる。`check.sh` の通常実行でも `FAIL  config: 設定エラー` が立ち、直下の詳細に出所(config ファイルか環境変数か)が出る。
 
 ### `exclude` の効く範囲
 
 `exclude` が効くのは**ハーネス自身がファイルを列挙する検査**(`bash-syntax` / `shellcheck` / `json-syntax` / `yaml-syntax` / `md-links` 等)に限る。ruff / pytest / go test / vulture のように**自分でツリーを歩くツールには効かない** — それらはツール自身の無視設定(ruff の `exclude` / `per-file-ignores`、pytest の `testpaths` 等)に従う。ハーネスが各ツールの除外構文へ翻訳することはしない(ツールごとに意味が違い、翻訳は必ずずれるため)。
+
+1点だけ非対称がある: `check_file.sh`(PostToolUse フック)は単発ファイルを受け取るため、常に `exclude` を適用する。つまり除外した `vendor/foo.py` は編集直後には黙って通り、Stop フックの `ruff check .` では報告される。両方の経路を揃えたいときは、ツール自身の無視設定も書くこと。
 
 ### `--list-checks` に載らない検査がある
 

@@ -32,6 +32,11 @@ check:
   # FAIL / WARN 時に出すログの行数
   log_tail_lines: 40
 
+  # 1ステージの上限秒(0-3600)。0 = ハーネスに任せる — CLI / CI からの実行は
+  # 無制限、Stop フックからの実行だけがフック制限より短い既定(240秒)で打ち切る。
+  # 明示するとすべての実行経路に効く。打ち切りは FAIL ではなく TIMEOUT として出る
+  stage_timeout_seconds: 0
+
   # スタック単位(python / node / go / rust / java / shell)
   # 全体より優先される
   # python:

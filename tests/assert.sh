@@ -39,6 +39,28 @@ else
 fi
 export TEST_PYTHON
 
+# tpy <args...> — 比較に使う Python 出力を得るための起動口。
+#
+# 素の python3 を $( ) で捕まえると、Windows では出力の CR がそのまま残り
+# 「表示は同じなのに一致しない」失敗になる。ハーネス本体は harness_python が
+# 境界で一度だけ正規化するが、テストはその境界を通らないため、ここに同じ役割の
+# 入口を1つ用意する(経路ごとに tr を書き足すと、足し忘れた経路だけが壊れる)。
+# 素の python3 での捕捉が再び増えないことは tests/test_python_boundary.sh が
+# 走査で禁止する。終了コードは Python のものを返す。
+tpy() {
+  local args=() arg status
+  for arg in "$@"; do
+    if [[ -n "${MSYSTEM:-}" && "$arg" == /* ]] && command -v cygpath >/dev/null 2>&1; then
+      args+=("$(cygpath -w -- "$arg")")
+    else
+      args+=("$arg")
+    fi
+  done
+  "$TEST_PYTHON" "${args[@]}" | tr -d '\r'
+  status="${PIPESTATUS[0]}"
+  return "$status"
+}
+
 native_path() { # native_path <Git Bash / Unix path>
   if [[ -n "${MSYSTEM:-}" ]] && command -v cygpath >/dev/null 2>&1; then
     cygpath -w -- "$1"

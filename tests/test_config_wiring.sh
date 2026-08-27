@@ -94,8 +94,32 @@ make_fake ruff 0
 printf 'check:\n  skip: [lnit]\n' > "$P5/.feedback/config.yaml"
 OUT="$(run_check "$P5")"; RC=$?
 assert_eq "1" "$RC" "壊れた config は完了をブロックする"
-assert_contains "$OUT" "FAIL  config: .feedback/config.yaml" "config 自体の FAIL が出る"
+assert_contains "$OUT" "FAIL  config: 設定エラー" "config 自体の FAIL が出る"
 assert_contains "$OUT" "PASS  python: ruff" "他の検査は既定値で続行する"
+rm -f "$FAKEBIN/ruff"
+
+# --- 環境変数の誤りも config と同じ扱いで報告する ---
+# 検証しないと壊れ方が2種類に分かれる: ステージ名の打ち間違いは沈黙して無視され
+# 「切ったつもりで動き続ける」、列挙外の値はそのままツールへ渡り、環境変数の誤りが
+# 利用者のコードの失敗として報告される。どちらも config 側では落としている
+P5B="$(new_project broken_env)"
+printf '[project]\nname = "t"\n' > "$P5B/pyproject.toml"
+make_fake ruff 0
+OUT="$(PATH="$FAKEBIN:$PATH" FEEDBACK_CHECK_SKIP=tests bash "$CHECK" "$P5B" 2>&1)"; RC=$?
+assert_eq "1" "$RC" "未知のステージ名を環境変数で渡すと完了をブロックする"
+assert_contains "$OUT" "FEEDBACK_CHECK_SKIP" "どの環境変数が誤りか出る"
+assert_contains "$OUT" "未知のステージ" "誤りの内容が出る"
+assert_contains "$OUT" "PASS  python: ruff" "環境変数が壊れていても他の検査は続行する"
+
+OUT="$(PATH="$FAKEBIN:$PATH" FEEDBACK_SHELLCHECK_SEVERITY=bogus bash "$CHECK" "$P5B" 2>&1)"; RC=$?
+assert_eq "1" "$RC" "列挙外の値を環境変数で渡すと完了をブロックする"
+assert_contains "$OUT" "FEEDBACK_SHELLCHECK_SEVERITY" "どの環境変数が誤りか出る"
+assert_not_contains "$OUT" "FAIL  shell: shellcheck" "環境変数の誤りを検査の失敗として報告しない"
+
+# 正しい値は従来どおり効く(検証が上書きそのものを壊していないこと)
+OUT="$(PATH="$FAKEBIN:$PATH" FEEDBACK_SHELLCHECK_SEVERITY=error bash "$CHECK" "$P5B" 2>&1)"; RC=$?
+assert_eq "0" "$RC" "正しい値の環境変数は通る: $OUT"
+assert_not_contains "$OUT" "FAIL  config: 設定エラー" "正しい値で設定エラーを出さない"
 rm -f "$FAKEBIN/ruff"
 
 # --- exclude が検査対象を減らす ---

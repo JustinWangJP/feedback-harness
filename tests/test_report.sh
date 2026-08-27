@@ -108,14 +108,14 @@ CLOSED_FILE="$(grep -rl "^id: ${CID}\$" "$WORK/project/.feedback/log")"
 assert_contains "$(cat "$CLOSED_FILE")" "status_changed:" "close が status_changed を書く"
 
 # --- --mark で基点スタンプが更新され、--last で読める ---
-TODAY="$(python3 -c 'import datetime; print(datetime.date.today().isoformat())')"
+TODAY="$(tpy -c 'import datetime; print(datetime.date.today().isoformat())')"
 fb report --since 2026-07-10 --mark >/dev/null
 assert_file_exists "$WORK/project/.feedback/.last-retro" "--mark で .last-retro が作られる"
 assert_contains "$(cat "$WORK/project/.feedback/.last-retro")" "$TODAY" "スタンプには今日の日付が入る"
 assert_contains "$(fb report --last)" "フィードバックレポート" "--last でスタンプ基点のレポートが出る"
 
 # --- yesterday ショートカット ---
-YESTERDAY="$(python3 -c 'import datetime; print((datetime.date.today()-datetime.timedelta(days=1)).isoformat())')"
+YESTERDAY="$(tpy -c 'import datetime; print((datetime.date.today()-datetime.timedelta(days=1)).isoformat())')"
 assert_contains "$(fb report --since yesterday)" "$YESTERDAY 以降" "--since yesterday が解決される"
 
 # --- スタンプが無い状態での --last は明示的エラー ---

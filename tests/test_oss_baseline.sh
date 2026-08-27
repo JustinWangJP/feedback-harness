@@ -9,10 +9,10 @@ assert_file_exists "$REPO/LICENSE" "MIT Licenseが存在する"
 assert_contains "$(cat "$REPO/LICENSE")" "MIT License" "ライセンス本文がMITである"
 assert_contains "$(cat "$REPO/LICENSE")" "Copyright (c) 2026 JustinWangJP" "著作権表示がある"
 assert_eq "MIT" \
-  "$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['license'])" "$REPO/package.json")" \
+  "$(tpy -c "import json,sys; print(json.load(open(sys.argv[1]))['license'])" "$REPO/package.json")" \
   "package metadataのlicenseがMITである"
 assert_eq "MIT" \
-  "$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['packages']['']['license'])" "$REPO/package-lock.json")" \
+  "$(tpy -c "import json,sys; print(json.load(open(sys.argv[1]))['packages']['']['license'])" "$REPO/package-lock.json")" \
   "lockfileのroot package metadataもMITである"
 
 CI="$REPO/.github/workflows/ci.yml"
