@@ -93,6 +93,14 @@ run_rw() { # run_rw <ラベル> <args...>
 
 run_rw "add" add --category style --summary "テスト用の記録"
 run_rw "close" close 20260101-000000 --reason "テスト"
+# report --mark は .last-retro を transaction で書く。読み取り扱いのまま通すと
+# transaction() が壊れた journal を上書きしてから unlink し、「内容を確認のうえ
+# 削除して再実行」と案内した当の記録が黙って消える
+run_rw "report --mark" report --since 2026-01-01 --mark
+assert_file_exists "$PROJECT/.feedback/.transaction.json" \
+  "止まった report --mark が journal を消していない"
+assert_file_absent "$PROJECT/.feedback/.last-retro" \
+  "止まった report --mark が基点を書いていない"
 
 # 書き込みが止まっている以上、記録は1件も増えていないこと
 ENTRY_COUNT="$(find "$PROJECT/.feedback/log" -name '*.md' | wc -l | tr -d ' ')"
