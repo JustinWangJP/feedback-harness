@@ -135,7 +135,7 @@ docs/
 
 ### 文档的权威顺序
 
-有关当前用法，请参阅本 README、[配置指南](docs/configuration.md)和[脚本参考](scripts/README.zh-CN.md)。带日期的 `docs/proposals/` 和 `docs/superpowers/` 文件保留提案或设计编写时的决策。如果这些资料与当前规范不同，请以刚才列出的三份文档和实际实现为准。完整文档列表请参阅[文档导航](docs/README.zh-CN.md)。
+有关当前用法，请参阅本 README、[配置指南](docs/configuration.zh-CN.md)和[脚本参考](scripts/README.zh-CN.md)。带日期的 `docs/proposals/` 和 `docs/superpowers/` 文件保留提案或设计编写时的决策。如果这些资料与当前规范不同，请以刚才列出的三份文档和实际实现为准。完整文档列表请参阅[文档导航](docs/README.zh-CN.md)。
 
 有关 Codex 当前规范，请参阅 OpenAI 官方的[插件使用指南](https://learn.chatgpt.com/docs/plugins)、[插件包规范](https://developers.openai.com/plugins/build/plugins)和 [Hooks 规范](https://developers.openai.com/codex/hooks)。有关 Claude Code，请参阅 Anthropic 官方的[插件安装指南](https://code.claude.com/docs/en/discover-plugins)。
 
@@ -393,7 +393,7 @@ bash scripts/check.sh --list-checks           # 不执行检查，仅列出检�
 bash scripts/check.sh --list-checks --json    # 以机器可读 JSON 输出相同信息
 ```
 
-优先级为：环境变量 > 单项检查 > 技术栈 > 全局 > 默认值。语法和全部设置请参阅[配置指南](docs/configuration.md)。
+优先级为：环境变量 > 单项检查 > 技术栈 > 全局 > 默认值。语法和全部设置请参阅[配置指南](docs/configuration.zh-CN.md)。
 
 ## 反馈运作流程
 

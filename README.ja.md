@@ -135,7 +135,7 @@ docs/
 
 ### ドキュメントの位置づけ
 
-現在の使い方は、この README、[設定ガイド](docs/configuration.md)、[スクリプト仕様](scripts/README.ja.md)を参照してください。日付付きの `docs/proposals/` と `docs/superpowers/` は、提案や設計を行った時点の判断を残す履歴資料です。現在の仕様と内容が異なる場合は、先に挙げた3つの文書と実装を優先してください。文書の一覧は[ドキュメント案内](docs/README.ja.md)にまとめています。
+現在の使い方は、この README、[設定ガイド](docs/configuration.ja.md)、[スクリプト仕様](scripts/README.ja.md)を参照してください。日付付きの `docs/proposals/` と `docs/superpowers/` は、提案や設計を行った時点の判断を残す履歴資料です。現在の仕様と内容が異なる場合は、先に挙げた3つの文書と実装を優先してください。文書の一覧は[ドキュメント案内](docs/README.ja.md)にまとめています。
 
 Codex 側の現在の仕様は、OpenAI 公式の[プラグイン利用ガイド](https://learn.chatgpt.com/docs/plugins)、[プラグインのパッケージ仕様](https://developers.openai.com/plugins/build/plugins)、[Hooks 仕様](https://developers.openai.com/codex/hooks)を参照してください。Claude Code 側は、Anthropic 公式の[プラグイン導入ガイド](https://code.claude.com/docs/en/discover-plugins)を参照してください。
 
@@ -393,7 +393,7 @@ bash scripts/check.sh --list-checks           # 検査ID・実効判定・「出
 bash scripts/check.sh --list-checks --json    # 同じ内容を機械可読な JSON で出力
 ```
 
-設定の優先順位は、環境変数 > 検査単位 > スタック単位 > 全体 > 既定値です。書き方とすべての項目は、[設定ガイド](docs/configuration.md)を参照してください。
+設定の優先順位は、環境変数 > 検査単位 > スタック単位 > 全体 > 既定値です。書き方とすべての項目は、[設定ガイド](docs/configuration.ja.md)を参照してください。
 
 ## フィードバック運用フロー
 

@@ -297,12 +297,20 @@ assert_contains "$OUT" "openが2件以上" "open_threshold=2 で open 2件の NO
 rm -f "$WORK/proj/.feedback/log/e1.md" "$WORK/proj/.feedback/log/e2.md" "$WORK/proj/.feedback/config.yaml"
 
 # --- 雛形とガイドがスキーマと一致する ---
-# 設定項目は harness_config.py / config.example.yaml / docs/configuration.md の
-# 3箇所に現れる。文書が古いまま残るのを機械的に防ぐ
+# 設定項目は harness_config.py / config.example.yaml / 設定ガイドに現れる。
+# 文書が古いまま残るのを機械的に防ぐ。
+# 設定ガイドは3言語ある。1言語だけを見ると、翻訳版に検査IDを足し忘れても
+# 緑のまま通り、日本語以外の利用者にだけ不完全なリファレンスが残る
 EXAMPLE="$REPO/.feedback/config.example.yaml"
-GUIDE="$REPO/docs/configuration.md"
+GUIDES=(
+  "$REPO/docs/configuration.md"
+  "$REPO/docs/configuration.ja.md"
+  "$REPO/docs/configuration.zh-CN.md"
+)
 assert_file_exists "$EXAMPLE" "雛形が存在する"
-assert_file_exists "$GUIDE" "設定ガイドが存在する"
+for GUIDE in "${GUIDES[@]}"; do
+  assert_file_exists "$GUIDE" "設定ガイドが存在する: $(basename "$GUIDE")"
+done
 
 MISSING=""
 while IFS=$'\t' read -r kind name _ _; do
@@ -312,12 +320,25 @@ while IFS=$'\t' read -r kind name _ _; do
 done < <(python3 "$CFG" --keys)
 assert_eq "" "$MISSING" "全設定キーが雛形に載っている"
 
-MISSING=""
-while IFS=$'\t' read -r kind name _ _; do
-  [[ "$kind" == "check" ]] || continue
-  grep -q "\`$name\`" "$GUIDE" || MISSING="$MISSING $name"
-done < <(python3 "$CFG" --keys)
-assert_eq "" "$MISSING" "全検査IDが設定ガイドに載っている"
+for GUIDE in "${GUIDES[@]}"; do
+  MISSING=""
+  while IFS=$'\t' read -r kind name _ _; do
+    [[ "$kind" == "check" ]] || continue
+    grep -q "\`$name\`" "$GUIDE" || MISSING="$MISSING $name"
+  done < <(python3 "$CFG" --keys)
+  assert_eq "" "$MISSING" "全検査IDが設定ガイドに載っている: $(basename "$GUIDE")"
+done
+
+# 言語切替行がお互いを指していること。3言語に分けた以上、どの版から入っても
+# 他の版へ辿れなければ「英語だと思って開いた日本語文書」が別の形で再発する
+for GUIDE in "${GUIDES[@]}"; do
+  HEAD_LINE="$(head -n 1 "$GUIDE")"
+  for peer in configuration.md configuration.ja.md configuration.zh-CN.md; do
+    [[ "$(basename "$GUIDE")" == "$peer" ]] && continue
+    assert_contains "$HEAD_LINE" "($peer)" \
+      "$(basename "$GUIDE") の言語切替行が $peer を指す: $HEAD_LINE"
+  done
+done
 
 # check.sh の呼び出しID と CHECKS のドリフトも防ぐ(設計書 §8)。
 # 行頭アンカーの grep は "cmd && run_stage ..." 形式の行を拾えないため

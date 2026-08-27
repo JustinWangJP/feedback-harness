@@ -9,7 +9,7 @@
 | 文書 | 内容 |
 |---|---|
 | [プロジェクト概要](../README.ja.md) | 機能、導入方法、日常の利用方法 |
-| [設定ガイド](configuration.md) | `.feedback/config.yaml` の設定方法とトラブルシューティング |
+| [設定ガイド](configuration.ja.md) | `.feedback/config.yaml` の設定方法とトラブルシューティング |
 | [スクリプト仕様](../scripts/README.ja.md) | 各スクリプトの役割、実行内容、終了コード |
 | [Codex / 汎用エージェント向け規約](pointer_agents.md) | Codex Plugin Hooks と手動フォールバックを両立する、導入先 AGENTS.md 用の規約 |
 | [Claude Code 向け規約](pointer_claude.md) | Claude Code プラグインの Hooks と init-only の手動フォールバックを両立する、導入先 CLAUDE.md 用の規約 |

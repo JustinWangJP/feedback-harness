@@ -81,7 +81,8 @@ assert_contains "$OUT" "未知の検査ID" "派生に見えないIDの打ち間�
 BASES="$(sed -nE 's/^DERIVABLE_CHECKS = \((.*)\)$/\1/p' "$REPO/scripts/harness_config.py" \
   | tr -d '", ' | tr ',' ' ')"
 assert_contains "$BASES" "mvn" "DERIVABLE_CHECKS を読み取れている: $BASES"
-for doc in docs/configuration.md scripts/README.md scripts/README.ja.md scripts/README.zh-CN.md; do
+for doc in docs/configuration.md docs/configuration.ja.md docs/configuration.zh-CN.md \
+          scripts/README.md scripts/README.ja.md scripts/README.zh-CN.md; do
   for base in $BASES; do
     assert_contains "$(cat "$REPO/$doc")" "$base-" \
       "$doc が派生検査ID($base-<module>)を説明している"
