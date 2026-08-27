@@ -20,6 +20,129 @@ has() {
   return 0
 }
 
+# harness_python <args...> — Python 3.10+ を実行する。
+#
+# Unix では python3、Windows の Git Bash では python だけが PATH にある構成が
+# 一般的なので、全入口で同じ順序で解決する。HARNESS_PYTHON には明示したい
+# executable 名または Git Bash から実行できる path を指定できる。
+#
+# 出力の改行は呼び出し側から見て常に LF である。Windows の Python は
+# sys.stdout へ CRLF を書き出す(2026-08-24 の Windows CI で実測。当初
+# newline="\n" で書くと考えて capture 側の CR 除去を外したところ、
+# tests/test_python_boundary.sh が実出力 "true\r\n" を捕まえた)。CR が
+# 混ざると eval・文字列比較・行読みが静かに外れるため、経路ごとに落とすのでは
+# なくこの境界で一度だけ正規化する — 経路ごとの防御は、足し忘れた経路だけが
+# 壊れる形になる。
+_harness_python_works() {
+  # interpreter として掴んでよいのは実ファイルだけ。command -v は export された
+  # shell function も解決するため、これが無いと同名の wrapper 関数が本番の
+  # 解決経路を乗っ取る。実際 tests/assert.sh は python3 が無い環境で
+  # `export -f python3` の shim を定義しており、その shim は cygpath 変換を
+  # 独自に行うので、Windows 経路の検証テストが本番コードではなく shim を
+  # 検査してしまっていた(PR #13 レビュー由来)。
+  [[ "$(type -t "$1" 2>/dev/null)" == "file" ]] || return 1
+  "$1" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)' \
+    >/dev/null 2>&1
+}
+
+# 解決結果の process 内 cache。
+#
+# harness_python は PostToolUse フック(毎編集)から何度も呼ばれ、
+# _harness_python_works は判定のたびに Python を追加起動する。Windows の
+# Python 起動は 200-400ms あり、1編集あたり秒単位の遅延になるため一度だけ解決する。
+# cache は HARNESS_PYTHON の値で key し、同一 process 内で指定が変わったら
+# 解決し直す(テストが HARNESS_PYTHON を切り替えて検証するため)。
+_HARNESS_PYTHON_RESOLVED=0
+_HARNESS_PYTHON_CACHE_KEY=""
+_HARNESS_PYTHON_CACHED=""
+
+# _harness_python_resolve — 使用する実行可能名を $_HARNESS_PYTHON_CACHED に入れる。
+# 見つからなければ非0。command substitution から呼ぶと subshell で cache が
+# 捨てられるため、値は戻り値ではなく変数で返す。
+_harness_python_resolve() {
+  local key="${HARNESS_PYTHON:-}"
+  if [[ "$_HARNESS_PYTHON_RESOLVED" != "1" || "$_HARNESS_PYTHON_CACHE_KEY" != "$key" ]]; then
+    if [[ -n "$key" ]]; then
+      if _harness_python_works "$key"; then
+        _HARNESS_PYTHON_CACHED="$key"
+      else
+        _HARNESS_PYTHON_CACHED=""
+      fi
+    elif _harness_python_works python3; then
+      _HARNESS_PYTHON_CACHED="python3"
+    elif _harness_python_works python; then
+      _HARNESS_PYTHON_CACHED="python"
+    else
+      _HARNESS_PYTHON_CACHED=""
+    fi
+    _HARNESS_PYTHON_RESOLVED=1
+    _HARNESS_PYTHON_CACHE_KEY="$key"
+  fi
+  [[ -n "$_HARNESS_PYTHON_CACHED" ]]
+}
+
+_harness_python_exec() {
+  local executable="$1"
+  shift
+  local args=()
+  local arg
+  for arg in "$@"; do
+    # Git Bash の /c/... や /tmp/... は Windows Python には存在しない。
+    # MSYS の自動変換は Bash function/command形によって効かない場合があるため、
+    # Pythonへ渡す独立した絶対path引数だけを境界で明示変換する。
+    #
+    # 「/ で始まる」だけを条件にすると、自由テキストを取る CLI
+    # (feedback.sh add --summary "/docs 配下は…" 等)の引数まで書き換わり、
+    # 記録内容が静かに壊れる。実在する path だけに限定する。
+    if [[ -n "${MSYSTEM:-}" && "$arg" == /* && -e "$arg" ]] \
+       && command -v cygpath >/dev/null 2>&1; then
+      args+=("$(cygpath -w -- "$arg")")
+    else
+      args+=("$arg")
+    fi
+  done
+  # ハーネスの出力・ログは日本語を含む。Windows の Python は stdout が
+  # console/pipe のとき ANSI コードページ(cp932 / cp1252 等)で符号化するため、
+  # 何も指定しないと feedback.sh list や --list-checks が UnicodeEncodeError で
+  # 落ちる。CI の workflow ではなくここで固定する — workflow に置くと利用者の
+  # 環境には届かず、CI だけが「誰も使っていない環境」を検証することになる。
+  # 周囲の環境変数は尊重せず上書きする(ハーネスの入出力は常に UTF-8)。
+  PYTHONUTF8=1 PYTHONIOENCODING=utf-8 "$executable" "${args[@]}"
+}
+
+harness_has_python() {
+  _harness_python_resolve
+}
+
+harness_python() {
+  _harness_python_resolve || return 127
+  if [[ -z "${MSYSTEM:-}" ]]; then
+    # Unix の Python は LF しか書かない。毎編集フックで走るため、
+    # 不要な tr プロセスを挟まない
+    _harness_python_exec "$_HARNESS_PYTHON_CACHED" "$@"
+    return $?
+  fi
+  # PIPESTATUS を読むため local 宣言はパイプラインより前に置く
+  # (local 自体が $? を潰すが PIPESTATUS はパイプラインが設定する)。
+  # 正規化するのは stdout だけ。呼び出し側が 2>&1 で stderr を混ぜる場合は
+  # その capture 側で落とす(check_file.sh の py_compile 経路が該当)。
+  local status
+  _harness_python_exec "$_HARNESS_PYTHON_CACHED" "$@" | tr -d '\r'
+  status="${PIPESTATUS[0]}"
+  return "$status"
+}
+
+# harness_bash_path <path> — Windows native pathをGit Bash pathへ正規化する。
+harness_bash_path() {
+  local path="$1"
+  if [[ -n "${MSYSTEM:-}" && "$path" =~ ^[A-Za-z]:[\\/].* ]] \
+     && command -v cygpath >/dev/null 2>&1; then
+    cygpath -u -- "$path"
+  else
+    printf '%s\n' "$path"
+  fi
+}
+
 # 重大度しきい値(shellcheck の -S に渡す)。既定は warning。
 # style/info まで拾うと、導入初日のプロジェクトが既存コードのSC2086等で
 # 完了をブロックされ続けるため、既定では拾わない。
@@ -42,16 +165,19 @@ SHELLCHECK_SEVERITY="${FEEDBACK_SHELLCHECK_SEVERITY:-warning}"
 harness_project_root() {
   local explicit="${1:-}"
   if [[ -n "$explicit" ]]; then
+    explicit="$(harness_bash_path "$explicit")"
     (cd "$explicit" 2>/dev/null && pwd) || return 1
     return 0
   fi
-  if [[ -n "${CLAUDE_PROJECT_DIR:-}" && -d "${CLAUDE_PROJECT_DIR}" ]]; then
-    (cd "$CLAUDE_PROJECT_DIR" && pwd)
+  local project_dir="${CLAUDE_PROJECT_DIR:-}"
+  project_dir="$(harness_bash_path "$project_dir")"
+  if [[ -n "$project_dir" && -d "$project_dir" ]]; then
+    (cd "$project_dir" && pwd)
     return 0
   fi
   local top
   if top="$(git rev-parse --show-toplevel 2>/dev/null)" && [[ -n "$top" ]]; then
-    printf '%s\n' "$top"
+    harness_bash_path "$top"
     return 0
   fi
   pwd
@@ -67,12 +193,12 @@ harness_load_config() {
   [[ -n "$root" ]] || root="$(harness_project_root)"
   local libdir="${BASH_SOURCE[0]%/*}"
   local shell_out
-  if ! shell_out="$(python3 "$libdir/harness_config.py" --shell "$root" 2>/dev/null)"; then
-    # ローダー自体が起動できない(python3 不在等)。既定値で続行するが、
+  if ! shell_out="$(harness_python "$libdir/harness_config.py" --shell "$root" 2>/dev/null)"; then
+    # ローダー自体が起動できない(Python 3.10+ 不在等)。既定値で続行するが、
     # FEEDBACK_CHECK_SKIP 等の環境変数による上書きは失われるため、
     # 黙って挙動を変えず HARNESS_CONFIG_ERROR で可視化する(既存の
     # 「config壊れているがFAILを立てて続行する」経路に乗せる)
-    HARNESS_CONFIG_ERROR="設定ローダー(harness_config.py)を起動できませんでした(python3 を確認してください)。既定値で続行します — FEEDBACK_CHECK_SKIP 等の環境変数による上書きは適用されません。"
+    HARNESS_CONFIG_ERROR="設定ローダー(harness_config.py)を起動できませんでした(Python 3.10+ を確認してください)。既定値で続行します — FEEDBACK_CHECK_SKIP 等の環境変数による上書きは適用されません。"
     HARNESS_EXCLUDE=""
     HARNESS_LOG_TAIL_LINES=40
     HARNESS_SHELLCHECK_MIN_SEVERITY=warning
@@ -91,17 +217,38 @@ harness_load_config() {
 # harness_check_severity <検査ID> <呼び出し側の既定> — 実効判定(fail/warn/skip)。
 # config が触っていない検査は、呼び出し側が宣言ゲートで決めた既定をそのまま返す。
 harness_check_severity() {
-  local id="$1" default="$2" key value
-  key="HARNESS_CHECK_${id//-/_}_SEVERITY"
-  value="${!key:-}"
+  local id="$1" default="$2"
+  local value
+  value="$(_harness_check_field "$id" SEVERITY)"
   printf '%s\n' "${value:-$default}"
+}
+
+# _harness_check_field <検査ID> <SEVERITY|SOURCE> — 派生IDの継承込みで値を引く。
+#
+# モジュールごとに枝分かれする検査(mvn-<module> 等)は、明示設定が無ければ
+# base(mvn)の設定を継ぐ。継がないと `check.skip: [test]` や
+# FEEDBACK_CHECK_SKIP=test がモジュール側に届かず、「ステージごと止めたのに
+# 動き続ける」という最も気づきにくい壊れ方になる。
+_harness_check_field() {
+  local id="$1" field="$2" key value base
+  key="HARNESS_CHECK_${id//-/_}_${field}"
+  value="${!key:-}"
+  if [[ -z "$value" ]]; then
+    for base in ${HARNESS_DERIVABLE_CHECKS:-}; do
+      [[ "$id" == "$base-"* ]] || continue
+      key="HARNESS_CHECK_${base//-/_}_${field}"
+      value="${!key:-}"
+      break
+    done
+  fi
+  printf '%s\n' "$value"
 }
 
 # harness_check_source <検査ID> — 判定がどこで決まったか(--list-checks 用)。
 harness_check_source() {
-  local id="$1" key value
-  key="HARNESS_CHECK_${id//-/_}_SOURCE"
-  value="${!key:-}"
+  local id="$1"
+  local value
+  value="$(_harness_check_field "$id" SOURCE)"
   printf '%s\n' "${value:-既定}"
 }
 
@@ -150,6 +297,8 @@ harness_node_pm() {
 # 渡す前に同じ形へ揃える必要がある。
 harness_relpath() {
   local path="$1" root="$2" abs
+  path="$(harness_bash_path "$path")"
+  root="$(harness_bash_path "$root")"
   case "$path" in
     /*) abs="$path" ;;
     *) abs="$PWD/$path" ;;
@@ -205,10 +354,30 @@ harness_json_escape() {
   printf '%s' "$s"
 }
 
+# _harness_append_event <ルート> <event JSON> — events.jsonl へ1行足す。
+#
+# 通常経路は feedback_store.py — repository lock の中で追記し、必要なら
+# rotation する。ただし失敗を握り潰すと、Python 不在やロック競合
+# (feedback_log.py はコマンド全体の間 lock を保持する。既定 timeout 10秒)で
+# イベントが黙って消え、stats/report の初回通過率が過少計上される。
+# 「記録が減る」ではなく「合格率が上がったように見える」形で壊れるため、
+# 追記に失敗したら shell から直接足して計測を守る(rotation は次の成功時に働く)。
+# 記録がフック本体を壊してはならないので、どちらも失敗は無視して 0 を返す。
+_harness_append_event() {
+  local root="$1" event_json="$2"
+  local libdir="${BASH_SOURCE[0]%/*}"
+  if ! harness_python "$libdir/feedback_store.py" append-event "$root" "$event_json" \
+      --lock-timeout "${HARNESS_FEEDBACK_LOCK_TIMEOUT_SECONDS:-10}" >/dev/null 2>&1; then
+    printf '%s\n' "$event_json" >> "$root/.feedback/events.jsonl" 2>/dev/null || true
+  fi
+  return 0
+}
+
 # harness_log_event <ルート> <hook> <result> [ファイル] — フック合否を
 # .feedback/events.jsonl に1行追記する(stats/report の原料。ローカル状態で共有しない)。
 #
-# 記録がフック本体を壊してはならないため、すべての失敗は黙って無視する。
+# 記録がフック本体を壊してはならないため、失敗してもフックは止めない。
+# 追記経路と欠落時の扱いは _harness_append_event を参照。
 # 無限増長を防ぐため 512KB を超えたら末尾2000行に切り詰める。
 harness_log_event() {
   local root="$1" hook="$2" result="$3" file="${4:-}"
@@ -227,9 +396,7 @@ harness_log_event() {
     event_json="$(printf '{"ts":"%s","hook":"%s","result":"%s"}' \
       "$ts" "$hook" "$result")" || return 0
   fi
-  local libdir="${BASH_SOURCE[0]%/*}"
-  python3 "$libdir/feedback_store.py" append-event "$root" "$event_json" \
-    --lock-timeout "${HARNESS_FEEDBACK_LOCK_TIMEOUT_SECONDS:-10}" >/dev/null 2>&1 || true
+  _harness_append_event "$root" "$event_json"
   return 0
 }
 
@@ -247,9 +414,7 @@ harness_log_warn() {
   local event_json
   event_json="$(printf '{"ts":"%s","hook":"stop","result":"warn","check":"%s"}' \
     "$ts" "$(harness_json_escape "$label")")" || return 0
-  local libdir="${BASH_SOURCE[0]%/*}"
-  python3 "$libdir/feedback_store.py" append-event "$root" "$event_json" \
-    --lock-timeout "${HARNESS_FEEDBACK_LOCK_TIMEOUT_SECONDS:-10}" >/dev/null 2>&1 || true
+  _harness_append_event "$root" "$event_json"
   return 0
 }
 
@@ -276,20 +441,20 @@ harness_is_jsonc() {
 # harness_has_pyyaml — YAML 検証が可能か。
 # PyYAML は標準ライブラリではない。未導入を「ファイルの問題」として報告しない。
 harness_has_pyyaml() {
-  has python3 && python3 -c "import yaml" >/dev/null 2>&1
+  harness_has_python && harness_python -c "import yaml" >/dev/null 2>&1
 }
 
 # harness_validate_json <file...> — JSON 構文を検証する。
-# 壊れていれば "path: 理由" を出力して非0。python3 不在時は検証せず成功。
+# 壊れていれば "path: 理由" を出力して非0。Python 不在時は検証せず成功。
 harness_validate_json() {
-  has python3 || return 0
+  harness_has_python || return 0
   local targets=()
   local f
   for f in "$@"; do
     harness_is_jsonc "$f" || targets+=("$f")
   done
   [[ ${#targets[@]} -eq 0 ]] && return 0
-  python3 -c '
+  harness_python -c '
 import json, sys
 bad = 0
 for p in sys.argv[1:]:
@@ -307,10 +472,10 @@ sys.exit(bad)
 # 壊れていれば "path: 理由" を出力して非0。PyYAML 不在時は検証せず成功。
 harness_validate_yaml() {
   # 引数ゼロの判定を先に済ませる。検証すべきファイルが無いのに
-  # PyYAML 検出のため python3 を起動するのは無駄(フックは毎編集で走る)
+  # PyYAML 検出のため Python を起動するのは無駄(フックは毎編集で走る)
   [[ $# -eq 0 ]] && return 0
   harness_has_pyyaml || return 0
-  python3 -c '
+  harness_python -c '
 import sys, yaml
 bad = 0
 for p in sys.argv[1:]:
@@ -339,9 +504,9 @@ sys.exit(bad)
 # コードブロック(``` / ~~~)とコードスパン(`...`)の中はリンクとして扱わない
 # (文書がリンク記法そのものを説明している箇所を拾わないため)。
 harness_check_md_links() {
-  has python3 || return 0
+  harness_has_python || return 0
   [[ $# -eq 0 ]] && return 0
-  python3 -c '
+  harness_python -c '
 import re, sys
 from pathlib import Path
 

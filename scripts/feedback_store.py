@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import argparse
 import contextlib
-import fcntl
+import errno
 import hashlib
 import json
 import os
@@ -14,6 +14,11 @@ import tempfile
 import time
 from collections.abc import Callable, Iterable
 from pathlib import Path
+
+if os.name == "nt":
+    import msvcrt
+else:
+    import fcntl
 
 LOCK_NAME = ".state.lock"
 JOURNAL_NAME = ".transaction.json"
@@ -24,6 +29,52 @@ EVENT_KEEP_LINES = 2000
 
 class StoreError(RuntimeError):
     """状態保存または回復に失敗した。"""
+
+
+def _prepare_state_lock_file(fd: int) -> None:
+    """Windowsでlock対象になる1バイト目を確保する。
+
+    msvcrt.locking は現在位置から1バイトをlockするため、空fileのままでは
+    lock範囲が定まらない。この書き込みは retry loop の外で一度だけ行う —
+    loop の中で行うと、別processが既に byte 0 をlockしている状況で
+    ERROR_LOCK_VIOLATION(PermissionError)が上がり、BlockingIOError へ
+    変換されないまま loop を抜けて command 全体が traceback で落ちる。
+    書き込みに失敗した場合は他processが先に確保済み(=非空)なので何もしない。
+    """
+    if os.name != "nt":
+        return
+    try:
+        if os.fstat(fd).st_size == 0:
+            os.write(fd, b"\0")
+            os.fsync(fd)
+    except OSError:
+        pass
+    finally:
+        with contextlib.suppress(OSError):
+            os.lseek(fd, 0, os.SEEK_SET)
+
+
+def _try_state_lock(fd: int) -> None:
+    """現在のplatformで排他lockを非blockで取得する。"""
+    if os.name == "nt":
+        os.lseek(fd, 0, os.SEEK_SET)
+        try:
+            msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+        except OSError as exc:
+            if exc.errno in (errno.EACCES, errno.EAGAIN, errno.EDEADLK):
+                raise BlockingIOError from exc
+            raise
+        return
+    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+
+def _release_state_lock(fd: int) -> None:
+    """_try_state_lock で取得した排他lockを解放する。"""
+    if os.name == "nt":
+        os.lseek(fd, 0, os.SEEK_SET)
+        msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+        return
+    fcntl.flock(fd, fcntl.LOCK_UN)
 
 
 def _fsync_dir(path: Path) -> None:
@@ -74,13 +125,32 @@ def atomic_write_text(path: Path, content: str) -> None:
 
 
 def atomic_create_text(path: Path, content: str) -> None:
-    """既存pathを上書きせず、完全に書けた内容だけを公開する。"""
+    """既存pathを上書きせず、完全に書けた内容だけを公開する。
+
+    第一手段は os.link — 「存在したら失敗する」を filesystem 側が保証するため、
+    lock を取れていない writer が居ても上書きしない。ただし hardlink は
+    exFAT/FAT32(USBメモリ)・多くのSMB共有・一部のWindows構成で使えず、
+    FileExistsError でも StoreError でもない OSError(EPERM/ENOTSUP)が上がる。
+    そこで落ちると `feedback.sh add` がtracebackで死に、そのcheckoutでは
+    記録そのものができなくなる。
+
+    代替経路の排他は repository 単位の state_lock が担保する — この関数の
+    呼び出し元(cmd_add)は main() が握る lock の中で動くため、存在確認と
+    os.replace の間に別のCLI processが割り込むことはない。os.replace を使うのは
+    原子性を保つため(open(path,"x") へ直接書くと、途中で落ちた時に frontmatter が
+    壊れたエントリが残る)。
+    """
     tmp = _write_temp(path, content)
     try:
         try:
             os.link(tmp, path)
         except FileExistsError as exc:
             raise StoreError(f"既存ファイルを上書きしません: {path}") from exc
+        except OSError:
+            # hardlink 非対応の filesystem。lock 済みなので存在確認で足りる
+            if path.exists():
+                raise StoreError(f"既存ファイルを上書きしません: {path}") from None
+            os.replace(tmp, path)
         _fsync_dir(path.parent)
     finally:
         tmp.unlink(missing_ok=True)
@@ -93,19 +163,38 @@ def _append_jsonl_event(
     max_bytes: int = EVENT_MAX_BYTES,
     keep_lines: int = EVENT_KEEP_LINES,
 ) -> None:
-    """lock取得済みの状態でJSONLへ追記し、必要なら原子的にrotationする。"""
+    """lock取得済みの状態でJSONLへ追記し、必要なら原子的にrotationする。
+
+    通常は追記だけで済ませる。毎回ファイル全体を読み直して書き戻すと、
+    post_edit フックが編集ファイルごとに1回呼ぶ経路で最大 max_bytes の
+    読み書きと fsync が件数分積み上がる(rotation の閾値は 512KB)。
+    全体を書き換えるのは、実際に rotation が要るときだけでよい。
+    """
     if not isinstance(event, dict):
         raise StoreError("eventはJSON objectである必要があります")
     path = root / ".feedback" / "events.jsonl"
+    line = json.dumps(event, ensure_ascii=False, separators=(",", ":"))
+    try:
+        size = path.stat().st_size if path.exists() else 0
+    except OSError as exc:
+        raise StoreError(f"event logを読み取れません: {path}") from exc
+
+    if size + len(line.encode("utf-8")) + 1 <= max_bytes:
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with open(path, "a", encoding="utf-8", newline="\n") as stream:
+                stream.write(line + "\n")
+        except OSError as exc:
+            raise StoreError(f"event logへ追記できません: {path}") from exc
+        return
+
+    # rotation。ここだけは全体を読み直し、原子的に置き換える
     try:
         lines = path.read_text(encoding="utf-8").splitlines() if path.exists() else []
     except OSError as exc:
         raise StoreError(f"event logを読み取れません: {path}") from exc
-    lines.append(json.dumps(event, ensure_ascii=False, separators=(",", ":")))
-    content = "\n".join(lines) + "\n"
-    if len(content.encode("utf-8")) > max_bytes:
-        content = "\n".join(lines[-keep_lines:]) + "\n"
-    atomic_write_text(path, content)
+    lines.append(line)
+    atomic_write_text(path, "\n".join(lines[-keep_lines:]) + "\n")
 
 
 def record_event(
@@ -133,11 +222,14 @@ def state_lock(root: Path, timeout_seconds: int):
     feedback_dir.mkdir(parents=True, exist_ok=True)
     path = feedback_dir / LOCK_NAME
     fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
+    _prepare_state_lock_file(fd)
     deadline = time.monotonic() + timeout_seconds
+    locked = False
     try:
         while True:
             try:
-                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                _try_state_lock(fd)
+                locked = True
                 break
             except BlockingIOError:
                 if time.monotonic() >= deadline:
@@ -148,7 +240,8 @@ def state_lock(root: Path, timeout_seconds: int):
         yield
     finally:
         try:
-            fcntl.flock(fd, fcntl.LOCK_UN)
+            if locked:
+                _release_state_lock(fd)
         finally:
             os.close(fd)
 
@@ -244,6 +337,21 @@ def _apply_payload(
             after_write(index)
 
 
+def recovery_hint(root: Path) -> str:
+    """回復不能なjournalから復帰する手順。
+
+    「何が起きたか」だけでは利用者が動けない。journal は .feedback/ 配下の
+    単一ファイルなので、内容を確認して削除すれば必ず復帰できる。
+    その手順を例外と警告の両方へ載せる。
+    """
+    journal = root / ".feedback" / JOURNAL_NAME
+    return (
+        f"\n  中断された更新の記録: {journal}\n"
+        "  内容を確認のうえ、対象ファイルを意図した状態に直してから"
+        "この記録を削除して再実行してください。"
+    )
+
+
 def recover_transaction(root: Path) -> bool:
     """中断されたtransactionを同じ最終内容へroll-forwardする。"""
     journal = root / ".feedback" / JOURNAL_NAME
@@ -252,8 +360,13 @@ def recover_transaction(root: Path) -> bool:
     try:
         payload = json.loads(journal.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
-        raise StoreError(f"transaction journalを読み取れません: {journal}") from exc
-    _apply_payload(root, payload)
+        raise StoreError(
+            f"transaction journalを読み取れません: {journal}{recovery_hint(root)}"
+        ) from exc
+    try:
+        _apply_payload(root, payload)
+    except StoreError as exc:
+        raise StoreError(f"{exc}{recovery_hint(root)}") from exc
     journal.unlink()
     _fsync_dir(journal.parent)
     return True

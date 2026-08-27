@@ -10,14 +10,25 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO="$(cd "$HERE/.." && pwd)"
 
 # 1: skills/ と agents/ に、ハーネス側スクリプトの裸参照が残っていない。
-# 対象は feedback_log.py と init.sh — どちらもプラグイン側にしか無く、
+# 対象は feedback.sh と init.sh — どちらもプラグイン側にしか無く、
 # 導入先の相対パスでは解決できない(init.sh に至っては導入先の scripts/ を
 # 作る側なので、実行時点では存在しない)。
 # check.sh / check_file.sh は init.sh が導入先へ展開した後に
 # 「導入先で」叩くものなので、相対パスのままが正しく、ここでは禁じない。
-BARE="$(grep -rnE 'scripts/(feedback_log\.py|init\.sh)' "$REPO/skills" "$REPO/agents" 2>/dev/null \
+BARE="$(grep -rnE 'scripts/(feedback\.sh|init\.sh)' "$REPO/skills" "$REPO/agents" 2>/dev/null \
   | grep -v 'CLAUDE_PLUGIN_ROOT' || true)"
 assert_eq "" "$BARE" "skills/agents に裸の scripts/ 参照が残っていない"
+
+# 1b: skills/ と agents/ が Python スクリプトを直接実行させない。
+# feedback_log.py は shebang(#!/usr/bin/env python3)+実行ビット付きなので
+# 「そのまま実行」の表記でも Unix では動いてしまうが、python3 が無く
+# python.exe だけの Git Bash では env: python3: No such file or directory になる。
+# 入口は bash .../feedback.sh に一本化する(interpreter 解決は harness_python の役目)。
+# PR #13 で skills/ は移行したが agents/feedback-curator.md だけ残り、
+# promote / add / list — キュレーション経路が丸ごと Windows で落ちていた。
+DIRECT_PY="$(grep -rnE 'scripts/[A-Za-z_]+\.py' "$REPO/skills" "$REPO/agents" 2>/dev/null || true)"
+assert_eq "" "$DIRECT_PY" \
+  "skills/agents が Python スクリプトを直接実行させない(bash 経由の入口を使う)"
 
 # 2: 置換後の表記が実際に使われている
 HAS_PLUGIN_ROOT="$(grep -rl 'CLAUDE_PLUGIN_ROOT' "$REPO/skills" "$REPO/agents" | wc -l | tr -d ' ')"
@@ -34,12 +45,26 @@ BARE_CLAUDE="$(grep -rn 'CLAUDE_PLUGIN_ROOT' "$REPO/skills" "$REPO/agents" 2>/de
 assert_eq "" "$BARE_CLAUDE" \
   "skills/agents のプラグインルート参照が \${PLUGIN_ROOT:-\${CLAUDE_PLUGIN_ROOT:-}} 形式に統一されている"
 
-# 3: Codex 向けポインタは据え置き(placeholder を書いてはいけない)
-POINTER="$(cat "$REPO/docs/pointer_agents.md")"
-assert_contains "$POINTER" "scripts/feedback_log.py" "ポインタはリポジトリ相対のまま"
-case "$POINTER" in
-  *CLAUDE_PLUGIN_ROOT*) fail "pointer_agents.md に CLAUDE_PLUGIN_ROOT を書いてはいけない" ;;
-esac
+# 3: 導入先へ挿入されるポインタは据え置き(placeholder を書いてはいけない)。
+# pointer_agents.md / pointer_claude.md はどちらも init.sh が導入先の
+# AGENTS.md / CLAUDE.md へ差し込む断片で、そこでは ${CLAUDE_PLUGIN_ROOT} が
+# 展開されない。片方だけ護欄を張ると、書き漏れは残った側でだけ起きる
+for pointer_file in "$REPO/docs/pointer_agents.md" "$REPO/docs/pointer_claude.md"; do
+  pointer_name="$(basename "$pointer_file")"
+  POINTER="$(cat "$pointer_file")"
+  assert_contains "$POINTER" "scripts/feedback.sh" \
+    "$pointer_name はリポジトリ相対のまま"
+  ASSERT_CHECKS=$((ASSERT_CHECKS + 1))
+  case "$POINTER" in
+    *CLAUDE_PLUGIN_ROOT*) fail "$pointer_name に CLAUDE_PLUGIN_ROOT を書いてはいけない" ;;
+  esac
+  # 入口の一本化(1b)は導入先の断片にも及ぶ。導入先には python3 が無い
+  # Git Bash もあるため、.py の直接実行を案内してはいけない
+  ASSERT_CHECKS=$((ASSERT_CHECKS + 1))
+  case "$POINTER" in
+    *scripts/*.py*) fail "$pointer_name が Python スクリプトを直接実行させている" ;;
+  esac
+done
 
 # curator と orchestrator の出力契約は同じ語彙・必須フィールドを持つ。
 # 提案を自由文だけに戻すと、承認判断と将来の自動処理で取りこぼすため固定する

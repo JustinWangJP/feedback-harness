@@ -19,21 +19,21 @@ done
 
 # 2: Claude / Codex のプラグイン名・バージョンとマーケットプレイス名
 assert_eq "feedback-harness" \
-  "$(python3 -c "import json;print(json.load(open('$REPO/.claude-plugin/plugin.json'))['name'])")" \
+  "$(python3 -c "import json,sys;print(json.load(open(sys.argv[1]))['name'])" "$REPO/.claude-plugin/plugin.json")" \
   "Claude プラグイン名"
 assert_eq "feedback-harness" \
-  "$(python3 -c "import json;print(json.load(open('$REPO/.codex-plugin/plugin.json'))['name'])")" \
+  "$(python3 -c "import json,sys;print(json.load(open(sys.argv[1]))['name'])" "$REPO/.codex-plugin/plugin.json")" \
   "Codex プラグイン名"
 assert_eq "feedback-harness" \
-  "$(python3 -c "import json;print(json.load(open('$REPO/.claude-plugin/marketplace.json'))['name'])")" \
+  "$(python3 -c "import json,sys;print(json.load(open(sys.argv[1]))['name'])" "$REPO/.claude-plugin/marketplace.json")" \
   "マーケットプレイス名"
 assert_eq \
-  "$(python3 -c "import json;print(json.load(open('$REPO/.claude-plugin/plugin.json'))['version'])")" \
-  "$(python3 -c "import json;print(json.load(open('$REPO/.codex-plugin/plugin.json'))['version'])")" \
+  "$(python3 -c "import json,sys;print(json.load(open(sys.argv[1]))['version'])" "$REPO/.claude-plugin/plugin.json")" \
+  "$(python3 -c "import json,sys;print(json.load(open(sys.argv[1]))['version'])" "$REPO/.codex-plugin/plugin.json")" \
   "Claude / Codex のプラグインバージョンが一致する"
-assert_eq "0.1.8" \
-  "$(python3 -c "import json;print(json.load(open('$REPO/.claude-plugin/plugin.json'))['version'])")" \
-  "公開プラグインバージョンが0.1.8である"
+assert_eq "0.1.9" \
+  "$(python3 -c "import json,sys;print(json.load(open(sys.argv[1]))['version'])" "$REPO/.claude-plugin/plugin.json")" \
+  "公開プラグインバージョンが0.1.9である"
 
 CODEX_MANIFEST_ERROR="$(python3 - "$REPO/.codex-plugin/plugin.json" <<'PY'
 import json

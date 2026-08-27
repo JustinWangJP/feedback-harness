@@ -9,10 +9,9 @@
 # make check がテストをもう一度走らせる。以降が無限再帰となり、Stop フックが
 # timeout 300 を食い潰していた(2026-08-16 発生)。
 #
-# このテストの判定対象は check.sh の合否ではなく「時間内に終了するか」。
-# 合否は対象プロジェクトの状態次第で変わるため判定に使わない。ガードが
-# 壊れていると終わらないため、set -m で独自プロセスグループを切り、時限で
-# 再帰ツリーごと強制終了する(放置するとCPUを焼き続ける)。
+# 実時間を合否判定にすると、遅いrunnerを再帰と誤判定する。代わりに一時
+# Makefileからcheck.shを呼び返し、Makeの実行回数を独立したmarkerで数える。
+# ガードが壊れていてもfixture側で3回までに制限し、再帰プロセスを残さない。
 set -u
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$HERE/assert.sh"
@@ -21,39 +20,35 @@ REPO="$(cd "$HERE/.." && pwd)"
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
-LOG="$WORK/check.log"
-# 判定したいのは「有限時間で終わるか」であって速度ではない。ガードが壊れていれば
-# 再帰は Stop フックの timeout 300 まで伸びるため、そこに十分届かない値であれば
-# 回帰は捕まえられる。予算を実測値ぎりぎりに置くと負荷で落ちる不安定なテストになる
-# (P1〜P3 でテストが7本増え、make check 込みの実測が約30秒まで伸びて 30 が同値になった)。
-LIMIT=150
+PROJECT="$WORK/project"
+MARKER="$WORK/make-invocations"
+mkdir -p "$PROJECT"
+: > "$MARKER"
 
-# フックと同じ環境(CLAUDE_PROJECT_DIR export 済み)で check.sh を走らせる。
-# 再帰は1段階あたり数秒かかるため、ガードが効いていれば数秒で終わる。
-set -m
-CLAUDE_PROJECT_DIR="$REPO" bash "$REPO/scripts/check.sh" >"$LOG" 2>&1 &
-PID=$!
-set +m
+cat > "$PROJECT/Makefile" <<'MAKE'
+check:
+	@count="$$(wc -l < "$${MARKER}")"; \
+		printf 'make\n' >> "$${MARKER}"; \
+		if [ "$$count" -lt 2 ]; then \
+			export CLAUDE_PROJECT_DIR="$${PROJECT}"; \
+			bash "$${CHECK}"; \
+		fi
+MAKE
 
-ELAPSED=0
-while kill -0 "$PID" 2>/dev/null && [[ $ELAPSED -lt $LIMIT ]]; do
-  sleep 1
-  ELAPSED=$((ELAPSED + 1))
-done
-
-if kill -0 "$PID" 2>/dev/null; then
-  # 終わらない = 再帰している。ツリー全体をプロセスグループごと止める
-  PGID="$(ps -o pgid= -p "$PID" | tr -d ' ')"
-  [[ -n "$PGID" ]] && kill -TERM -- -"$PGID" 2>/dev/null
-  wait "$PID" 2>/dev/null
-  fail "check.sh が${LIMIT}秒以内に終了しない(再帰ガードが効いていない)"
-else
-  wait "$PID"
-  RC=$?
-  # 0=ALL PASS / 1=ステージ失敗 / 2=ルート解決失敗。いずれも「終了した」ことの証拠
-  if [[ $RC -ne 0 && $RC -ne 1 && $RC -ne 2 ]]; then
-    fail "check.sh が異常終了した (exit=$RC)"
-  fi
-fi
+# フックと同じくCLAUDE_PROJECT_DIRが伝播した状態で起動する。外側のcheck.shが
+# makeへだけFEEDBACK_CHECK_RECURSION_GUARDを渡すため、Makefileから呼び返された
+# 内側のcheck.shはmake fallbackをSKIPし、markerは1行だけになる。
+OUT="$(
+  export CHECK="$REPO/scripts/check.sh"
+  export PROJECT MARKER
+  export CLAUDE_PROJECT_DIR="$PROJECT"
+  unset FEEDBACK_CHECK_RECURSION_GUARD
+  bash "$REPO/scripts/check.sh" "$PROJECT" 2>&1
+)"
+RC=$?
+assert_eq "0" "$RC" "fixtureに対するcheck.shが成功する: $OUT"
+COUNT="$(wc -l < "$MARKER" | tr -d ' ')"
+assert_eq "1" "$COUNT" "make fallbackを1回で打ち切る"
+assert_contains "$OUT" "PASS  make check" "外側のmake checkが成功する"
 
 assert_summary

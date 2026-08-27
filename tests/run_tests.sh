@@ -19,6 +19,14 @@ TESTDIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # (残すべきもの)の区別がここにある。
 unset CLAUDE_PROJECT_DIR FEEDBACK_CHECK_SKIP FEEDBACK_SHELLCHECK_SEVERITY FEEDBACK_CONTRACT_BASE
 
+# テスト自身が直接起動する python3(fixture生成・検証補助)の入出力を UTF-8 に
+# 固定する。テストコードは配布物ではないので、ハーネス本体と違いここで環境変数を
+# 使ってよい。ハーネス本体の Python 実行は _harness_python_exec が command 上で
+# UTF-8 を指定するため、この export に依存しない — 依存していないことは
+# test_python_boundary.sh が ambient を ascii に潰して検証する。
+export PYTHONUTF8=1
+export PYTHONIOENCODING=utf-8
+
 PASSED=0
 FAILED=0
 FAILED_NAMES=""

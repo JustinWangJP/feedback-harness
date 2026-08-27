@@ -9,14 +9,16 @@
 
 ## 环境要求
 
-- **必需：** `bash`、`python3`
+- **必需：** `bash`、Python 3.10 以上版本（`python3` 或 `python`）
 - **可选：** 项目使用的 lint、类型检查、测试、构建等工具
 
 只会使用已经安装的可选工具。找不到的工具会在说明原因后标记为 `SKIP`，工具链不会自动安装任何工具。
 
+在 Windows 上，请使用 Git for Windows 附带的 **Git Bash**。现有 `*.sh` 文件可直接在 Git Bash 中运行；如果没有 `python3`，工具链会自动选择 `python`。正常使用不需要 PowerShell 脚本。
+
 ### 开发本仓库
 
-本仓库自身的检查依赖会单独固定版本，不属于工具链的运行要求。运行 `make install-dev-tools`，即可将 `requirements-dev.txt` 中的 PyYAML和Ruff，以及 `scripts/dev_tool_versions.sh` 中声明的actionlint安装到仓库内的 `.venv`。直接运行 `scripts/check.sh` 前，请先执行 `source .venv/bin/activate`；`make test` 会自动优先使用这些本地工具。Linux CI使用相同的安装目标，并在检查前验证这三个工具，但工具链仍不会在目标项目中自动安装工具。
+本仓库自身的检查依赖会单独固定版本，不属于工具链的运行要求。运行 `make install-dev-tools`，即可将 `requirements-dev.txt` 中的 PyYAML和Ruff，以及 `scripts/dev_tool_versions.sh` 中声明的actionlint安装到仓库内的 `.venv`。直接运行 `scripts/check.sh` 前，请在 Linux/macOS 上执行 `source .venv/bin/activate`，或在 Windows Git Bash 中执行 `source .venv/Scripts/activate`。`make test` 会自动优先使用这些本地工具。Linux CI 会验证固定版本的检查工具；Windows CI 则使用 Git Bash 和 Windows Python 运行同一套回归测试。工具链仍不会在目标项目中自动安装工具。
 
 ## 工作原理
 
@@ -41,7 +43,7 @@
 | `build` | 构建 | go build / npm run build / cargo check |
 | `format` | 格式偏差 | ruff format / prettier / gofmt / cargo fmt |
 | `security` | 混入的密钥 | secretlint（声明 `.secretlintrc.*` 时）/ gitleaks |
-| `docs` | Markdown 内部链接失效 | 内置实现（只需要 python3） |
+| `docs` | Markdown 内部链接失效 | 内置实现（只需要 Python） |
 | `contract` | API 破坏性变更 | oasdiff（OpenAPI）/ cargo semver-checks（`[lib]` crate） |
 | — | 配置文件语法 | `*.json` / `*.yaml`（避免将 JSONC 和多文档 YAML 误判为错误） |
 | — | 依赖项的存在性和一致性 | npm ls / go mod verify / cargo metadata / deptry |
@@ -52,7 +54,7 @@
 
 | 功能 | 命令 | 用途 |
 |---|---|---|
-| 记录反馈 | `feedback_log.py add` | 立即记录人工反馈或有效的工作方式，并保存 signal |
+| 记录反馈 | `feedback.sh add` | 立即记录人工反馈或有效的工作方式，并保存 signal |
 | 转化为规则 | `promote` / `merge` / `close` / `retire` | 向 `rules.md` 添加或合并规则、关闭已处理的反馈，或停用过时规则 |
 | 测量 | `stats` | 显示仅限当前工作副本的首次通过率、平均重新检查次数、常见 WARN 和**复发候选** |
 | 报告 | `report` | 生成仅限当前工作副本的周期摘要，用于晨会或复盘，并与上一周期比较 |
@@ -99,7 +101,8 @@ scripts/
                     #   harness_log_event|warn）
   harness_config.py # 读取 .feedback/config.yaml 并解析检查设置
   feedback_store.py # repository lock、原子写入及中断事务恢复
-  feedback_log.py   # 反馈记录 CLI（add / list / search / promote / merge / close /
+  feedback.sh       # 跨平台反馈 CLI 入口（解析 Python 可执行文件）
+  feedback_log.py   # 反馈 CLI 实现（add / list / search / promote / merge / close /
                     #   retire / rules / stats / report）
   init.sh           # 安装脚本（为不支持 Hooks 的环境部署资源）
   README.md         # 脚本的详细规范和所需工具（英文）
@@ -132,7 +135,7 @@ docs/
 
 ### 文档的权威顺序
 
-有关当前用法，请参阅本 README、[配置指南](docs/configuration.md)和[脚本参考](scripts/README.zh-CN.md)。带日期的 `docs/proposals/` 和 `docs/superpowers/` 文件保留提案或设计编写时的决策。如果这些资料与当前规范不同，请以刚才列出的三份文档和实际实现为准。完整文档列表请参阅[文档导航](docs/README.zh-CN.md)。
+有关当前用法，请参阅本 README、[配置指南](docs/configuration.zh-CN.md)和[脚本参考](scripts/README.zh-CN.md)。带日期的 `docs/proposals/` 和 `docs/superpowers/` 文件保留提案或设计编写时的决策。如果这些资料与当前规范不同，请以刚才列出的三份文档和实际实现为准。完整文档列表请参阅[文档导航](docs/README.zh-CN.md)。
 
 有关 Codex 当前规范，请参阅 OpenAI 官方的[插件使用指南](https://learn.chatgpt.com/docs/plugins)、[插件包规范](https://developers.openai.com/plugins/build/plugins)和 [Hooks 规范](https://developers.openai.com/codex/hooks)。有关 Claude Code，请参阅 Anthropic 官方的[插件安装指南](https://code.claude.com/docs/en/discover-plugins)。
 
@@ -195,7 +198,7 @@ cd /path/to/your-project && bash scripts/check.sh   # 验证技术栈检测
 
 | 资源 | 插件 | `init.sh` |
 |---|---|---|
-| `scripts/check.sh` `checks/*.sh` `check_file.sh` `audit.sh` `lib.sh` `harness_config.py` `feedback_store.py` `feedback_log.py` `README.md` `README.ja.md` `README.zh-CN.md` | 保存在插件中。Codex 通过 `PLUGIN_ROOT` 运行（Hooks 还会设置兼容变量 `CLAUDE_PLUGIN_ROOT`）；Claude Code 使用 `CLAUDE_PLUGIN_ROOT` | 复制到目标项目的 `scripts/` 目录 |
+| `scripts/check.sh` `checks/*.sh` `check_file.sh` `feedback.sh` `audit.sh` `lib.sh` `harness_config.py` `feedback_store.py` `feedback_log.py` `README.md` `README.ja.md` `README.zh-CN.md` | 保存在插件中。Codex 通过 `PLUGIN_ROOT` 运行（Hooks 还会设置兼容变量 `CLAUDE_PLUGIN_ROOT`）；Claude Code 使用 `CLAUDE_PLUGIN_ROOT` | 复制到目标项目的 `scripts/` 目录 |
 | Hooks（`hooks.json`） | 是（启用后自动运行） | 否（由 CLAUDE.md / AGENTS.md 规则作为替代） |
 | skills | 是（Claude Code / Codex） | 否（由 CLAUDE.md / AGENTS.md 规则作为替代） |
 | agents / commands | 仅 Claude Code | 否 |
@@ -250,7 +253,7 @@ cd /path/to/your-project && bash scripts/check.sh   # 验证技术栈检测
 1. 用一句话概括反馈
 2. 如果反馈涉及失败，则用一行对根因进行分类（`文脈欠落` / `指示欠陥` / `実行誤り` / `モデル限界` / `未判定`）
 3. 确定 signal（发生了什么）。对错误输出或行为的修正，无论根因是什么，都属于 `failure`；省略时由 CLI 推断
-4. 选择类别，并通过 `feedback_log.py add` 记录条目
+4. 选择类别，并通过 `feedback.sh add` 记录条目
 5. 当 open 条目达到 3 个或更多时，建议通过 `feedback-loop` 进行整理
 
 ```text
@@ -339,12 +342,12 @@ bash scripts/audit.sh                    # 漏洞审计（使用网络，因此�
 
 ```bash
 # 收到人工反馈时（失败反馈应包含一行根因）
-python3 scripts/feedback_log.py add --category style --source human \
+bash scripts/feedback.sh add --category style --source human \
   --summary "错误消息使用日语" \
   --detail "指示中没有统一使用日语的要求。根因: 指示欠陥"
 
 # 保留有效工作方式或指示措辞时（省略 signal 时自动判断）
-python3 scripts/feedback_log.py add --category workflow --source agent \
+bash scripts/feedback.sh add --category workflow --source agent \
   --summary "先确定设计再实现可以避免返工"
 ```
 
@@ -353,19 +356,19 @@ python3 scripts/feedback_log.py add --category workflow --source agent \
 ### 整理积累的反馈
 
 ```bash
-python3 scripts/feedback_log.py list                    # 列出 open 条目
-python3 scripts/feedback_log.py list --signal failure   # 仅显示失败类 signal
-python3 scripts/feedback_log.py promote <id> --rule "<一条通用规则>"
-python3 scripts/feedback_log.py merge <id> --into <现有规则的来源id>   # 用于复发
-python3 scripts/feedback_log.py retire <来源id> --reason "<停用原因>"  # 规则盘点
+bash scripts/feedback.sh list                    # 列出 open 条目
+bash scripts/feedback.sh list --signal failure   # 仅显示失败类 signal
+bash scripts/feedback.sh promote <id> --rule "<一条通用规则>"
+bash scripts/feedback.sh merge <id> --into <现有规则的来源id>   # 用于复发
+bash scripts/feedback.sh retire <来源id> --reason "<停用原因>"  # 规则盘点
 ```
 
 ### 测量并共享效果
 
 ```bash
-python3 scripts/feedback_log.py stats                      # 首次通过率、复发候选、最近审计日期
-python3 scripts/feedback_log.py report --since yesterday  # 一项晨会议题
-python3 scripts/feedback_log.py report --last --mark       # 复盘后推进下一个统计周期的起点
+bash scripts/feedback.sh stats                      # 首次通过率、复发候选、最近审计日期
+bash scripts/feedback.sh report --since yesterday  # 一项晨会议题
+bash scripts/feedback.sh report --last --mark       # 复盘后推进下一个统计周期的起点
 ```
 
 ### 环境变量
@@ -378,6 +381,7 @@ python3 scripts/feedback_log.py report --last --mark       # 复盘后推进下�
 | `FEEDBACK_SHELLCHECK_SEVERITY` | `warning` | shellcheck 严重程度阈值；使用 `style` 可执行更严格的检查 |
 | `FEEDBACK_CONTRACT_BASE` | `main` | API 契约差异的基线分支 |
 | `CLAUDE_PROJECT_DIR` | （自动） | Claude Code 设置的检查目标根目录。Codex 根据 Hook 执行时的当前目录解析 |
+| `HARNESS_PYTHON` | （自动） | 要运行的 Python 可执行文件（默认按 `python3` → `python` 的顺序解析）。当 Git Bash 或虚拟环境中的名称或路径不同时，可显式指定 |
 
 ### 配置文件
 
@@ -389,13 +393,13 @@ bash scripts/check.sh --list-checks           # 不执行检查，仅列出检�
 bash scripts/check.sh --list-checks --json    # 以机器可读 JSON 输出相同信息
 ```
 
-优先级为：环境变量 > 单项检查 > 技术栈 > 全局 > 默认值。语法和全部设置请参阅[配置指南](docs/configuration.md)。
+优先级为：环境变量 > 单项检查 > 技术栈 > 全局 > 默认值。语法和全部设置请参阅[配置指南](docs/configuration.zh-CN.md)。
 
 ## 反馈运作流程
 
 ```text
 [记录] 人工修正 / 有效工作方式 / 重复出现的检查失败 / 完成前复盘
-          → feedback_log.py add   （capture-feedback skill / AGENTS.md 规则）
+→ feedback.sh add       （capture-feedback skill / AGENTS.md 规则）
              失败反馈在 --detail 中包含一行根因：
                文脈欠落 | 指示欠陥 | 実行誤り | モデル限界 | 未判定
              signal（--signal）描述发生的事件：
@@ -415,8 +419,8 @@ bash scripts/check.sh --list-checks --json    # 以机器可读 JSON 输出相�
 [应用] .feedback/rules.md → 在下一会话开始工作前应用
                 ↓
 [盘点] 定期审查（feedback-loop Phase 4）→ 通过 retire 停用过时规则
-[测量] feedback_log.py stats         — 首次通过率和复发候选（仅在请求时输出文本）
-[报告] feedback_log.py report --last → 五分钟晨会/复盘议题
+[测量] feedback.sh stats         — 首次通过率和复发候选（仅在请求时输出文本）
+[报告] feedback.sh report --last → 五分钟晨会/复盘议题
                                           （之后使用 --mark 推进统计周期）
 [审计] bash scripts/audit.sh          — 手动执行的漏洞审计（使用网络）
                                           仅成功时更新 .last-audit，report 会检查其时间

@@ -64,3 +64,46 @@ jobs:
 
       - name: Run the harness against itself
         run: bash scripts/check.sh
+
+  windows-git-bash:
+    name: Windows Git Bash checks
+    runs-on: windows-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: bash
+    # PYTHONUTF8 / PYTHONIOENCODING は job env に置かない。
+    # 利用者の Git Bash にはこれらが無いため、workflow で与えると CI だけが
+    # 「誰も使っていない環境」を検証することになる。ハーネスの Python 実行は
+    # scripts/lib.sh の _harness_python_exec が自分で UTF-8 を指定する。
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Validate Git Bash entry points
+        run: |
+          set -eu
+          HARNESS_PYTHON=python bash scripts/feedback.sh --help >/dev/null
+          HARNESS_PYTHON=python bash scripts/check.sh --list-checks --json >/dev/null
+          # 日本語を出力する経路。job env で UTF-8 を与えていないため、
+          # ここが通ることが「利用者の Git Bash でも文字化け・例外なく動く」証拠になる
+          HARNESS_PYTHON=python bash scripts/check.sh --list-checks >/dev/null
+          HARNESS_PYTHON=python bash scripts/feedback.sh list >/dev/null
+          HARNESS_PYTHON=python bash scripts/feedback.sh rules >/dev/null
+
+      - name: Validate shell and Python syntax
+        run: |
+          set -eu
+          bash -n scripts/*.sh scripts/checks/*.sh scripts/hooks/*.sh tests/*.sh
+          python -m py_compile scripts/*.py
+
+      - name: Run regression tests
+        run: HARNESS_PYTHON=python bash tests/run_tests.sh
+
+      - name: Run the harness against itself
+        run: HARNESS_PYTHON=python bash scripts/check.sh

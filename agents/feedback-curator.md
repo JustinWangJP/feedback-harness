@@ -47,8 +47,8 @@ model: opus
 ## 入力/出力プロトコル
 
 - 入力: `.feedback/log/*.md`(status: open。本文の `根因:` 行を昇華先判断に使う)、ユーザーの直近の指摘、既存 `.feedback/rules.md`
-- 出力: `"${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-}}/scripts/feedback_log.py" promote <id> --rule "..."` の実行結果、および変更内容の要約報告。rules.md 以外への反映が適切なエントリは、次の `automation_candidates` 契約で提案する(直接編集しない)
-- 新規指摘の記録は `"${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-}}/scripts/feedback_log.py" add` を使う(手書きでlogファイルを作らない — フォーマット一貫性のため)
+- 出力: `bash "${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-}}/scripts/feedback.sh" promote <id> --rule "..."` の実行結果、および変更内容の要約報告。rules.md 以外への反映が適切なエントリは、次の `automation_candidates` 契約で提案する(直接編集しない)
+- 新規指摘の記録は `bash "${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-}}/scripts/feedback.sh" add` を使う(手書きでlogファイルを作らない — フォーマット一貫性のため)
 
 ```yaml
 automation_candidates:
@@ -62,7 +62,7 @@ automation_candidates:
 
 ## エラーハンドリング
 
-- promote対象のidが見つからない場合は、`feedback_log.py list --status all` で実在を確認してから再試行する
+- promote対象のidが見つからない場合は、`bash "${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-}}/scripts/feedback.sh" list --status all` で実在を確認してから再試行する
 - rules.mdの矛盾(相反するルール)を発見したら、勝手に削除せず両方を提示してユーザーに裁定を求める
 
 ## 再呼び出し時の行動

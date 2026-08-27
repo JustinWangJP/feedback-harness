@@ -17,7 +17,7 @@ description: フィードバックハーネス全体のオーケストレータ�
    - ハーネス構成の点検・検証の依頼 → **QA実行** (Phase 2)
    - 別プロジェクトへの導入依頼 → **導入実行** (Phase 3)
    - ルールの棚卸し・見直し・定期審査の依頼 → **棚卸し実行** (Phase 4)
-   - 数字・レポートの依頼(「調子は」「初回通過率」「振り返りの議題」等) → **stats/report 実行**(`feedback_log.py stats` / `report --last`。振り返り実施後は `report --last --mark` で基点を更新する)
+   - 数字・レポートの依頼(「調子は」「初回通過率」「振り返りの議題」等) → **stats/report 実行**(`bash "${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-}}/scripts/feedback.sh" stats` / `report --last`。振り返り実施後は `report --last --mark` で基点を更新する)
    - 脆弱性監査の依頼(「監査して」「脆弱性チェック」等)、または report で監査期限切れを指摘された → **監査実行**(`bash "${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-}}/scripts/audit.sh"`。ネットワークを使うため Stop フックでは走らない)
    - `_workspace/` に前回レポートあり + 部分修正依頼 → 該当Phaseのみ再実行
 
@@ -58,7 +58,7 @@ automation_candidates:
 
 更新されないルールは安定するのではなく負債になる。目安は四半期に1回、またはルールが実践と乖離したと感じたとき。
 
-1. まず `python3 "${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-}}/scripts/feedback_log.py" stats` を実行する — 再発候補と open 滞留が機械的に出る。以下の調査はその裏取りとして行う
+1. まず `bash "${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-}}/scripts/feedback.sh" stats` を実行する — 再発候補と open 滞留が機械的に出る。以下の調査はその裏取りとして行う
 2. **再発候補は「判定結果」ではなく「調査対象」である。** CLI が出せるのは同カテゴリ・同時期という機械的な条件までで、同じ原則の再発かどうかは本文の意味を読まないと決まらない(添えられた数値は文字の重なりで、読む順のヒントに過ぎない)。候補ごとに**出典エントリと候補エントリの本文を実際に読み**、次の3つに振り分ける:
    - **真の再発** — 同じ原則が守られずに再び起きた。「ルールが効いていない」兆候として feedback-curator の再発原則(`merge --rule` での文言強化)を適用する。文章ルールで既に2回失敗しているなら、文言強化より lint・テストなど機械的検出への移行を優先して検討する
    - **別主題** — カテゴリが同じだけで原則が異なる。候補から外し、レポートに「偽陽性として除外」と理由を1行残す
@@ -71,7 +71,7 @@ automation_candidates:
 5. 退役はユーザーの裁定後にのみ実行する(rules.md の手編集はしない):
 
 ```bash
-python3 "${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-}}/scripts/feedback_log.py" retire <出典id> --reason "<退役理由>"
+bash "${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-}}/scripts/feedback.sh" retire <出典id> --reason "<退役理由>"
 ```
 
 rules.md からルールが撤去され、出典エントリ(merge済みの分も含む)が retired に更新され、理由が監査痕跡として残る。

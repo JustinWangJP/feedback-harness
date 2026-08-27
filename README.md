@@ -9,14 +9,16 @@ A feedback harness for both Claude Code and Codex. It provides two mechanisms:
 
 ## Requirements
 
-- **Required:** `bash`, `python3`
+- **Required:** `bash`, Python 3.10+ (`python3` or `python`)
 - **Optional:** the linting, type-checking, testing, building, and other tools used by your project
 
 Optional tools are used only when they are already installed. Missing tools are reported as `SKIP` with a reason; the harness never installs them automatically.
 
+On Windows, use **Git Bash** bundled with Git for Windows. The existing `*.sh` files run unchanged from Git Bash, and the harness selects `python` automatically when `python3` is unavailable. Normal operation does not require PowerShell scripts.
+
 ### Developing this repository
 
-This repository pins its own check dependencies separately from the harness runtime. Run `make install-dev-tools` to install PyYAML and Ruff from `requirements-dev.txt` and the actionlint version declared in `scripts/dev_tool_versions.sh` into the repository-local `.venv`. Run `source .venv/bin/activate` before calling `scripts/check.sh` directly; `make test` already prefers that local tool directory. The Linux CI uses the same installation target and verifies all three tools before running checks. This does not make the harness install tools in target projects.
+This repository pins its own check dependencies separately from the harness runtime. Run `make install-dev-tools` to install PyYAML and Ruff from `requirements-dev.txt` and the actionlint version declared in `scripts/dev_tool_versions.sh` into the repository-local `.venv`. Before calling `scripts/check.sh` directly, run `source .venv/bin/activate` on Linux/macOS or `source .venv/Scripts/activate` in Windows Git Bash. `make test` already prefers that local tool directory. Linux CI verifies the pinned check tools; Windows CI runs the same regression suite with Git Bash and Windows Python. This does not make the harness install tools in target projects.
 
 ## How it works
 
@@ -41,7 +43,7 @@ Checks **detect the project's technology stack automatically**. No advance confi
 | `build` | Build | go build / npm run build / cargo check |
 | `format` | Formatting drift | ruff format / prettier / gofmt / cargo fmt |
 | `security` | Committed secrets | secretlint (when `.secretlintrc.*` is declared) / gitleaks |
-| `docs` | Broken internal Markdown links | built-in implementation (requires only python3) |
+| `docs` | Broken internal Markdown links | built-in implementation (requires only Python) |
 | `contract` | Breaking API changes | oasdiff (OpenAPI) / cargo semver-checks (`[lib]` crate) |
 | — | Configuration syntax | `*.json` / `*.yaml` (avoids false positives for JSONC and multi-document YAML) |
 | — | Dependency presence and consistency | npm ls / go mod verify / cargo metadata / deptry |
@@ -52,7 +54,7 @@ The feedback accumulation features are:
 
 | Feature | Command | Purpose |
 |---|---|---|
-| Record feedback | `feedback_log.py add` | Records human feedback or a successful working pattern immediately, including its signal |
+| Record feedback | `feedback.sh add` | Records human feedback or a successful working pattern immediately, including its signal |
 | Turn feedback into rules | `promote` / `merge` / `close` / `retire` | Adds or merges rules in `rules.md`, closes processed feedback, or retires obsolete rules |
 | Measure | `stats` | Reports local-only first-pass rate, average recheck count, frequent WARNs, and **recurrence candidates** |
 | Report | `report` | Produces a local-only period summary for stand-ups and retrospectives, including comparison with the preceding period |
@@ -99,7 +101,8 @@ scripts/
                     #   harness_log_event|warn)
   harness_config.py # Loads .feedback/config.yaml and resolves check settings
   feedback_store.py # Repository lock, atomic writes, and interrupted-transaction recovery
-  feedback_log.py   # Feedback CLI (add / list / search / promote / merge / close /
+  feedback.sh       # Cross-platform Feedback CLI entry point (resolves Python executable)
+  feedback_log.py   # Feedback CLI implementation (add / list / search / promote / merge / close /
                     #   retire / rules / stats / report)
   init.sh           # Installer (deploys assets for environments without Hooks)
   README.md         # Detailed script specifications and tool requirements
@@ -195,7 +198,7 @@ The installer copies `scripts/` and AGENTS.md into the target project. It adds g
 
 | Asset | Plugin | `init.sh` |
 |---|---|---|
-| `scripts/check.sh` `checks/*.sh` `check_file.sh` `audit.sh` `lib.sh` `harness_config.py` `feedback_store.py` `feedback_log.py` `README.md` `README.ja.md` `README.zh-CN.md` | Stored in the plugin. Codex runs them through `PLUGIN_ROOT` (Hooks also set the compatibility variable `CLAUDE_PLUGIN_ROOT`); Claude Code uses `CLAUDE_PLUGIN_ROOT` | Copied into the target project's `scripts/` directory |
+| `scripts/check.sh` `checks/*.sh` `check_file.sh` `feedback.sh` `audit.sh` `lib.sh` `harness_config.py` `feedback_store.py` `feedback_log.py` `README.md` `README.ja.md` `README.zh-CN.md` | Stored in the plugin. Codex runs them through `PLUGIN_ROOT` (Hooks also set the compatibility variable `CLAUDE_PLUGIN_ROOT`); Claude Code uses `CLAUDE_PLUGIN_ROOT` | Copied into the target project's `scripts/` directory |
 | Hooks (`hooks.json`) | Yes (runs automatically after enablement) | No (CLAUDE.md / AGENTS.md rules are the fallback) |
 | skills | Yes (Claude Code / Codex) | No (CLAUDE.md / AGENTS.md rules are the fallback) |
 | agents / commands | Claude Code only | No |
@@ -250,7 +253,7 @@ You: Refactor the authentication code.
 1. Summarizes the feedback in one sentence
 2. For feedback about a failure, classifies the root cause on one line (`文脈欠落` / `指示欠陥` / `実行誤り` / `モデル限界` / `未判定`)
 3. Determines the signal (what happened). A correction to incorrect output or behavior is always `failure`, regardless of root cause; when omitted, the CLI infers it
-4. Selects a category and records the entry with `feedback_log.py add`
+4. Selects a category and records the entry with `feedback.sh add`
 5. When three or more entries are open, suggests consolidating them through `feedback-loop`
 
 ```text
@@ -339,12 +342,12 @@ bash scripts/audit.sh                    # Vulnerability audit (manual because i
 
 ```bash
 # After receiving human feedback (include one root-cause line for failure feedback)
-python3 scripts/feedback_log.py add --category style --source human \
+bash scripts/feedback.sh add --category style --source human \
   --summary "Write error messages in Japanese" \
   --detail "The Japanese-only requirement was absent from the instructions. 根因: 指示欠陥"
 
 # To preserve a successful workflow or phrasing (the signal is inferred when omitted)
-python3 scripts/feedback_log.py add --category workflow --source agent \
+bash scripts/feedback.sh add --category workflow --source agent \
   --summary "Agreeing on the design before implementation prevents rework"
 ```
 
@@ -353,19 +356,19 @@ With the Claude Code or Codex plugin, the `capture-feedback` skill performs the 
 ### Organize accumulated feedback
 
 ```bash
-python3 scripts/feedback_log.py list                    # List open entries
-python3 scripts/feedback_log.py list --signal failure   # Show failure signals only
-python3 scripts/feedback_log.py promote <id> --rule "<one generalized rule>"
-python3 scripts/feedback_log.py merge <id> --into <existing-rule-source-id>   # For recurrence
-python3 scripts/feedback_log.py retire <source-id> --reason "<retirement reason>"    # Rule review
+bash scripts/feedback.sh list                    # List open entries
+bash scripts/feedback.sh list --signal failure   # Show failure signals only
+bash scripts/feedback.sh promote <id> --rule "<one generalized rule>"
+bash scripts/feedback.sh merge <id> --into <existing-rule-source-id>   # For recurrence
+bash scripts/feedback.sh retire <source-id> --reason "<retirement reason>"    # Rule review
 ```
 
 ### Measure and share results
 
 ```bash
-python3 scripts/feedback_log.py stats                      # First-pass rate, recurrence candidates, last audit date
-python3 scripts/feedback_log.py report --since yesterday  # One stand-up question
-python3 scripts/feedback_log.py report --last --mark       # Advance the period after the retrospective
+bash scripts/feedback.sh stats                      # First-pass rate, recurrence candidates, last audit date
+bash scripts/feedback.sh report --since yesterday  # One stand-up question
+bash scripts/feedback.sh report --last --mark       # Advance the period after the retrospective
 ```
 
 ### Environment variables
@@ -378,6 +381,7 @@ Environment variables are **temporary overrides that take precedence over config
 | `FEEDBACK_SHELLCHECK_SEVERITY` | `warning` | shellcheck severity threshold; use `style` for stricter checking |
 | `FEEDBACK_CONTRACT_BASE` | `main` | Baseline branch for API contract differences |
 | `CLAUDE_PROJECT_DIR` | (automatic) | Project root set by Claude Code. Codex resolves the root from the Hook's working directory |
+| `HARNESS_PYTHON` | (automatic) | Python executable to run (resolved as `python3` then `python` by default). Set it when Git Bash or a virtualenv exposes Python under a different name or path |
 
 ### Configuration file
 
@@ -395,7 +399,7 @@ Precedence is environment variable > individual check > stack > global > default
 
 ```text
 [record] Human correction / successful workflow / repeated check failure / pre-completion retrospective
-          → feedback_log.py add   (capture-feedback skill / AGENTS.md rules)
+→ feedback.sh add       (capture-feedback skill / AGENTS.md rules)
              Failure feedback includes one root cause in --detail:
                文脈欠落 | 指示欠陥 | 実行誤り | モデル限界 | 未判定
              signal (--signal) describes what happened:
@@ -415,8 +419,8 @@ Precedence is environment variable > individual check > stack > global > default
 [apply] .feedback/rules.md → apply before work in the next session
                 ↓
 [review] Periodic review (feedback-loop Phase 4) → retire obsolete rules
-[measure] feedback_log.py stats         — first-pass rate and recurrence candidates (text, on request)
-[report]  feedback_log.py report --last → five-minute stand-up/retrospective topic
+[measure] feedback.sh stats         — first-pass rate and recurrence candidates (text, on request)
+[report]  feedback.sh report --last → five-minute stand-up/retrospective topic
                                           (then --mark to advance the reporting period)
 [audit]   bash scripts/audit.sh          — manual vulnerability audit (uses the network)
                                           updates .last-audit only on success; report checks its age

@@ -1,38 +1,40 @@
-# 設定ガイド（config.yaml）
+English | [日本語](configuration.ja.md) | [简体中文](configuration.zh-CN.md)
 
-ハーネスの挙動は `.feedback/config.yaml` で調整できる。このファイルは**リポジトリに入る**ため、チーム全員に同じ設定が届き、環境変数の「各自で export してください」という頼み事が不要になる。書かなかった項目はすべて既定値。全部書く必要はない。
+# Configuration guide (config.yaml)
 
-[雛形](../.feedback/config.example.yaml)を `.feedback/config.yaml` にコピーして使い始める:
+Harness behavior is adjusted through `.feedback/config.yaml`. Because this file **lives in the repository**, everyone on the team gets the same settings and nobody has to be asked to `export` anything. Every key you leave out keeps its default, so there is no need to write them all.
+
+Copy the [template](../.feedback/config.example.yaml) to `.feedback/config.yaml` to get started:
 
 ```bash
 cp .feedback/config.example.yaml .feedback/config.yaml
 ```
 
-### 運用の流れ
+### How it is used day to day
 
 ```
-[導入]   check.sh を1回実行する → 現在の失敗項目を把握
+[install]  run check.sh once            → see what currently fails
    ↓
-[調整]   --list-checks で検査IDと現在の判定を見る
-   ↓     config.example.yaml をコピーして .feedback/config.yaml へ
-[確認]   --list-checks で「出所」が config になっているか確認
+[adjust]   --list-checks                → see check IDs and current verdicts
+   ↓       copy config.example.yaml to .feedback/config.yaml
+[confirm]  --list-checks                → confirm the "source" column now says config
    ↓
-[共有]   config.yaml を commit → チーム全員に同じ設定が届く
+[share]    commit config.yaml           → the whole team gets the same settings
    ↓
-[返済]   負債を直したら該当行を削除 → 既定値に戻る
+[repay]    delete the line once fixed   → the default comes back
 ```
 
-**config の差分が負債返済の記録になる。** `warn_on: [format]` を消せたことは、その負債を返した証拠であり、diff がそのまま記録になる。だから一時しのぎの緩和も config に書く(シェルの履歴や個人の環境変数ではなく)。
+**The config diff becomes the record of debt repayment.** Being able to delete `warn_on: [format]` is the proof that the debt was paid, and the diff is the record. That is why even a temporary relaxation belongs in the config — not in shell history or someone's personal environment variables.
 
-## 3分で始める
+## Three minutes to start
 
-まず現在の設定を確認する。このコマンドは検査自体を実行しないため、安全に利用できる。
+First, look at the current settings. This command does not run the checks themselves, so it is always safe.
 
 ```bash
 bash scripts/check.sh --list-checks
 ```
 
-出力(このリポジトリ feedback-harness 自身での例。並ぶ行はプロジェクトのスタック構成とツール導入状況で変わる):
+Output (an example from this repository, feedback-harness, itself; which rows appear depends on the project's stacks and which tools are installed):
 
 ```
 検査ID       ラベル               ステージ  判定  出所
@@ -46,7 +48,7 @@ md-links     docs: 内部リンク     docs      fail  既定
 make-check   make check           test      fail  既定
 ```
 
-**左端の列がそのまま設定キー**。`ruff-format` が `warn` なのが気になるなら、コピーした config に1行足す:
+**The leftmost column is the configuration key.** If it bothers you that `ruff-format` is `warn`, add one line to the config you copied:
 
 ```yaml
 checks:
@@ -54,36 +56,36 @@ checks:
     severity: fail
 ```
 
-もう一度 `--list-checks` を実行すると、判定と**出所**が変わる。
+Run `--list-checks` again and both the verdict and the **source** change:
 
 ```
 ruff-format  python: ruff format  format    fail  checks.ruff-format
 ```
 
-出所が `既定` から `checks.ruff-format` に変わったことで、書いた設定が効いていることが確認できる。この「書く → `--list-checks` で出所を確認する」の往復が、config のすべての作業の基本形。
+The source moving from `既定` (default) to `checks.ruff-format` confirms that what you wrote is in effect. This round trip — write it, then confirm the source with `--list-checks` — is the basic shape of every configuration task.
 
-## 困りごとから引く
+## Look it up by problem
 
-### 導入初日、既存コードが大量に FAIL する
+### Day one: the existing code fails everywhere
 
-**症状**: ハーネスを導入したら format や lint が大量 FAIL で、何も完了できない。
+**Symptom**: you installed the harness and format or lint fails en masse, so nothing can be completed.
 
-**書く YAML**:
+**YAML to write**:
 
 ```yaml
 check:
-  warn_on: [format]   # FAIL を WARN に落とす。検査はするが完了をブロックしない
+  warn_on: [format]   # demote FAIL to WARN — still checked, but does not block completion
 ```
 
-**出力がどう変わるか**: `--list-checks` の判定列が `fail` → `warn` に並ぶ。`check.sh` の最終行は `ALL PASS (N件WARN …)` になり exit 0。WARN はプラグインのフック経由で `events.jsonl` に記録され `stats` の「頻出WARN」に現れるため、直し忘れが見える(init.sh 配布のみでフックが無い環境では記録されない)。
+**How the output changes**: the verdict column of `--list-checks` shows `warn` where it showed `fail`. The last line of `check.sh` becomes `ALL PASS (N件WARN …)` and it exits 0. WARNs are recorded to `events.jsonl` through the plugin hooks and appear under "頻出WARN" (frequent WARNs) in `stats`, so what you have not fixed stays visible (they are not recorded in environments installed only through `init.sh`, which have no hooks).
 
-直し終わったら `warn_on` から外す。**検査そのものを消したいときだけ `skip` を使う** — `skip` は検査を行わないため、壊れたままで気づけなくなる。`warn_on` は「今は直せないが見えていてほしい」ためのもの。
+Remove the stage from `warn_on` once you have fixed it. **Use `skip` only when you want the check itself gone** — `skip` does not run the check, so breakage goes unnoticed. `warn_on` is for "I cannot fix it now but I want to keep seeing it".
 
-### 誤検出の多い検査を止めたい
+### Silencing a check with too many false positives
 
-**症状**: 特定の検査(ここでは `vulture`)がこのプロジェクトでは常に意味のない指摘を出す。
+**Symptom**: one check (here, `vulture`) always produces meaningless findings in this project.
 
-**書く YAML**:
+**YAML to write**:
 
 ```yaml
 checks:
@@ -91,15 +93,15 @@ checks:
     severity: skip
 ```
 
-**出力がどう変わるか**: `check.sh` の該当行が `SKIP  python: vulture (config: checks.vulture)` になる。理由に `config: …` と付くため、自分で止めたのか既定の挙動なのかが区別できる。
+**How the output changes**: the matching line of `check.sh` becomes `SKIP  python: vulture (config: checks.vulture)`. Because the reason says `config: …`, you can tell a deliberate decision from default behavior.
 
-ステージ単位で停止することもできる（`check.skip: [security]` など。指定できる値は `lint` / `typecheck` / `test` / `build` / `format` / `security` / `docs` / `contract`）。ただし `lint` には18個の検査が含まれるため、構文エラー検出（`bash-syntax` / `json-syntax`）を残したい場合は、検査IDで個別に指定する。
+You can also stop a whole stage (`check.skip: [security]` and so on; the accepted values are `lint` / `typecheck` / `test` / `build` / `format` / `security` / `docs` / `contract`). Note that `lint` contains 18 checks, so name individual check IDs if you want to keep syntax detection (`bash-syntax` / `json-syntax`).
 
-### モノレポで言語ごとに事情が違う
+### A monorepo where each language has its own situation
 
-**症状**: 同じリポジトリに Python と Node があり、Python の test は重すぎる、Node の lint は歴史的経緯で汚い。
+**Symptom**: the same repository holds Python and Node; the Python tests are too heavy, and the Node lint is messy for historical reasons.
 
-**書く YAML**:
+**YAML to write**:
 
 ```yaml
 check:
@@ -109,13 +111,13 @@ check:
     warn_on: [lint]
 ```
 
-**出力がどう変わるか**: Python の test ステージだけ SKIP、Node の lint 群だけ WARN になる。**他スタックに漏れない**(`check.python.skip` を書いても Go の test は消えない)。スタックは `python` / `node` / `go` / `rust` / `java` / `shell` の6つ。
+**How the output changes**: only the Python test stage is SKIPped and only the Node lint checks become WARN. **Nothing leaks into other stacks** — writing `check.python.skip` does not remove the Go tests. The six stacks are `python` / `node` / `go` / `rust` / `java` / `shell`.
 
-### 生成物・ベンダコードを見せたくない
+### Keeping generated and vendored code out of sight
 
-**症状**: `vendor/` 配下のシェルスクリプトや生成済み Markdown が `bash-syntax` や `md-links` で引っかかる。
+**Symptom**: shell scripts under `vendor/` or generated Markdown get caught by `bash-syntax` or `md-links`.
 
-**書く YAML**:
+**YAML to write**:
 
 ```yaml
 check:
@@ -124,28 +126,28 @@ check:
     - dist/**
 ```
 
-**出力がどう変わるか**: ハーネスが列挙する検査対象からその glob が外れ、該当ファイルに起因する PASS / FAIL / WARN の行が消える。
+**How the output changes**: the glob drops out of the files the harness enumerates, and the PASS / FAIL / WARN lines caused by those files disappear.
 
-**効く範囲(重要)**: `exclude` が効くのは**ハーネス自身がファイルを列挙する検査だけ** — shell の `bash -n` / `shellcheck`、config の `json-syntax` / `yaml-syntax`、docs の `md-links` 等。**ruff / pytest / go test のように自分でツリーを歩くツールには効かない。** それらはそれぞれの無視設定(ruff の `exclude` / `per-file-ignores`、pytest の `testpaths` / `--ignore` 等)に従う。詳細は「[効かないとき](#効かないとき)」。
+**Where it applies (important)**: `exclude` applies **only to checks where the harness itself enumerates the files** — shell's `bash -n` / `shellcheck`, config's `json-syntax` / `yaml-syntax`, docs' `md-links`, and so on. **It does not apply to tools that walk the tree themselves, such as ruff, pytest, or go test.** Those follow their own ignore settings (ruff's `exclude` / `per-file-ignores`, pytest's `testpaths` / `--ignore`, and so on). See "[When it does not take effect](#when-it-does-not-take-effect)".
 
-### CI だけ挙動を変えたい
+### Changing behavior in CI only
 
-**症状**: 普段使いの config はそのままに、CI だけで重いステージを外したい / shellcheck を厳しくしたい。
+**Symptom**: you want to keep the everyday config as it is, and only in CI drop the heavy stages or tighten shellcheck.
 
-**書くもの**: 環境変数。config より優先される:
+**What to write**: environment variables. They take precedence over the config:
 
 ```bash
-FEEDBACK_CHECK_SKIP="test build" bash scripts/check.sh   # CI だけで重いステージを外す
-FEEDBACK_SHELLCHECK_SEVERITY=style bash scripts/check.sh # CI だけ厳しく
+FEEDBACK_CHECK_SKIP="test build" bash scripts/check.sh   # drop heavy stages in CI only
+FEEDBACK_SHELLCHECK_SEVERITY=style bash scripts/check.sh # tighten in CI only
 ```
 
-**出力がどう変わるか**: `--list-checks` の出所が `env.FEEDBACK_CHECK_SKIP` のように `env.` 始まりになる。**環境変数で切り替えられるのはこの3項目**(`FEEDBACK_CHECK_SKIP` / `FEEDBACK_SHELLCHECK_SEVERITY` / `FEEDBACK_CONTRACT_BASE`)で、判定(`severity` / `fail_on` / `warn_on`)を環境変数で上書きする口は無い。
+**How the output changes**: the source in `--list-checks` starts with `env.`, for example `env.FEEDBACK_CHECK_SKIP`. **Only these three settings can be switched by environment variable** (`FEEDBACK_CHECK_SKIP` / `FEEDBACK_SHELLCHECK_SEVERITY` / `FEEDBACK_CONTRACT_BASE`); there is no environment variable that overrides a verdict (`severity` / `fail_on` / `warn_on`).
 
-### 特定の検査だけ絶対にブロックしたい
+### Making one specific check always block
 
-**症状**: 宣言していない検査は WARN になるが、これだけは必ず FAIL にしたい(例: 依存の実在性)。
+**Symptom**: checks the project has not declared become WARN, but this one must always FAIL (for example, whether dependencies really exist).
 
-**書く YAML**:
+**YAML to write**:
 
 ```yaml
 checks:
@@ -153,76 +155,76 @@ checks:
     severity: fail
 ```
 
-**出力がどう変わるか**: `--list-checks` で `warn` → `fail`、出所は `checks.deptry`。指摘があると `check.sh` が exit 1 になり完了がブロックされる。
+**How the output changes**: `--list-checks` shows `fail` instead of `warn`, with `checks.deptry` as the source. Any finding makes `check.sh` exit 1 and blocks completion.
 
-## 優先順位
+## Precedence
 
-**環境変数 > `checks.<検査>` > `check.<スタック>` > `check`(全体) > 既定値**
+**environment variable > `checks.<check>` > `check.<stack>` > `check` (global) > default**
 
-最も具体的な指定が勝つ。使い分けの指針: **commit したい設定は config、その場限りの一時上書きは環境変数**。CI の workflow に書く環境変数はむしろ commit されるが、それは「CI という環境の既定値」を表している。
+The most specific setting wins. A guideline for choosing: **settings you want committed belong in the config; one-off overrides belong in environment variables.** Environment variables written into a CI workflow are committed too, but they express "the default for the CI environment".
 
-### 設定ファイルは2層ある
+### There are two configuration layers
 
-| ファイル | 追跡 | 用途 |
+| File | Tracking | Purpose |
 |---|---|---|
-| `.feedback/config.yaml` | commit して共有 | チームの設定。全員に同じ判定を効かせる |
-| `.feedback/local/config.yaml` | `.gitignore` 済み | この端末だけの設定。**共有設定より優先される** |
+| `.feedback/config.yaml` | committed and shared | The team's settings. Everyone gets the same verdicts |
+| `.feedback/local/config.yaml` | already in `.gitignore` | Settings for this machine only. **Takes precedence over the shared settings** |
 
-書ける項目は両方とも同じ。個人設定は、共有設定を書き換えずに手元の事情を反映したいときに使う — 使っていないツールの検査を切る、重い検査を一時的に外す、といった用途である。チームの判定を変えたいなら共有設定を直す。
+Both accept the same keys. Personal settings exist so you can reflect local circumstances without rewriting the shared settings — turning off checks for a tool you do not use, temporarily dropping a heavy check. If you want to change the team's verdicts, edit the shared settings.
 
-個人設定で決まった項目は、`--list-checks` の出所が `local.` で始まる(例 `local.checks.ruff`)。SKIP の理由表示も `(config: …)` ではなく `(個人設定: …)` になる。個人設定は他の人からは見えないため、共有設定を読んでも理由が見つからない状況を避けるための区別である。
+Anything decided by a personal setting shows a source starting with `local.` in `--list-checks` (for example `local.checks.ruff`), and the SKIP reason reads `(個人設定: …)` rather than `(config: …)`. Personal settings are invisible to everybody else, so this distinction avoids a situation where reading the shared settings never explains the behavior.
 
-どちらのファイルが壊れていても、そのファイル名付きでエラーになり検査は既定値のまま続行する。
+If either file is broken, the error names that file and the checks continue with defaults.
 
-同じ層で同じステージを複数のキーに指定した場合は、`fail_on` > `warn_on` > `skip` の順で優先される。検査を誤って無効化しないよう、より厳しい判定を優先するためである。
+When the same stage is named by several keys in the same layer, `fail_on` > `warn_on` > `skip` wins, so that a check is not disabled by accident: the stricter verdict is preferred.
 
-## 項目リファレンス
+## Reference
 
-辞書として引く章。通読する必要はない。検査IDは `--list-checks` の左端の列からコピーする。
+A chapter to look things up in. There is no need to read it through. Copy check IDs from the leftmost column of `--list-checks`.
 
-**① 全体(`check`)**
+**① Global (`check`)**
 
-| キー | 型 | 既定値 | 対応する環境変数 | 効果 |
+| Key | Type | Default | Environment variable | Effect |
 |---|---|---|---|---|
-| `skip` | ステージリスト | `[]` | `FEEDBACK_CHECK_SKIP` | 指定ステージを飛ばす。語彙は `lint` / `typecheck` / `test` / `build` / `format` / `security` / `docs` / `contract` |
-| `fail_on` | ステージリスト | `[]` | — | 宣言が無くても WARN ではなく FAIL にする |
-| `warn_on` | ステージリスト | `[]` | — | FAIL するステージを WARN に落とす |
-| `exclude` | glob リスト | `[]` | — | ハーネスが列挙するファイルから除外する(効く範囲は上記) |
-| `log_tail_lines` | 整数 | `40` | — | FAIL / WARN 時に出すログ行数。エージェントの文脈量に直結する |
+| `skip` | stage list | `[]` | `FEEDBACK_CHECK_SKIP` | Skip the given stages. The vocabulary is `lint` / `typecheck` / `test` / `build` / `format` / `security` / `docs` / `contract` |
+| `fail_on` | stage list | `[]` | — | FAIL rather than WARN even without a declaration |
+| `warn_on` | stage list | `[]` | — | Demote failing stages to WARN |
+| `exclude` | glob list | `[]` | — | Exclude from the files the harness enumerates (scope as described above) |
+| `log_tail_lines` | integer | `40` | — | How many log lines to print on FAIL / WARN. Directly affects how much context the agent receives |
 
-**② スタック単位(`check.<stack>`)**
+**② Per stack (`check.<stack>`)**
 
-`skip` / `fail_on` / `warn_on` の3キーのみ。①と同じ意味で、そのスタックの検査にだけ効く。スタックは `python` / `node` / `go` / `rust` / `java` / `shell`。
+Only the three keys `skip` / `fail_on` / `warn_on`. They mean the same as in ① but apply only to that stack's checks. The stacks are `python` / `node` / `go` / `rust` / `java` / `shell`.
 
-**③ 検査単位(`checks.<id>`)**
+**③ Per check (`checks.<id>`)**
 
-| キー | 型 | 既定値 | 効果 |
+| Key | Type | Default | Effect |
 |---|---|---|---|
-| `severity` | `fail` \| `warn` \| `skip` | 検査ごと(宣言の有無で決まる既定) | この検査の判定。`skip` は実行しない |
-| ツール固有キー | — | — | 下表 |
+| `severity` | `fail` \| `warn` \| `skip` | per check (the default follows from whether it is declared) | The verdict for this check. `skip` does not run it |
+| tool-specific keys | — | — | See the table below |
 
-| 検査ID | 固有キー | 型 | 既定値 | 対応する環境変数 |
+| Check ID | Specific key | Type | Default | Environment variable |
 |---|---|---|---|---|
 | `shellcheck` | `min_severity` | `style`\|`info`\|`warning`\|`error` | `warning` | `FEEDBACK_SHELLCHECK_SEVERITY` |
-| `vulture` | `min_confidence` | 0〜100 の整数（大きいほど検出が減る） | `80` | — |
-| `oasdiff` | `base` | 文字列 | `main` | `FEEDBACK_CONTRACT_BASE` |
+| `vulture` | `min_confidence` | integer 0–100 (higher detects less) | `80` | — |
+| `oasdiff` | `base` | string | `main` | `FEEDBACK_CONTRACT_BASE` |
 
-**その他のセクション**
+**Other sections**
 
-| キー | 型 | 既定値 | 効果 |
+| Key | Type | Default | Effect |
 |---|---|---|---|
-| `audit.interval_days` | 整数 | `7` | `stats` / `report` が「監査を推奨」を出すまでの経過日数 |
-| `audit.npm_audit_level` | 文字列 | `high` | `npm audit --audit-level=<値>`(`low` / `moderate` / `high` / `critical`) |
-| `feedback.open_threshold` | 整数 | `3` | `add` / `stats` / `report` が promote を促す open エントリ件数 |
-| `feedback.lock_timeout_seconds` | 整数 | `10` | 複数agent/sessionが同時に更新したとき、repository lockの取得を待つ秒数(1〜300) |
-| `feedback.stale_days` | 整数 | `7` | `stats` / `report` が頻出WARN・失敗上位に「これだけ再発していない」と注記するまでの日数 |
-| `feedback.retro_interval_days` | 整数 | `90` | `stats` / `report` が「ルールの棚卸しを推奨」を出すまでの経過日数(基点は `.feedback/.last-retro`) |
+| `audit.interval_days` | integer | `7` | Days before `stats` / `report` recommend running an audit |
+| `audit.npm_audit_level` | string | `high` | `npm audit --audit-level=<value>` (`low` / `moderate` / `high` / `critical`) |
+| `feedback.open_threshold` | integer | `3` | How many open entries make `add` / `stats` / `report` prompt for promotion |
+| `feedback.lock_timeout_seconds` | integer | `10` | Seconds to wait for the repository lock when several agents or sessions update at once (1–300) |
+| `feedback.stale_days` | integer | `7` | Days before `stats` / `report` annotate a frequent WARN or top failure with "this has not recurred lately" |
+| `feedback.retro_interval_days` | integer | `90` | Days before `stats` / `report` recommend a rule review (the baseline is `.feedback/.last-retro`) |
 
-### 検査ID一覧(41件)
+### The check IDs (41)
 
-暗記しないこと。使うときは `--list-checks` の左端の列からコピーする。以下は全体像の把握用。
+Do not memorize them. Copy from the leftmost column of `--list-checks` when you need one. The list below is for an overview.
 
-| スタック/群 | 検査ID |
+| Stack / group | Check IDs |
 |---|---|
 | python | `ruff` / `ruff-format` / `mypy` / `pytest` / `deptry` / `vulture` / `import-linter` |
 | node | `node-lint` / `node-typecheck` / `tsc` / `node-test` / `node-test-coverage` / `node-build` / `npm-ls` / `prettier` / `knip` |
@@ -230,76 +232,82 @@ checks:
 | rust | `clippy` / `cargo-check` / `cargo-test` / `cargo-metadata` / `cargo-fmt` / `cargo-semver-checks` |
 | java | `mvn` / `gradle` |
 | shell | `bash-syntax` / `shellcheck` |
-| 横断 | `json-syntax` / `yaml-syntax` / `md-links` / `secretlint` / `gitleaks` / `actionlint` / `dockerfilelint` / `hadolint` / `oasdiff` / `make-check` |
+| cross-cutting | `json-syntax` / `yaml-syntax` / `md-links` / `secretlint` / `gitleaks` / `actionlint` / `dockerfilelint` / `hadolint` / `oasdiff` / `make-check` |
 
-`gradle` は `./gradlew check` と `gradle check` の両方を指す(起動方法の違いであって別の検査ではない)。
+`gradle` covers both `./gradlew check` and `gradle check` (a difference in how it is launched, not a different check).
 
-## 効かないとき
+**Derived check IDs (per module)**
 
-### まず `--list-checks` で出所を見る
+In a Maven monorepo without a root `pom.xml`, each discovered `pom.xml` gets its own check ID, `mvn-<module-slug>` (for example `services/api/pom.xml` → `mvn-services-api`). The slug is reduced to lowercase letters, digits, and hyphens, and a numeric suffix is appended when two modules would produce the same slug (`mvn-services-api-2`). The actual IDs are visible in the leftmost column of `--list-checks`.
 
-ほとんどの「効かない」は、**想定と違う層で判定が決まっている**ことの症状である。
+The verdict resolves as **the derived ID's explicit setting → the `mvn` setting**. In other words `check.skip: [test]` and `checks.mvn.severity: skip` reach every module, while `checks.mvn-tools-cli.severity: skip` stops only that one. You do not have to disable Maven checking wholesale to drop a single heavy module.
+
+## When it does not take effect
+
+### First, look at the source with `--list-checks`
+
+Almost every "it does not take effect" is a symptom of **the verdict being decided in a different layer than you assumed**.
 
 ```bash
 bash scripts/check.sh --list-checks
 ```
 
-- 出所が `既定` のまま → config が読めていない。下記「壊れた config」を確認
-- 出所が config 由来のパス(例: `check.python.warn_on`)だが期待するキーと違う(例: `check.python.warn_on` を書いたつもりが `check.warn_on` で効いている)→ 優先順位の誤り
-- 出所が `env.<変数名>` → 環境変数が export されたまま。config より優先されるため、`unset` するまで config は効かない
+- The source is still `既定` (default) → the config is not being read. See "A broken config" below
+- The source is a config path (for example `check.python.warn_on`) but not the key you expected (you meant to write `check.python.warn_on` but `check.warn_on` is what took effect) → a precedence mistake
+- The source is `env.<variable>` → an environment variable is still exported. It takes precedence over the config, so the config has no effect until you `unset` it
 
-### 壊れた config は表の後に stderr へ出る(仕様)
+### A broken config prints to stderr after the table (by design)
 
-config に打ち間違い(未知のキー・未知の検査ID・型不一致)があると、`--list-checks` は表を**既定値で**出した後に stderr へエラーを出して exit 1 する:
+If the config contains a typo (an unknown key, an unknown check ID, a type mismatch), `--list-checks` prints the table **with defaults** and then writes the error to stderr and exits 1:
 
 ```
 $ bash scripts/check.sh --list-checks
 検査ID       ラベル               ステージ  判定  出所
-(…表は既定値で出る…)
+(… the table is printed with defaults …)
 
 ERROR: .feedback/config.yaml を読めませんでした。以下はすべて既定値です。
 .feedback/config.yaml: check.skip の 'lnit' は未知のステージです。使えるのは lint / typecheck / test / build / format / security / docs / contract
 ```
 
-これは黙って既定値に落ちるより安全な挙動である — 「設定が効かない」の原因が config 自体の誤りであることを教えてくれる。`check.sh` の通常実行でも `FAIL  config: .feedback/config.yaml` が立つ。
+This is safer than silently falling back to defaults — it tells you that the reason "the settings do not work" is an error in the config itself. A normal `check.sh` run also raises `FAIL  config: .feedback/config.yaml`.
 
-### `exclude` の効く範囲
+### The scope of `exclude`
 
-`exclude` が効くのは**ハーネス自身がファイルを列挙する検査**(`bash-syntax` / `shellcheck` / `json-syntax` / `yaml-syntax` / `md-links` 等)に限る。ruff / pytest / go test / vulture のように**自分でツリーを歩くツールには効かない** — それらはツール自身の無視設定(ruff の `exclude` / `per-file-ignores`、pytest の `testpaths` 等)に従う。ハーネスが各ツールの除外構文へ翻訳することはしない(ツールごとに意味が違い、翻訳は必ずずれるため)。
+`exclude` applies only to **checks where the harness itself enumerates the files** (`bash-syntax` / `shellcheck` / `json-syntax` / `yaml-syntax` / `md-links`, and so on). It **does not apply to tools that walk the tree themselves**, such as ruff, pytest, go test, or vulture — those follow their own ignore settings (ruff's `exclude` / `per-file-ignores`, pytest's `testpaths`, and so on). The harness does not translate into each tool's exclusion syntax, because the semantics differ per tool and any translation would drift.
 
-### `--list-checks` に載らない検査がある
+### Some checks do not appear in `--list-checks`
 
-`--list-checks` は、対象プロジェクトの構成から適用対象になった検査だけを表示する。適用対象になった検査でツールが未導入の場合は、行を省略せず `skip` と理由を表示する。一方、設定や対象ファイルが無く、検査の適用条件自体を満たさない場合は表示しない。たとえば import-linter の設定が無いプロジェクトでは `import-linter` は表示されないが、設定がありツールだけが無い場合は `skip` と表示される。
+`--list-checks` shows only the checks that apply to the target project's layout. When a check applies but its tool is not installed, the row is not omitted: it is shown as `skip` with the reason. When there is no configuration or no target file, so the check's own applicability condition is not met, it is not shown at all. For example, `import-linter` does not appear in a project without an import-linter configuration, but it is shown as `skip` when the configuration exists and only the tool is missing.
 
-機械処理で全行を取得したい場合は、次の JSON 出力を利用できる。
+To retrieve every row for machine processing, use the JSON output:
 
 ```bash
 bash scripts/check.sh --list-checks --json
 ```
 
-### それでも分からなければ
+### If you still cannot tell
 
-`python3 scripts/harness_config.py --json` で解決済みの全実効値を出せる。「[YAML の書ける記法・書けない記法](#yaml-の書ける記法書けない記法)」に該当しないかも確認すること。
+`bash -c '. scripts/lib.sh; harness_python scripts/harness_config.py --json'` prints every resolved effective value. Also check whether you have hit "[YAML notation that is and is not supported](#yaml-notation-that-is-and-is-not-supported)".
 
-## YAML の書ける記法・書けない記法
+## YAML notation that is and is not supported
 
-config の YAML は PyYAML を要求せず自前のパーサで読む(任意依存を増やさないため)。そのため**書ける記法が YAML のサブセット**になっている。
+The config YAML is read by an in-house parser rather than requiring PyYAML (so as not to add an optional dependency). As a result, **the supported notation is a subset of YAML**.
 
-**書ける記法**:
+**Supported**:
 
-- コメント(`#` 始まり、および値の後ろ)
-- 入れ子マップ(スペースインデント。深さ制限なし)
-- スカラー: 裸文字列 / `'...'` / `"..."` / 整数 / `true`・`false` / 空(= null)
-- リスト: ブロック形式(`- item`)とフロー形式(`[a, b]`)、空リスト `[]`
+- Comments (starting with `#`, and after a value)
+- Nested maps (space indentation, no depth limit)
+- Scalars: bare strings / `'...'` / `"..."` / integers / `true` and `false` / empty (= null)
+- Lists: block form (`- item`) and flow form (`[a, b]`), and the empty list `[]`
 
-**書けない記法(行番号と理由付きでエラーになる)**:
+**Not supported (an error with the line number and the reason)**:
 
-- アンカー・エイリアス(`&` / `*`)
-- 複数文書(`---` 区切り)
-- 複数行文字列(`|` / `>`)
-- リスト要素の入れ子(マップやリストを要素に持つリスト)
-- タブインデント
+- Anchors and aliases (`&` / `*`)
+- Multiple documents (`---` separators)
+- Multi-line strings (`|` / `>`)
+- Nested list elements (a list whose elements are maps or lists)
+- Tab indentation
 
-また、クォート（`'` / `"`）やフロー形式のリスト（`[`）を閉じていない場合も、行番号付きのエラーになる。壊れた値を通常の文字列として受理し、後続の検査が意図せず無効になることを防ぐためである。
+An unclosed quote (`'` / `"`) or an unclosed flow list (`[`) is also an error with a line number. This prevents a broken value from being accepted as an ordinary string and silently disabling later checks.
 
-書けない記法を黙って無視すると「書いたのに効かない」という最悪の状態になるため、いずれも FAIL にする。未知のキー(`shelcheck_severity` のような打ち間違い)も同じ理由でエラーになる。
+Silently ignoring unsupported notation would produce the worst state — "I wrote it and it does not work" — so all of these FAIL. An unknown key (a typo such as `shelcheck_severity`) is an error for the same reason.

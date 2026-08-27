@@ -16,7 +16,8 @@ scripts/
 ├── lib.sh            # check.sh / check_file.sh 的共用工具函数（包括 has()）
 ├── harness_config.py # .feedback/config.yaml 的唯一解析器（YAML 子集、schema 验证、3 层解析）
 ├── feedback_store.py # repository lock、原子写入及中断事务恢复
-├── feedback_log.py   # 反馈记录 CLI：记录、整理、盘点、统计和周期报告
+├── feedback.sh       # 跨平台反馈 CLI 入口（解析 Python 可执行文件）
+├── feedback_log.py   # 反馈 CLI 实现：记录、整理、盘点、统计和周期报告
 ├── audit.sh          # 按需漏洞审计（工具链中专门联网的检查；Stop hook 不会调用）
 ├── init.sh           # 安装脚本（为不支持 Hooks 的环境部署资源；不会复制到目标项目）
 └── hooks/
@@ -30,10 +31,10 @@ scripts/
 | 类别 | 脚本 | 职责 |
 |------|-----------|------|
 | 自动检查 | `check.sh`、`check_file.sh`、`hooks/*` | 不额外下载依赖或查询远程服务地将 lint/test/build 结果返回给代理 |
-| 反馈积累和测量 | `feedback_log.py` | 记录并通用化人工反馈，传递到后续会话；输出指标和周期摘要 |
+| 反馈积累和测量 | `feedback.sh` | 记录并通用化人工反馈，传递到后续会话；输出指标和周期摘要 |
 | 按需审计（使用网络） | `audit.sh` | 检查依赖项漏洞；Hooks 不会调用 |
 
-有两种分发方式。**插件安装**会将所有文件保留在插件中。Codex 使用 `PLUGIN_ROOT`（Hooks 还会设置兼容变量 `CLAUDE_PLUGIN_ROOT`），Claude Code 使用 `CLAUDE_PLUGIN_ROOT`。**通过 `init.sh` 安装**时，会将 `check.sh`、`checks/*.sh`、`check_file.sh`、`lib.sh`、`audit.sh`、`harness_config.py`、`feedback_store.py`、`feedback_log.py` 以及本 README 的三种语言版本复制到目标项目的 `scripts/` 目录。`hooks/` 和 `init.sh` 本身不会复制：前者仅用于插件，后者应从分发源仓库运行。
+有两种分发方式。**插件安装**会将所有文件保留在插件中。Codex 使用 `PLUGIN_ROOT`（Hooks 还会设置兼容变量 `CLAUDE_PLUGIN_ROOT`），Claude Code 使用 `CLAUDE_PLUGIN_ROOT`。**通过 `init.sh` 安装**时，会将 `check.sh`、`checks/*.sh`、`check_file.sh`、`lib.sh`、`feedback.sh`、`audit.sh`、`harness_config.py`、`feedback_store.py`、`feedback_log.py` 以及本 README 的三种语言版本复制到目标项目的 `scripts/` 目录。`hooks/` 和 `init.sh` 本身不会复制：前者仅用于插件，后者应从分发源仓库运行。
 
 ## 共用设计原则
 
@@ -58,7 +59,7 @@ bash scripts/check.sh --list-checks --json   # 以 JSON 输出相同信息
 bash scripts/check.sh --help          # 显示用法（exit 0）
 ```
 
-分发的各脚本（`check.sh` / `check_file.sh` / `audit.sh` / `init.sh` / `harness_config.py` / `feedback_log.py`）在收到 `--help` / `-h` 时显示用法并 `exit 0`。`check.sh` / `audit.sh` / `init.sh` 会以 **`exit 2`** 拒绝未知选项——若把未知选项当作项目根目录，就会显示“找不到目录”，从而掩盖问题其实出在参数上。`check_file.sh` 是例外：除 `--help` 外，以 `-` 开头的参数一律按文件名处理，因为该脚本的非零退出码会直接导致 PostToolUse 拒绝本次编辑。
+分发的各脚本（`check.sh` / `check_file.sh` / `feedback.sh` / `audit.sh` / `init.sh` / `harness_config.py` / `feedback_log.py`）在收到 `--help` / `-h` 时显示用法并 `exit 0`。`check.sh` / `audit.sh` / `init.sh` 会以 **`exit 2`** 拒绝未知选项——若把未知选项当作项目根目录，就会显示“找不到目录”，从而掩盖问题其实出在参数上。`check_file.sh` 是例外：除 `--help` 外，以 `-` 开头的参数一律按文件名处理，因为该脚本的非零退出码会直接导致 PostToolUse 拒绝本次编辑。
 
 **行为：** 对每个检测到的技术栈运行相应阶段，同时执行与技术栈无关的横向检查，并输出 `PASS`/`FAIL`/`WARN`/`SKIP` 摘要。
 
@@ -84,7 +85,7 @@ bash scripts/check.sh --help          # 显示用法（exit 0）
 - **访问远程仓库** — 契约差异基线为 `git merge-base HEAD <FEEDBACK_CONTRACT_BASE:-main>`；无法解析时使用 `HEAD`
 
 - **检测对象：** Python（`pyproject.toml` / `setup.py` / `requirements.txt`；即使没有这些文件，只要存在 `*.py` 也会仅运行 `ruff`）/ Node（`package.json`）/ Go（`go.mod`）/ Rust（`Cargo.toml`）/ Java（`pom.xml` / `build.gradle`）/ Shell（`*.sh`）/ 通用（`Makefile` 的 `check` target）
-- **Maven 项目：** 根目录存在 `pom.xml` 时，将其作为 reactor 入口，只运行一次 `verify`。没有根 POM 时，对检测到的每个 `pom.xml` 使用 `-f` 独立运行。每个 POM 依次优先使用同目录的 `mvnw`、仓库根目录的 `mvnw`，最后才使用全局 `mvn`。wrapper 存在但不可执行时会标记为 `SKIP`，不会静默回退。Maven `verify` 包含项目配置的编译、测试、打包和 integration-test 生命周期阶段；Maven 可能会按照项目设置从仓库解析依赖项和插件
+- **Maven 项目：** 根目录存在 `pom.xml` 时，将其作为 reactor 入口，只运行一次 `verify`。没有根 POM 时，对检测到的每个 `pom.xml` 使用 `-f` 独立运行。每个 POM 依次优先使用同目录的 `mvnw`、仓库根目录的 `mvnw`，最后才使用全局 `mvn`。wrapper 存在但不可执行时会标记为 `SKIP`，不会静默回退。Maven `verify` 包含项目配置的编译、测试、打包和 integration-test 生命周期阶段；Maven 可能会按照项目设置从仓库解析依赖项和插件。没有根 POM 时检测到的每个模块都拥有独立的检查 ID `mvn-<模块 slug>`（例如 `services/api/pom.xml` → `mvn-services-api`；slug 冲突时会追加序号）。判定按「该派生 ID 的显式设置 → `mvn` 的设置」顺序解析，因此 `check.skip: [test]` 会作用于所有模块，而 `checks.mvn-tools-cli.severity: skip` 只停止该模块
 - **横向检查（与技术栈无关）：** 验证 `*.json`、`*.yaml` 和 `*.yml` 的语法。`tsconfig*.json`、`jsconfig*.json`、`devcontainer.json` 以及 `.vscode/` 下的文件通常允许注释（JSONC），因此不检查。YAML 支持由 `---` 分隔的多文档格式，`!Ref` 等未知自定义标签不视为语法错误。未安装 PyYAML 时，YAML 检查标记为 `SKIP` 并说明原因
 - **文档一致性：** 在 `docs` 阶段检测 Markdown 内部链接失效。为保持离线运行，不检查外部 URL、`mailto:`、仅锚点链接和绝对路径。代码块和行内代码中的链接状文本不参与验证
 - **密钥（`security` 阶段）：** 存在 `.secretlintrc.*` 时运行 `secretlint`。**未配置时标记为 SKIP**，因为 secretlint 无法在没有配置的情况下启动。值默认会被屏蔽，不会出现在失败日志中。PATH 中存在 `gitleaks` 时也会运行，但仅支持带有 `--no-git --redact` 的版本
@@ -92,7 +93,7 @@ bash scripts/check.sh --help          # 显示用法（exit 0）
 - **依赖项存在性（离线）：** Node 仅在使用 npm 且存在 `node_modules` 时运行 `npm ls --all`；Go 使用 `go mod verify`；Rust 使用 `cargo metadata --offline`；Python 使用 `deptry`。这些检查可发现不存在的包名以及声明与实际安装内容不一致的问题
 - **API 契约和破坏性变更（`contract` 阶段）：** 根目录或 `api/` 中存在 `openapi.yaml` / `openapi.json` 时，使用 `oasdiff breaking` 与 Git 基线（`git merge-base HEAD <FEEDBACK_CONTRACT_BASE:-main>`，无法解析时使用 `HEAD`）比较。含有 `[lib]` 的 Rust crate 运行 `cargo semver-checks check-release --baseline-rev <Git生成的SHA>`。两者都不访问远程仓库或 registry，完全离线运行
 - **复用现有测试测量覆盖率：** 不运行两次测试，只添加测量参数。检测到 pytest-cov 时，Python 添加 `--cov --cov-report=term-missing`（配置的 `--cov-fail-under` 会自动成为 FAIL gate）；Go 使用 `go test -cover`；Node 如果存在 `test:coverage` script，则用它**替代** `test`，避免运行两次
-- **配置文件：** 通过提交并共享 `.feedback/config.yaml`，可调整阶段 skip、FAIL/WARN 切换、检查对象排除（`exclude`）、日志行数、工具阈值（shellcheck 严重程度、vulture confidence、oasdiff 基线）、审计间隔等。优先级为**环境变量 > 单项检查（`checks.<id>`）> 技术栈（`check.<stack>`）> 全局（`check`）> 默认值**。`FEEDBACK_CHECK_SKIP` 等环境变量用于临时覆盖配置。配置分为两层：`.feedback/local/config.yaml`（已被 `.gitignore`，仅对本机生效）优先于共享的 `config.yaml`，可在不修改团队设置的前提下反映本地情况（例如关闭未使用工具的检查）。由个人层决定的项目，其来源以 `local.` 开头。全部项目请参阅分发源插件的配置指南 `docs/configuration.md`；分发的 `scripts/` 不包含 `docs/`，因此此处不添加链接
+- **配置文件：** 通过提交并共享 `.feedback/config.yaml`，可调整阶段 skip、FAIL/WARN 切换、检查对象排除（`exclude`）、日志行数、工具阈值（shellcheck 严重程度、vulture confidence、oasdiff 基线）、审计间隔等。优先级为**环境变量 > 单项检查（`checks.<id>`）> 技术栈（`check.<stack>`）> 全局（`check`）> 默认值**。`FEEDBACK_CHECK_SKIP` 等环境变量用于临时覆盖配置。配置分为两层：`.feedback/local/config.yaml`（已被 `.gitignore`，仅对本机生效）优先于共享的 `config.yaml`，可在不修改团队设置的前提下反映本地情况（例如关闭未使用工具的检查）。由个人层决定的项目，其来源以 `local.` 开头。全部项目请参阅分发源插件的配置指南 `docs/configuration.zh-CN.md`；分发的 `scripts/` 不包含 `docs/`，因此此处不添加链接
 - **`--list-checks`：** 不执行检查命令，只列出检查 ID、标签、阶段、实际判定和**来源**（由哪一层决定）。适用的检查即使未安装工具，也会显示 `skip` 和原因。最左侧的检查 ID 可直接用作 `checks:` 的 key。结合 `--json` 可输出机器可读格式。配置损坏时，先使用默认值显示表格，再向 stderr 输出错误并以 1 退出
 - **跳过阶段：** `FEEDBACK_CHECK_SKIP` 可指定 `lint`、`typecheck`、`test`、`build`、`format`、`security`、`docs` 和 `contract`，多个名称以空格分隔；与配置中的 `check.skip` 使用相同词汇
 - **Make 递归防护：** 仅在运行 `make check` 时将 `FEEDBACK_CHECK_RECURSION_GUARD` 传给后代进程，使其中启动的 check.sh 跳过 Make 回退。这样可阻止以下无限递归：Hook 执行时传播的 `CLAUDE_PROJECT_DIR` 让测试中的 check.sh 将根目录重新解析为本仓库，随后 make check 再次执行测试，最终耗尽 Stop hook 的 timeout。**普通 Make 命令和直接运行的 lint/test/build 阶段不受影响**
@@ -126,19 +127,19 @@ bash scripts/check_file.sh <文件路径>
 
 | 扩展名 | 检查内容 |
 |---|---|
-| `.py` | `ruff check`（不存在时使用 `python3 -m py_compile`） |
+| `.py` | `ruff check`（不存在时使用所选 Python 的 `-m py_compile`） |
 | `.ts`/`.tsx`/`.js`/`.jsx`/`.mjs`/`.cjs` | 存在 ESLint 配置时使用 `eslint`；否则 `.js`/`.mjs`/`.cjs` 使用 `node --check` |
 | `.go` | `gofmt -l`（检测未格式化文件） |
 | `.rs` | `rustfmt --check` |
 | `.sh` | `bash -n`，以及存在时运行 `shellcheck` |
-| `.json`/`.yaml`/`.yml` | 使用 `python3` 解析验证 |
+| `.json`/`.yaml`/`.yml` | 使用所选 Python 解析验证 |
 
 - **退出码：** `0` = 无问题、仅 WARN、未指定文件或目标文件不存在 / `1` = FAIL 或配置错误（会显示详情）
 
-### `feedback_log.py` — 反馈记录 CLI
+### `feedback.sh` — 反馈记录 CLI
 
 ```bash
-python3 scripts/feedback_log.py <子命令> [参数]
+bash scripts/feedback.sh <子命令> [参数]
 ```
 
 条目以带 frontmatter 的 Markdown 保存在 `.feedback/log/`，通用规则会被整理到 `.feedback/rules.md`。**不要直接创建或编辑 log 文件，必须使用此 CLI**，否则不一致的 frontmatter 会破坏 `list` / `promote`。
@@ -196,7 +197,7 @@ Claude Code 和 Codex app / CLI 使用插件提供的 Hooks（`hooks/hooks.json`
 | 响应完成前 | `Stop` | `on_stop.sh` → `check.sh` | 存在 FAIL 时阻塞完成并继续修正；如果上次成功检查后没有变更，则跳过检查本身 |
 
 - **应用规则：** `apply-feedback` skill 读取 `.feedback/rules.md`。如果同时使用 `init.sh`，CLAUDE.md / AGENTS.md 还会说明 Hooks 禁用时的手动步骤。
-- **记录反馈：** `capture-feedback` / `feedback-loop` skill 调用 `feedback_log.py`。
+- **记录反馈：** `capture-feedback` / `feedback-loop` skill 调用 `feedback.sh`。
 - Skills 和 Agents 的启动条件及步骤请参阅项目根目录 README.md 中的“Skills / Agents / Commands 的使用方法（插件安装）”。通过 `init.sh` 安装时不会分发该部分内容，而由下述规则驱动流程替代。
 - **配置文件：** 插件使用 `hooks/hooks.json` 和 `skills/`。Claude Code 读取 `.claude-plugin/plugin.json`，Codex 读取 `.codex-plugin/plugin.json`。CLAUDE.md / AGENTS.md 规则只在同时使用 `init.sh` 时添加。
 
@@ -206,11 +207,11 @@ Claude Code 和 Codex app / CLI 使用插件提供的 Hooks（`hooks/hooks.json`
 
 | 时机 | 命令 | 依据 |
 |---|---|---|
-| 会话开始 | `python3 scripts/feedback_log.py rules` | 将规则应用到工作方针（§1） |
+| 会话开始 | `bash scripts/feedback.sh rules` | 将规则应用到工作方针（§1） |
 | 每次代码变更后 | `bash scripts/check_file.sh <编辑的文件>` | 立即检查，发现问题则修正（§2） |
 | 完成前 | `bash scripts/check.sh` | 确认 `ALL PASS` 后再完成；存在 FAIL 时不得报告完成（§3） |
-| 收到反馈后 | `python3 scripts/feedback_log.py add --category … --summary … --source human` | 立即记录，这是唯一的持久化方式（§4） |
-| 复盘 / 晨会 | `python3 scripts/feedback_log.py report --last --mark` | 将周期摘要作为议题，结束后推进统计起点 |
+| 收到反馈后 | `bash scripts/feedback.sh add --category … --summary … --source human` | 立即记录，这是唯一的持久化方式（§4） |
+| 复盘 / 晨会 | `bash scripts/feedback.sh report --last --mark` | 将周期摘要作为议题，结束后推进统计起点 |
 | 收到审计提示时 | `bash scripts/audit.sh` | 当 `stats` / `report` 在超过 7 天或从未执行时显示“建议审计”后运行 |
 
 - **应用规则：** CLAUDE.md / AGENTS.md §1 规定必须读取 `.feedback/rules.md`。
@@ -232,12 +233,14 @@ Claude Code 和 Codex app / CLI 使用插件提供的 Hooks（`hooks/hooks.json`
 
 ## 所需工具
 
-- **必需：** `bash`、`python3`（用于解析 Hooks 中的 JSON、运行 `feedback_log.py`、验证 JSON/YAML 以及检查内部链接）
+- **必需：** `bash`、Python 3.10 以上版本（`python3` 或 `python`；用于解析 Hooks 中的 JSON、运行反馈 CLI、验证 JSON/YAML 以及检查内部链接）
 - **可选 — 技术栈标准工具**（自动检测；未安装时标记为 `SKIP`）：`ruff`、`mypy`、`pytest` / `npm`/`pnpm`/`yarn`、`eslint`、`tsc` / `go`、`gofmt` / `cargo`、`rustfmt`、`clippy` / `mvn`、`gradle` / `shellcheck`
 - **可选 — 扩展检查：** `pytest-cov`（覆盖率）/ `deptry`、`vulture`、`import-linter`（Python 依赖、死代码、架构约束）/ `secretlint`、`dockerfilelint`、`knip`、`prettier`（通过 npm；本仓库的 `package.json` 是示例）/ `gitleaks`、`actionlint`、`hadolint`、`oasdiff`、`cargo-semver-checks`（系统相关二进制文件，仅在 PATH 中存在时使用）
 - **可选 — 仅审计**（只由 `audit.sh` 使用，会访问网络）：`pip-audit` / `npm` / `govulncheck` / `cargo-audit`
 
 工具链不会安装其中任何工具。使用 `npx --no-install` 是为了避免在工具未安装时未经许可从网络下载。
+
+在 Windows 上，请从 Git for Windows 附带的 Git Bash 运行现有 `*.sh` 文件。共用运行器会解析 Python 可执行文件名，因此不需要 PowerShell 专用脚本。如果 Python 的名称或路径与 `python3` / `python` 不同，请通过 `HARNESS_PYTHON` 显式指定。
 
 ## 安装到其他项目
 

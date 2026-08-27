@@ -30,7 +30,7 @@ LIBDIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib.sh
 . "$LIBDIR/lib.sh"
 
-# 単一ファイル検査でも shellcheck の重大度は config に従う。python3 の起動は
+# 単一ファイル検査でも shellcheck の重大度は config に従う。Python の起動は
 # 実測 約26ms で、このスクリプトが起動する ruff / eslint(数百ms)に対して誤差
 harness_load_config
 
@@ -80,8 +80,12 @@ case "$FILE" in
       if has ruff; then
         # exit code で判定する(ruffは成功時も "All checks passed!" を出力するため)
         cur="$(ruff check --output-format=concise "$FILE" 2>&1)" && cur=""
-      elif has python3; then
-        cur="$(python3 -m py_compile "$FILE" 2>&1)" && cur=""
+      elif harness_has_python; then
+        cur="$(harness_python -m py_compile "$FILE" 2>&1)" && cur=""
+        # harness_python の CR 正規化は stdout だけを通す。ここは 2>&1 で
+        # stderr(py_compile の SyntaxError 本文)を取り込むため、この経路の
+        # CR は capture 側で落とす
+        cur="${cur//$'\r'/}"
       fi
       emit "$sev" "$cur"
     fi

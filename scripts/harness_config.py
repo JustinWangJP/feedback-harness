@@ -228,6 +228,23 @@ SCHEMA_VERSION = 1
 # 表示ラベルは ID に使えない — Node のラベルは "node: $PM run lint" のように
 # パッケージマネージャで変動するため。スタック/群は check.<stack> の解決に、
 # ステージは check.skip 等の解決に使う
+# 検出したモジュールごとに枝分かれする検査。ID は `<base>-<モジュールslug>` で、
+# 判定は「その派生IDの明示設定 → base の設定」の順に解決する(解決は bash 側の
+# harness_check_severity)。base を静的に列挙するのは、任意のIDを受け付けると
+# config の打ち間違いが黙って通ってしまうため。
+DERIVABLE_CHECKS = ("mvn",)
+
+
+def base_check_id(check_id):
+    """派生検査IDから登録済みの base を返す。派生でなければ自分自身。"""
+    if check_id in CHECKS:
+        return check_id
+    for base in DERIVABLE_CHECKS:
+        if check_id.startswith(f"{base}-"):
+            return base
+    return check_id
+
+
 CHECKS = {
     "ruff": ("python", "lint"),
     "ruff-format": ("python", "format"),
@@ -399,14 +416,14 @@ def validate(cfg, path):
     if not isinstance(checks, dict):
         raise ConfigError(f"{path}: checks はマップである必要があります")
     for cid, body in checks.items():
-        if cid not in CHECKS:
+        if base_check_id(cid) not in CHECKS:
             raise ConfigError(
                 f"{path}: {cid!r} は未知の検査IDです。"
                 "`bash scripts/check.sh --list-checks` で一覧を確認してください"
             )
         if not isinstance(body, dict):
             raise ConfigError(f"{path}: checks.{cid} はマップである必要があります")
-        params = CHECK_PARAMS.get(cid, {})
+        params = CHECK_PARAMS.get(base_check_id(cid), {})
         known = set(params) | {"severity"}
         for key, value in body.items():
             if key == "severity":
@@ -586,6 +603,9 @@ def _cmd_shell(root, env):
         out.append(f"{name}={shlex.quote(str(value))}")
 
     emit("HARNESS_CONFIG_ERROR", eff["error"] or "")
+    # 派生検査IDの base 一覧。bash 側の harness_check_severity が
+    # 「派生IDに明示設定が無ければ base の設定を継ぐ」解決に使う
+    emit("HARNESS_DERIVABLE_CHECKS", " ".join(DERIVABLE_CHECKS))
     # 検査ごと・フィールドごとの変数に分ける。旧形式の
     # "id:severity:source" は区切り文字が値に現れると情報を失うため使わない。
     # ID はスキーマで固定され、'-' を '_' に置換しても一意であることを
@@ -612,12 +632,15 @@ def _cmd_shell(root, env):
 
 def _check_env_name(check_id, field):
     """検査IDとフィールドを衝突しない shell 変数名へ写像する。"""
-    if check_id not in CHECKS:
+    if base_check_id(check_id) not in CHECKS:
         raise ConfigError(f"未知の検査IDです: {check_id}")
     if field not in ("SEVERITY", "SOURCE"):
         raise ConfigError(f"未知の検査設定フィールドです: {field}")
     normalized = check_id.replace("-", "_")
     collisions = [cid for cid in CHECKS if cid.replace("-", "_") == normalized]
+    if check_id not in CHECKS:
+        # 派生IDは CHECKS に無い。登録済みIDと衝突しないことだけ確かめる
+        collisions = collisions or [check_id]
     if collisions != [check_id]:
         raise ConfigError(
             "shell 変数名へ変換すると検査IDが衝突します: " + ", ".join(collisions)

@@ -113,7 +113,7 @@ if [[ $FAILED -eq 1 ]]; then
   echo "脆弱性が検出されました。修正してから再実行すること。"
   # spec §3.2: 監査の失敗はフィードバックループに載せる(失敗シグナル)。
   # Stop フックの HINT と同じ形で、記録を促すのみ(自動記録はしない)
-  echo "HINT: 修正後、python3 \"$LIBDIR/feedback_log.py\" add --source hook --category security での記録を検討すること"
+  echo "HINT: 修正後、bash \"$LIBDIR/feedback.sh\" add --source hook --category security での記録を検討すること"
   exit 1
 fi
 if [[ $PASSED -eq 0 ]]; then
