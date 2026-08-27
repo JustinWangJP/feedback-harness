@@ -11,6 +11,30 @@
 
 ---
 
+## 0. 改修状況(このブランチ)
+
+本レポートの指摘は `claude/feedback-harness-fixes-dgnghz` で対応済み(`abbdeb9` ほか)。
+各修正は欠陥を再注入して護欄テストが落ちることを確認している。
+
+| 指摘 | 対応 | 護欄 |
+|------|------|------|
+| ①[P1] frontmatter 乗っ取り | 先頭ブロック限定の読み取りへ変更 | `tests/test_entry_frontmatter.sh` |
+| ②[P2] Stop フックのループ防止 | 判定不能はブロックしない側へ倒し shell フォールバックを追加 | `tests/test_on_stop_skip.sh` |
+| ③[P2] 日付の無検証 | `--since` / `.last-retro` をパースして復旧手順つきで案内 | `tests/test_date_args.sh` |
+| ④[P3] 環境変数の無検証 | config と同じ規則で検証し同じ経路で報告(FAIL ラベルを出所中立へ) | `tests/test_config_wiring.sh` |
+| ⑤[P3] ステージのタイムアウト無し | `check.stage_timeout_seconds` と `--stage-timeout` を追加、Stop は 240 秒、打ち切りは `TIMEOUT` | `tests/test_stage_timeout.sh` |
+| ⑥[P3] テスト規約の乖離 | 捕捉21箇所を `tpy` へ移行し走査で禁止 | `tests/test_python_boundary.sh` |
+| ⑦[P4] `exclude` の非対称 | 3言語の設定ガイドへ明記 | — |
+
+改修中に新たに1件を検出し、その場で塞いだ: ステージを `timeout` で包む実装は
+shell 関数(`harness_validate_json` 等)を渡すと 127 になり、`run_stage` の
+「実行不可」判定で**横断検査が黙って SKIP へ落ちる**。外部コマンドのときだけ
+包むよう限定し、`tests/test_stage_timeout.sh` が固定している。
+
+拡張案(§6)は未着手で、レポートの記載のまま残している。
+
+---
+
 ## 1. 実装品質
 
 **強い点**
