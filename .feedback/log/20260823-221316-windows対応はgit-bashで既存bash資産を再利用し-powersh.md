@@ -4,7 +4,8 @@ date: 2026-08-23
 source: human
 category: architecture
 signal: instruction
-status: open
+status: promoted
+status_changed: 2026-08-26
 ---
 
 # Windows対応はGit Bashで既存Bash資産を再利用し、PowerShellは不可避な場合だけ使う
