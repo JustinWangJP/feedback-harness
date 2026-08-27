@@ -45,12 +45,26 @@ BARE_CLAUDE="$(grep -rn 'CLAUDE_PLUGIN_ROOT' "$REPO/skills" "$REPO/agents" 2>/de
 assert_eq "" "$BARE_CLAUDE" \
   "skills/agents のプラグインルート参照が \${PLUGIN_ROOT:-\${CLAUDE_PLUGIN_ROOT:-}} 形式に統一されている"
 
-# 3: Codex 向けポインタは据え置き(placeholder を書いてはいけない)
-POINTER="$(cat "$REPO/docs/pointer_agents.md")"
-assert_contains "$POINTER" "scripts/feedback.sh" "ポインタはリポジトリ相対のまま"
-case "$POINTER" in
-  *CLAUDE_PLUGIN_ROOT*) fail "pointer_agents.md に CLAUDE_PLUGIN_ROOT を書いてはいけない" ;;
-esac
+# 3: 導入先へ挿入されるポインタは据え置き(placeholder を書いてはいけない)。
+# pointer_agents.md / pointer_claude.md はどちらも init.sh が導入先の
+# AGENTS.md / CLAUDE.md へ差し込む断片で、そこでは ${CLAUDE_PLUGIN_ROOT} が
+# 展開されない。片方だけ護欄を張ると、書き漏れは残った側でだけ起きる
+for pointer_file in "$REPO/docs/pointer_agents.md" "$REPO/docs/pointer_claude.md"; do
+  pointer_name="$(basename "$pointer_file")"
+  POINTER="$(cat "$pointer_file")"
+  assert_contains "$POINTER" "scripts/feedback.sh" \
+    "$pointer_name はリポジトリ相対のまま"
+  ASSERT_CHECKS=$((ASSERT_CHECKS + 1))
+  case "$POINTER" in
+    *CLAUDE_PLUGIN_ROOT*) fail "$pointer_name に CLAUDE_PLUGIN_ROOT を書いてはいけない" ;;
+  esac
+  # 入口の一本化(1b)は導入先の断片にも及ぶ。導入先には python3 が無い
+  # Git Bash もあるため、.py の直接実行を案内してはいけない
+  ASSERT_CHECKS=$((ASSERT_CHECKS + 1))
+  case "$POINTER" in
+    *scripts/*.py*) fail "$pointer_name が Python スクリプトを直接実行させている" ;;
+  esac
+done
 
 # curator と orchestrator の出力契約は同じ語彙・必須フィールドを持つ。
 # 提案を自由文だけに戻すと、承認判断と将来の自動処理で取りこぼすため固定する
