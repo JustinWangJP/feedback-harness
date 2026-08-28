@@ -31,9 +31,9 @@ assert_eq \
   "$(tpy -c "import json,sys;print(json.load(open(sys.argv[1]))['version'])" "$REPO/.claude-plugin/plugin.json")" \
   "$(tpy -c "import json,sys;print(json.load(open(sys.argv[1]))['version'])" "$REPO/.codex-plugin/plugin.json")" \
   "Claude / Codex のプラグインバージョンが一致する"
-assert_eq "0.1.9" \
+assert_eq "0.1.10" \
   "$(tpy -c "import json,sys;print(json.load(open(sys.argv[1]))['version'])" "$REPO/.claude-plugin/plugin.json")" \
-  "公開プラグインバージョンが0.1.9である"
+  "公開プラグインバージョンが0.1.10である"
 
 CODEX_MANIFEST_ERROR="$(tpy - "$REPO/.codex-plugin/plugin.json" <<'PY'
 import json
