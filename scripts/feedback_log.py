@@ -186,11 +186,29 @@ def load_events() -> list:
     return out
 
 
+def parse_date_arg(value: str, where: str) -> str:
+    """日付引数を検証し、正規化した YYYY-MM-DD を返す。
+
+    集計は日付を**文字列比較**で切る(events.jsonl の ts も log の date も
+    ISO 文字列のため)。検証しないと `--since 2026/08/01` のような区切り違いが
+    エラーにならず、比較が全件不一致になって「何も起きていない期間」に見える。
+    レポートは振り返りの議題そのものなので、静かに空になる方が失敗より悪い。
+    """
+    try:
+        return datetime.date.fromisoformat(value).isoformat()
+    except ValueError:
+        sys.exit(
+            f"ERROR: {where} は YYYY-MM-DD 形式で指定してください(実際: {value!r})"
+        )
+
+
 def resolve_since(args) -> str:
     """--since(優先)または --days(既定30)から集計開始日を返す。"""
     if getattr(args, "since", None):
-        return args.since
+        return parse_date_arg(args.since, "--since")
     days = getattr(args, "days", 30)
+    if days < 0:
+        sys.exit(f"ERROR: --days は0以上で指定してください(実際: {days})")
     return (datetime.date.today() - datetime.timedelta(days=days)).isoformat()
 
 
@@ -361,17 +379,35 @@ def recurrence_candidates() -> list:
 
 
 def parse_entry(path: Path) -> dict:
-    meta, body, in_fm = {}, [], False
-    for line in path.read_text(encoding="utf-8").splitlines():
-        if line.strip() == "---":
-            in_fm = not in_fm
-            continue
-        if in_fm and ":" in line:
-            k, v = line.split(":", 1)
-            meta[k.strip()] = v.strip()
-        elif not in_fm:
-            body.append(line)
-    meta["body"] = "\n".join(body).strip()
+    """frontmatter は「先頭ブロック」だけを読む。
+
+    `---` を見るたびにモードを反転すると、本文中の水平線より後ろにある
+    `キー: 値` 形式の行がメタデータとして解釈される。detail に区切り線と
+    箇条書きを書くのはエージェントの日常的な形式なので、これは容易に起きる。
+
+    実害は「記録が消える」ではなく「記録したものが辿れない」形で出る:
+    detail に `---` と `id: 99999999` を書いたエントリは、cmd_add が印字した
+    id では find_entry に掛からず promote できなくなる(status / category /
+    signal も同様に本文で上書きできてしまう)。読み取り側を先頭ブロック限定に
+    直すことで、既存の記録もその場で正しく読めるようになる(書き込み側の
+    エスケープでは、すでに書かれたエントリを救えない)。
+
+    閉じの `---` が無いファイルは frontmatter が終端していないため、
+    従来どおり末尾まで frontmatter として読む(body は空)。生成物は
+    cmd_add が必ず閉じるので、これは手書きされた壊れたファイルの扱いである。
+    """
+    meta = {}
+    lines = path.read_text(encoding="utf-8").splitlines()
+    index = 0
+    if lines and lines[0].strip() == "---":
+        index = 1
+        while index < len(lines) and lines[index].strip() != "---":
+            if ":" in lines[index]:
+                k, v = lines[index].split(":", 1)
+                meta[k.strip()] = v.strip()
+            index += 1
+        index += 1  # 閉じの --- を飛ばす(無ければ末尾を越えるだけ)
+    meta["body"] = "\n".join(lines[index:]).strip()
     meta["path"] = path
     return meta
 
@@ -803,12 +839,22 @@ def resolve_report_since(args) -> str:
     if args.last:
         if not LAST_RETRO.exists():
             sys.exit("ERROR: .feedback/.last-retro がありません。--since <日付> を指定するか、初回は --mark で基点を作ってください")
-        return LAST_RETRO.read_text(encoding="utf-8").strip()
+        raw = LAST_RETRO.read_text(encoding="utf-8").strip()
+        # 基点が空・不正でも traceback にしない。audit_status_lines /
+        # retro_status_lines は同じ状況を握って表示を続けるのに、ここだけ
+        # ValueError で落ちていた(空ファイルを touch した利用者が踏む)。
+        try:
+            return datetime.date.fromisoformat(raw).isoformat()
+        except ValueError:
+            sys.exit(
+                f"ERROR: .feedback/.last-retro の基点が日付として読めません(内容: {raw!r})。\n"
+                "  YYYY-MM-DD へ直すか、削除して `report --since <日付> --mark` で作り直してください。"
+            )
     if not args.since:
         sys.exit("ERROR: --since <日付|yesterday> か --last を指定してください")
     if args.since == "yesterday":
         return (datetime.date.today() - datetime.timedelta(days=1)).isoformat()
-    return args.since
+    return parse_date_arg(args.since, "--since")
 
 
 def cmd_report(args):

@@ -32,6 +32,19 @@ try:
 except Exception:
     print("false")
 ')"
+# Python 3.10+ が解決できない環境では上の判定が空文字になる(harness_python は
+# 127 を返して何も出力しない)。空を「アクティブでない」と読むと、ループ防止
+# そのものが黙って無効化され、Stop → 修正試行 → Stop … が止まらなくなる —
+# check.sh は bash 主体で Python 不在でも動くため、失敗が残っている限り続く。
+# JSON を厳密に解釈できなくても "stop_hook_active": true の有無は読めるので、
+# shell だけで判定し直す。ここでの安全側は「ブロックしない」側である。
+if [[ -z "$ACTIVE" ]]; then
+  if printf '%s' "$INPUT" | grep -Eq '"stop_hook_active"[[:space:]]*:[[:space:]]*true'; then
+    ACTIVE="true"
+  else
+    ACTIVE="false"
+  fi
+fi
 
 # 検査ルートを明示的に渡す。省略するとカレントディレクトリが検査対象になり、
 # サブディレクトリ起動やCI流用時に沈黙して誤ったツリーを検査する。
@@ -51,7 +64,14 @@ if ! harness_tree_changed "$ROOT" "$STAMP"; then
   exit 0
 fi
 
-if OUT="$("$DIR/../check.sh" "$ROOT" 2>&1)"; then
+# フック側の上限(hooks.json の Stop timeout 300秒)に当たると、プロセスごと
+# 落とされて失敗内容もタイムアウトの事実もエージェントへ渡らず、スタンプも
+# 進まないため次のターンで同じ検査がまた走る。ステージ単位でそれより先に
+# 打ち切り、「どのステージが終わらなかったか」を返せるようにする。
+# config の check.stage_timeout_seconds を書いていれば、そちらが優先される。
+STAGE_TIMEOUT_DEFAULT=240
+
+if OUT="$("$DIR/../check.sh" "$ROOT" "--stage-timeout=$STAGE_TIMEOUT_DEFAULT" 2>&1)"; then
   # 成功した時だけスタンプを更新する。失敗を記録すると、直さないまま次の
   # ターンで「変更なし」と判定され、壊れたまま完了できてしまう
   mkdir -p "$(dirname "$STAMP")" 2>/dev/null && : > "$STAMP" 2>/dev/null

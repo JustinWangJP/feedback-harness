@@ -50,7 +50,7 @@ OUT="$(PATH="$FAKEBIN:$PATH" bash "$AUDIT" "$P2" 2>&1)"; RC=$?
 assert_eq "0" "$RC" "脆弱性なしで exit 0"
 assert_contains "$OUT" "PASS  python: pip-audit" "PASSとして記録される"
 assert_file_exists "$P2/.feedback/.last-audit" "成功時にスタンプが作られる"
-TODAY="$(python3 -c 'import datetime; print(datetime.date.today().isoformat())')"
+TODAY="$(tpy -c 'import datetime; print(datetime.date.today().isoformat())')"
 assert_contains "$(cat "$P2/.feedback/.last-audit")" "$TODAY" "スタンプはISO日付1行"
 # fake を使い捨てる(次セクションは「ツール不在」を検証するため、
 # P2 で作った fake が残っていると不在が再現できない — test_check_p2.sh と同じ作法)

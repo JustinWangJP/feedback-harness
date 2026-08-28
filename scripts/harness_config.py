@@ -306,6 +306,11 @@ SECTIONS = {
         "warn_on": ("stages", [], None),
         "exclude": ("strlist", [], None),
         "log_tail_lines": ("int", 40, None),
+        # 1ステージの上限秒。0 = ハーネスに任せる(CLI/CI からの実行は無制限、
+        # Stop フックからの実行だけがフック制限より短い既定で打ち切る)。
+        # 明示した値はすべての実行経路に効く。上限 3600 はフック制限より
+        # 十分長く、実質「打ち切らない」を表現するための余地でもある
+        "stage_timeout_seconds": ("int", 0, (0, 3600)),
     },
     "audit": {
         "interval_days": ("int", 7, None),
@@ -551,17 +556,50 @@ def resolve(layers, env):
                     values[f"{section}.{key}"] = (body[key], f"{tag}{section}.{key}")
 
     # 環境変数(最優先)
+    #
+    # config と同じ規則で検証する。検証しないと壊れ方が2種類に分かれる:
+    # 打ち間違えたステージ名(FEEDBACK_CHECK_SKIP=tests)は沈黙して無視され
+    # 「切ったつもりで動き続ける」、列挙外の値(FEEDBACK_SHELLCHECK_SEVERITY=bogus)
+    # はそのままツールへ渡り、環境変数の誤りが利用者のコードの失敗として報告される。
+    # どちらも config 側では行番号付きで落としているものであり、入口が違うだけで
+    # 扱いを変える理由がない。
+    env_errors = []
     raw = env.get(ENV_STAGE_SKIP, "").strip()
     if raw:
         for stage in raw.split():
+            if stage not in STAGES:
+                env_errors.append(
+                    f"環境変数 {ENV_STAGE_SKIP}: {stage!r} は未知のステージです。"
+                    f"使えるのは {' / '.join(STAGES)}"
+                )
+                continue
             for cid, (_stack, cstage) in CHECKS.items():
                 if cstage == stage:
                     severity[cid] = ("skip", f"env.{ENV_STAGE_SKIP}")
     for var, (cid, key) in ENV_PARAM_OVERRIDES.items():
-        if env.get(var):
-            values[f"checks.{cid}.{key}"] = (env[var], f"env.{var}")
+        raw_value = env.get(var)
+        if not raw_value:
+            continue
+        kind, _default, allowed = CHECK_PARAMS[cid][key]
+        value = raw_value
+        if kind == "int":
+            # 環境変数は常に文字列で届く。config 経由の値と同じ型にしてから
+            # 検証しないと、範囲チェックが型エラーとして出て原因が読めない
+            try:
+                value = int(raw_value)
+            except ValueError:
+                env_errors.append(
+                    f"環境変数 {var} は整数で指定してください(実際: {raw_value!r})"
+                )
+                continue
+        try:
+            _check_type(kind, value, allowed, var, "環境変数")
+        except ConfigError as exc:
+            env_errors.append(str(exc))
+            continue
+        values[f"checks.{cid}.{key}"] = (value, f"env.{var}")
 
-    return {"severity": severity, "values": values}
+    return {"severity": severity, "values": values, "env_errors": env_errors}
 
 
 def effective(root, env):
@@ -581,8 +619,9 @@ def effective(root, env):
     out = resolve(layers, env)
 
     # どちらの層が壊れていても FAIL は立てる。両方壊れていれば両方見せる —
-    # 片方だけ直して「まだ落ちる」となる往復を避けるため
-    errors = [e for e in (error, local_error) if e]
+    # 片方だけ直して「まだ落ちる」となる往復を避けるため。環境変数の誤りも
+    # 同じ経路へ載せる(出所が違うだけで、利用者にとっては同じ「設定の誤り」)
+    errors = [e for e in (error, local_error, *out.pop("env_errors", [])) if e]
     out["error"] = "\n".join(errors) if errors else None
     return out
 
@@ -617,6 +656,7 @@ def _cmd_shell(root, env):
     # 空白区切りだと "vendor dir/**" が2件に割れる
     emit("HARNESS_EXCLUDE", "\n".join(eff["values"]["check.exclude"][0]))
     emit("HARNESS_LOG_TAIL_LINES", eff["values"]["check.log_tail_lines"][0])
+    emit("HARNESS_STAGE_TIMEOUT_SECONDS", eff["values"]["check.stage_timeout_seconds"][0])
     emit("HARNESS_SHELLCHECK_MIN_SEVERITY", eff["values"]["checks.shellcheck.min_severity"][0])
     emit("HARNESS_VULTURE_MIN_CONFIDENCE", eff["values"]["checks.vulture.min_confidence"][0])
     emit("HARNESS_OASDIFF_BASE", eff["values"]["checks.oasdiff.base"][0])

@@ -39,7 +39,7 @@ harness_load_config
 # check_file.sh は編集直後の必須ゲートのため、ここでも表示して非0にする
 # (壊れた設定を書いたまま気づかず作業を続けさせない)。
 if [[ -n "${HARNESS_CONFIG_ERROR:-}" ]]; then
-  echo "check_file: .feedback/config.yaml の設定エラーです:"
+  echo "check_file: 設定エラーです:"
   echo "$HARNESS_CONFIG_ERROR"
   exit 1
 fi
