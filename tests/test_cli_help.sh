@@ -19,8 +19,8 @@ CLIS=(
   "bash $REPO/scripts/feedback.sh"
   "bash $REPO/scripts/audit.sh"
   "bash $REPO/scripts/init.sh"
-  "python3 $REPO/scripts/harness_config.py"
-  "python3 $REPO/scripts/feedback_log.py"
+  "tpy $REPO/scripts/harness_config.py"
+  "tpy $REPO/scripts/feedback_log.py"
 )
 
 for cli in "${CLIS[@]}"; do

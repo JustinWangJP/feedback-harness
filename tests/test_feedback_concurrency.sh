@@ -15,7 +15,7 @@ git -C "$PROJECT" init -q
 # 同一秒・同一summaryでも全entryが残らなければ、ID採番とcreateが競合している。
 PIDS=()
 for n in $(seq 1 50); do
-  CLAUDE_PROJECT_DIR="$PROJECT" python3 "$CLI" add \
+  CLAUDE_PROJECT_DIR="$PROJECT" tpy "$CLI" add \
     --category testing --summary "parallel-entry" --detail "probe-$n" --source agent \
     >/dev/null 2>&1 &
   PIDS+=("$!")
@@ -39,7 +39,7 @@ mkdir -p "$PROMOTE_PROJECT"
 git -C "$PROMOTE_PROJECT" init -q
 IDS=()
 for n in $(seq 1 8); do
-  OUT="$(CLAUDE_PROJECT_DIR="$PROMOTE_PROJECT" python3 "$CLI" add \
+  OUT="$(CLAUDE_PROJECT_DIR="$PROMOTE_PROJECT" tpy "$CLI" add \
     --category architecture --summary "rule-$n" --detail "detail-$n" --source human)"
   IDS+=("$(printf '%s' "$OUT" | sed -n 's/.*(id=\([^)]*\)).*/\1/p')")
 done
@@ -47,7 +47,7 @@ done
 PIDS=()
 for n in $(seq 1 8); do
   id="${IDS[$((n - 1))]}"
-  CLAUDE_PROJECT_DIR="$PROMOTE_PROJECT" python3 "$CLI" promote "$id" --rule "parallel rule $n" \
+  CLAUDE_PROJECT_DIR="$PROMOTE_PROJECT" tpy "$CLI" promote "$id" --rule "parallel rule $n" \
     >/dev/null 2>&1 &
   PIDS+=("$!")
 done
@@ -64,7 +64,7 @@ RULE_BREAK_COUNT="$(grep -c '^- \*\*\[.*<br>$' "$PROMOTE_PROJECT/.feedback/rules
 assert_eq "8" "$RULE_BREAK_COUNT" "promoteが行末空白ではなく明示的なMarkdown改行を生成する"
 
 # 2ファイルtransactionの1件目直後に例外を起こし、journalからroll-forwardする。
-python3 - "$REPO/scripts" "$WORK/recovery" <<'PY'
+tpy - "$REPO/scripts" "$WORK/recovery" <<'PY'
 import json
 import sys
 import subprocess
@@ -155,7 +155,7 @@ assert_eq "0" "$?" "中断transaction回復とlock timeout診断が機能する"
 
 # rotationと並列appendを同じlockで直列化する。大きな旧ログを最初のwriterが
 # 切り詰めた後も、同時に来た20イベントをlost updateせず全て保持する。
-python3 - "$REPO/scripts" "$WORK/events" <<'PY'
+tpy - "$REPO/scripts" "$WORK/events" <<'PY'
 import json
 import subprocess
 import sys

@@ -16,7 +16,7 @@ WORK="$(cd "$WORK" && pwd)"
 mkdir -p "$WORK/project/.feedback/log"
 export CLAUDE_PROJECT_DIR="$WORK/project"
 
-fb() { python3 "$CLI" "$@"; }
+fb() { tpy "$CLI" "$@"; }
 
 # --- events フィクスチャ(数値既知。末尾に不正JSON行を混ぜる) ---
 # post_edit: a.py は初回fail→pass、b.py は初回pass、c.py は fail,fail,pass

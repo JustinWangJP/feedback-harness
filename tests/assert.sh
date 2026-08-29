@@ -39,14 +39,12 @@ else
 fi
 export TEST_PYTHON
 
-# tpy <args...> — 比較に使う Python 出力を得るための起動口。
+# tpy <args...> — 通常のテストが Python を起動するための共通入口。
 #
-# 素の python3 を $( ) で捕まえると、Windows では出力の CR がそのまま残り
-# 「表示は同じなのに一致しない」失敗になる。ハーネス本体は harness_python が
-# 境界で一度だけ正規化するが、テストはその境界を通らないため、ここに同じ役割の
-# 入口を1つ用意する(経路ごとに tr を書き足すと、足し忘れた経路だけが壊れる)。
-# 素の python3 での捕捉が再び増えないことは tests/test_python_boundary.sh が
-# 走査で禁止する。終了コードは Python のものを返す。
+# 素の interpreter は、直接捕捉・関数経由・前置代入のどの形でも Windows では
+# CR を残しうる。ハーネス本体の harness_python と同じ役割の入口を1つに集約し、
+# 通常の test_*.sh に素の python/python3/$TEST_PYTHON が再び増えないことを
+# tests/test_python_boundary.sh が走査で禁止する。終了コードは Python のものを返す。
 tpy() {
   local args=() arg status
   for arg in "$@"; do

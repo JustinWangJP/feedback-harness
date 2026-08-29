@@ -10,7 +10,7 @@ REPO="$(cd "$HERE/.." && pwd)"
 
 # 1: JSON として妥当
 for f in .claude-plugin/plugin.json .codex-plugin/plugin.json .claude-plugin/marketplace.json hooks/hooks.json; do
-  if python3 -c "import json,sys; json.load(open(sys.argv[1]))" "$REPO/$f" 2>/dev/null; then
+  if tpy -c "import json,sys; json.load(open(sys.argv[1]))" "$REPO/$f" 2>/dev/null; then
     :
   else
     fail "$f が妥当な JSON でない"
@@ -31,9 +31,9 @@ assert_eq \
   "$(tpy -c "import json,sys;print(json.load(open(sys.argv[1]))['version'])" "$REPO/.claude-plugin/plugin.json")" \
   "$(tpy -c "import json,sys;print(json.load(open(sys.argv[1]))['version'])" "$REPO/.codex-plugin/plugin.json")" \
   "Claude / Codex のプラグインバージョンが一致する"
-assert_eq "0.1.10" \
+assert_eq "0.1.11" \
   "$(tpy -c "import json,sys;print(json.load(open(sys.argv[1]))['version'])" "$REPO/.claude-plugin/plugin.json")" \
-  "公開プラグインバージョンが0.1.10である"
+  "公開プラグインバージョンが0.1.11である"
 
 CODEX_MANIFEST_ERROR="$(tpy - "$REPO/.codex-plugin/plugin.json" <<'PY'
 import json
