@@ -1,7 +1,7 @@
 {
   "name": "feedback-harness",
   "displayName": "Feedback Harness",
-  "version": "0.1.10",
+  "version": "0.2.0",
   "description": "lint・型・テスト・ビルドに加え、設定構文・秘密情報・依存整合性・カバレッジ・API契約まで自動検査してエージェントに差し戻し、人間のレビュー指摘を蓄積してルール化するハーネス。ツールは検出できたものだけを使い、勝手に導入しない",
   "author": {
     "name": "JustinWangJP",
