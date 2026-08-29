@@ -81,16 +81,56 @@ assert_eq "3" "$?" "正規化経路でも Python の終了ステータスを保�
 MSYSTEM=MINGW64 bash -c '. "$1"; harness_python -c "pass"' _ "$LIB" >/dev/null 2>&1
 assert_eq "0" "$?" "正規化経路でも成功時は 0 を返す"
 
-# テスト側の捕捉も同じ契約に乗せる。ハーネス本体は harness_python が境界で
-# 正規化するが、テストが素の python3 を $( ) で捕まえるとその境界を通らず、
-# Windows では期待値だけに CR が混ざって「表示は同じなのに一致しない」失敗になる。
-# 走査で禁止する — 21箇所を移行したあと、次に足される1箇所を止められるのは
-# 一覧ではなく走査だけである(比較に使わない直接実行は対象外)。
-# パターンは分割して組み立てる。走査対象にこのファイル自身が含まれるため、
-# 探している並びをそのまま書くと自分の1行に当たって常に落ちる
-PY_CAPTURE_PATTERN='\$\(python'"3 "
-CAPTURES="$(grep -rnE "$PY_CAPTURE_PATTERN" "$REPO"/tests/*.sh || true)"
-assert_eq "" "$CAPTURES" "テストは Python 出力の捕捉に tpy を使う(素の python3 は CR が残る)"
+# テスト側の Python 起動も同じ契約に乗せる。ハーネス本体は harness_python が
+# 境界で正規化するが、テストが素の interpreter を使うと、前置代入つきの
+# command substitution や fb/parse 等の関数を介した捕捉だけに CR が残る。
+# 「捕捉か」を shell の字面から推測すると関数経由を見落とすため、通常の
+# test_*.sh は Python 起動をすべて tpy に通す、という検査可能な契約にする。
+#
+# このファイルは未正規化出力との対照を作り、test_windows_git_bash.sh は
+# python3 不在時の解決を模すため、低レベル検証の2ファイルだけを対象外にする。
+raw_test_python() { # raw_test_python <tests-dir>
+  local root="$1" file base
+  for file in "$root"/test_*.sh; do
+    [[ -f "$file" ]] || continue
+    base="$(basename "$file")"
+    case "$base" in
+      test_python_boundary.sh|test_windows_git_bash.sh) continue ;;
+    esac
+    awk '
+      /^[[:space:]]*#/ { next }
+      /(^|[^[:alnum:]_])python3([^[:alnum:]_]|$)/ ||
+      /[$]TEST_PYTHON|[$][{]TEST_PYTHON[}]/ ||
+      /(^|[$][(]|[;&|{])[[:space:]]*([[:alnum:]_]+=[^[:space:]]+[[:space:]]+)*python([[:space:]]|$)/ {
+        print FNR ":" $0
+      }
+    ' "$file" | sed "s#^#$base:#"
+  done
+  return 0
+}
+
+RAW_PYTHON="$(raw_test_python "$REPO/tests")"
+assert_eq "" "$RAW_PYTHON" "通常のテストは Python 起動をすべて tpy に通す"
+
+# 護欄自身の変異テスト。旧パターンは前置代入・関数経由に加えて、解決済みの
+# TEST_PYTHON を直接呼ぶ抜け道も見逃していた。実リポジトリが偶然きれいなだけでは
+# 保証にならないため、欠陥を再注入した fixture を検出できることまで固定する。
+GUARD_FIXTURE="$WORK/python-capture-guard"
+mkdir -p "$GUARD_FIXTURE"
+cat > "$GUARD_FIXTURE/test_direct.sh" <<'SH'
+OUT="$(CLAUDE_PROJECT_DIR=/tmp/isolated python3 tool.py stats)"
+SH
+cat > "$GUARD_FIXTURE/test_helper.sh" <<'SH'
+fb() { python3 tool.py "$@"; }
+OUT="$(fb list)"
+SH
+cat > "$GUARD_FIXTURE/test_resolved.sh" <<'SH'
+OUT="$("$TEST_PYTHON" tool.py stats)"
+SH
+MUTATIONS="$(raw_test_python "$GUARD_FIXTURE")"
+assert_contains "$MUTATIONS" "test_direct.sh:1" "前置代入つきの直接捕捉を検出する"
+assert_contains "$MUTATIONS" "test_helper.sh:1" "関数経由の Python 起動を検出する"
+assert_contains "$MUTATIONS" "test_resolved.sh:1" "解決済み interpreter の直接起動を検出する"
 
 # 契約が「境界で一度だけ」であること。フック側が自前で CR を落とし始めると
 # 「どこで落ちているのか」が経路ごとに分かれ、抜けが生まれる。

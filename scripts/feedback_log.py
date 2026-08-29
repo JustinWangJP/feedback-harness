@@ -209,7 +209,14 @@ def resolve_since(args) -> str:
     days = getattr(args, "days", 30)
     if days < 0:
         sys.exit(f"ERROR: --days は0以上で指定してください(実際: {days})")
-    return (datetime.date.today() - datetime.timedelta(days=days)).isoformat()
+    today = datetime.date.today()
+    max_days = today.toordinal() - datetime.date.min.toordinal()
+    if days > max_days:
+        sys.exit(
+            f"ERROR: --days に指定できる最大は {max_days} です"
+            f"(実際: {days}。開始日は {datetime.date.min.isoformat()} より前にできません)"
+        )
+    return (today - datetime.timedelta(days=days)).isoformat()
 
 
 def staleness_cutoff() -> str:
@@ -951,12 +958,18 @@ def cmd_report(args):
         else:
             line = f"PostToolUse 初回通過率: 当期間 {cur[0]}/{cur[1]}"
             # 前期間は「今回と同じ長さだけ遡った区間」。傾向の向きだけを見るための粗い比較
-            span = abs((datetime.date.fromisoformat(since) - datetime.date.today()).days) or 1
-            prev_to = (datetime.date.fromisoformat(since) - datetime.timedelta(days=1)).isoformat()
-            prev_from = (datetime.date.fromisoformat(since) - datetime.timedelta(days=span)).isoformat()
-            prev = post_edit_first_pass(evs, prev_from, prev_to)
-            if prev[1]:
-                line += f"(前期間 {prev[0]}/{prev[1]})"
+            since_date = datetime.date.fromisoformat(since)
+            available_days = since_date.toordinal() - datetime.date.min.toordinal()
+            if available_days > 0:
+                span = abs((since_date - datetime.date.today()).days) or 1
+                # date.min より前は表現できない。比較可能な履歴が指定期間より
+                # 短いときは、存在する範囲だけを前期間として使う。
+                prev_span = min(span, available_days)
+                prev_to = (since_date - datetime.timedelta(days=1)).isoformat()
+                prev_from = (since_date - datetime.timedelta(days=prev_span)).isoformat()
+                prev = post_edit_first_pass(evs, prev_from, prev_to)
+                if prev[1]:
+                    line += f"(前期間 {prev[0]}/{prev[1]})"
             print(line)
 
     if args.mark:

@@ -15,7 +15,7 @@ trap 'rm -rf "$WORK"' EXIT
 WORK="$(cd "$WORK" && pwd)"
 
 # parse <YAML本文> — パーサだけを叩き、結果を JSON で返す(非0なら stderr が出る)
-parse() { printf '%s' "$1" > "$WORK/t.yaml"; python3 -c '
+parse() { printf '%s' "$1" > "$WORK/t.yaml"; tpy -c '
 import json, sys
 sys.path.insert(0, sys.argv[1])
 import harness_config as hc
@@ -57,7 +57,7 @@ OUT="$(parse 'a: |
   multi')"
 assert_contains "$OUT" "複数行文字列" "複数行文字列を拒否する"
 
-OUT="$(printf 'a:\n\tb: 1' > "$WORK/t.yaml"; python3 -c '
+OUT="$(printf 'a:\n\tb: 1' > "$WORK/t.yaml"; tpy -c '
 import sys; sys.path.insert(0, sys.argv[1]); import harness_config as hc
 hc.parse_yaml(open(sys.argv[2]).read(), sys.argv[2])' "$REPO/scripts" "$WORK/t.yaml" 2>&1)"
 assert_contains "$OUT" "タブ" "タブインデントを拒否する"
@@ -85,7 +85,7 @@ assert_eq '{"a": "main"}' "$(parse 'a: "main"')" "正しく閉じたクォート
 
 # --- スキーマ検証 ---
 # 検証は parse の後段。打ち間違いを黙って無視しない契約を固定する
-val() { printf '%s' "$1" > "$WORK/v.yaml"; python3 -c '
+val() { printf '%s' "$1" > "$WORK/v.yaml"; tpy -c '
 import json, sys
 sys.path.insert(0, sys.argv[1])
 import harness_config as hc
@@ -151,9 +151,15 @@ assert_contains "$(tpy "$CFG" --keys)" "ruff-format" "--keys がハイフン付�
 # 実効値は --json で確認する。出所(どの層で決まったか)も一緒に返る
 mkdir -p "$WORK/proj/.feedback"
 resolve_json() { # resolve_json [環境変数の代入...]
-  env "$@" "$TEST_PYTHON" "$(native_path "$CFG")" --json "$(native_path "$WORK/proj")"
+  local assignment
+  (
+    for assignment in "$@"; do
+      export "${assignment?}"
+    done
+    tpy "$CFG" --json "$WORK/proj"
+  )
 }
-get() { python3 -c 'import json,sys; d=json.load(sys.stdin); print(json.dumps(d, sort_keys=True, ensure_ascii=False))'; }
+get() { tpy -c 'import json,sys; d=json.load(sys.stdin); print(json.dumps(d, sort_keys=True, ensure_ascii=False))'; }
 
 # config 不在 → 全て既定値
 OUT="$(resolve_json | get)"
@@ -278,11 +284,11 @@ FB="$REPO/scripts/feedback_log.py"
 mkdir -p "$WORK/proj/.feedback/log"
 printf '2026-01-01\n' > "$WORK/proj/.feedback/.last-audit"
 
-OUT="$(CLAUDE_PROJECT_DIR="$WORK/proj" python3 "$FB" stats)"
+OUT="$(CLAUDE_PROJECT_DIR="$WORK/proj" tpy "$FB" stats)"
 assert_contains "$OUT" "監査を推奨" "既定(7日)では推奨が出る"
 
 printf 'audit:\n  interval_days: 99999\n' > "$WORK/proj/.feedback/config.yaml"
-OUT="$(CLAUDE_PROJECT_DIR="$WORK/proj" python3 "$FB" stats)"
+OUT="$(CLAUDE_PROJECT_DIR="$WORK/proj" tpy "$FB" stats)"
 assert_not_contains "$OUT" "監査を推奨" "config で間隔を延ばすと推奨が消える"
 rm -f "$WORK/proj/.feedback/config.yaml" "$WORK/proj/.feedback/.last-audit"
 
@@ -292,7 +298,7 @@ for i in 1 2; do
     > "$WORK/proj/.feedback/log/e$i.md"
 done
 printf 'feedback:\n  open_threshold: 2\n' > "$WORK/proj/.feedback/config.yaml"
-OUT="$(CLAUDE_PROJECT_DIR="$WORK/proj" python3 "$FB" stats)"
+OUT="$(CLAUDE_PROJECT_DIR="$WORK/proj" tpy "$FB" stats)"
 assert_contains "$OUT" "openが2件以上" "open_threshold=2 で open 2件の NOTE が出る"
 rm -f "$WORK/proj/.feedback/log/e1.md" "$WORK/proj/.feedback/log/e2.md" "$WORK/proj/.feedback/config.yaml"
 
@@ -317,7 +323,7 @@ while IFS=$'\t' read -r kind name _ _; do
   case "$kind" in
     key|param) grep -q "${name##*.}" "$EXAMPLE" || MISSING="$MISSING $name(雛形)" ;;
   esac
-done < <(python3 "$CFG" --keys)
+done < <(tpy "$CFG" --keys)
 assert_eq "" "$MISSING" "全設定キーが雛形に載っている"
 
 for GUIDE in "${GUIDES[@]}"; do
@@ -325,7 +331,7 @@ for GUIDE in "${GUIDES[@]}"; do
   while IFS=$'\t' read -r kind name _ _; do
     [[ "$kind" == "check" ]] || continue
     grep -q "\`$name\`" "$GUIDE" || MISSING="$MISSING $name"
-  done < <(python3 "$CFG" --keys)
+  done < <(tpy "$CFG" --keys)
   assert_eq "" "$MISSING" "全検査IDが設定ガイドに載っている: $(basename "$GUIDE")"
 done
 
@@ -387,10 +393,10 @@ LP="$WORK/localproj"
 mkdir -p "$LP/.feedback/local"
 
 eff() { # eff <root> — 実効設定を JSON で返す
-  python3 "$CFG" --json "$1"
+  tpy "$CFG" --json "$1"
 }
 src_of() { # src_of <JSON> <検査ID> — その検査の判定と出所を "sev|src" で返す
-  python3 -c '
+  tpy -c '
 import json, sys
 d = json.loads(sys.stdin.read())
 sev, src = d["severity"].get(sys.argv[1], ("(なし)", "(なし)"))
@@ -419,7 +425,7 @@ assert_eq "skip|checks.shellcheck" "$(eff "$LP" | src_of - shellcheck)" \
 
 # 壊れた個人設定も FAIL として見えること(黙って無視しない)
 printf 'checks:\n  ruff:\n    severity: nonsense\n' > "$LP/.feedback/local/config.yaml"
-ERR="$(eff "$LP" | python3 -c 'import json,sys; print(json.loads(sys.stdin.read())["error"] or "")')"
+ERR="$(eff "$LP" | tpy -c 'import json,sys; print(json.loads(sys.stdin.read())["error"] or "")')"
 assert_contains "$ERR" "local" "壊れた個人設定はどのファイルか分かる形でエラーになる"
 
 assert_summary

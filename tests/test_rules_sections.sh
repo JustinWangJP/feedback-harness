@@ -18,7 +18,7 @@ mkdir -p "$WORK/project"
 ( cd "$WORK/project" && git init -q . )
 export CLAUDE_PROJECT_DIR="$WORK/project"
 
-fb() { python3 "$CLI" "$@"; }
+fb() { tpy "$CLI" "$@"; }
 extract_id() { sed -n 's/.*(id=\(.*\))$/\1/p'; }
 line_of() { grep -n -F "$1" "$WORK/project/.feedback/rules.md" | head -1 | cut -d: -f1; }
 lt() { [[ "$1" -lt "$2" ]] && echo 1 || echo 0; }

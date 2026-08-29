@@ -31,7 +31,7 @@ mkdir -p "$WORK/project"
 ( cd "$WORK/project" && git init -q . )
 
 OUT="$(cd "$WORK/project" && CLAUDE_PROJECT_DIR="$WORK/project" \
-  python3 "$WORK/cache/scripts/feedback_log.py" add \
+  tpy "$WORK/cache/scripts/feedback_log.py" add \
     --category workflow --summary "テスト用の指摘" --source human 2>&1)"
 
 assert_contains "$OUT" "recorded:" "add が成功する"
@@ -48,7 +48,7 @@ if [[ -z "$ENTRY_ID" ]]; then
   fail "add の出力から id を取り出せない: [$OUT]"
 else
   ( cd "$WORK/project" && CLAUDE_PROJECT_DIR="$WORK/project" \
-    python3 "$WORK/cache/scripts/feedback_log.py" promote "$ENTRY_ID" \
+    tpy "$WORK/cache/scripts/feedback_log.py" promote "$ENTRY_ID" \
       --rule "テスト用のルール" >/dev/null 2>&1 )
   assert_contains "$(cat "$WORK/project/.feedback/rules.md" 2>/dev/null)" \
     "$BUNDLED_MARKER" "バンドルのテンプレートでシードされる"
@@ -58,7 +58,7 @@ fi
 # CLAUDE_PROJECT_DIR が無くても git のトップレベルへ書く
 mkdir -p "$WORK/project/sub"
 OUT3="$(cd "$WORK/project/sub" && unset CLAUDE_PROJECT_DIR; \
-  python3 "$WORK/cache/scripts/feedback_log.py" add \
+  tpy "$WORK/cache/scripts/feedback_log.py" add \
     --category workflow --summary "サブディレクトリからの指摘" --source human 2>&1)"
 assert_contains "$OUT3" "recorded:" "サブディレクトリからでも add できる"
 assert_file_absent "$WORK/project/sub/.feedback" "サブディレクトリ直下には作らない"

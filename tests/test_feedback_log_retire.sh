@@ -17,7 +17,7 @@ mkdir -p "$WORK/project"
 ( cd "$WORK/project" && git init -q . )
 export CLAUDE_PROJECT_DIR="$WORK/project"
 
-fb() { python3 "$CLI" "$@"; }
+fb() { tpy "$CLI" "$@"; }
 extract_id() { sed -n 's/.*(id=\(.*\))$/\1/p'; }
 
 # ルールA(出典2件: merge で統合)とルールB(隣接ルール、巻き添え検出用)を用意する

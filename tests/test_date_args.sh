@@ -45,6 +45,11 @@ done
 run stats --days -1; RC=$?
 assert_eq "1" "$RC" "--days に負値を渡すとエラーになる: $OUT"
 
+run stats --days 1000000000; RC=$?
+assert_eq "1" "$RC" "--days が日付の表現範囲を越えるとエラーになる: $OUT"
+assert_contains "$OUT" "指定できる最大" "--days の上限と直し方を案内する"
+assert_not_contains "$OUT" "Traceback" "巨大な --days でも traceback を出さない"
+
 # 空文字は「指定なし」として扱う(stats は --days の既定へ、report は --last との
 # 指定漏れとして案内する)。どちらも黙って誤った期間を切らないことが要件
 run stats --since ""; RC=$?
@@ -61,6 +66,15 @@ assert_contains "$OUT" "2026-08-01 以降" "指定した開始日が見出しに
 run report --since 2026-08-01; RC=$?
 assert_eq "0" "$RC" "report の正しい --since は通る: $OUT"
 assert_contains "$OUT" "集計対象の指摘" "期間内の新規エントリが載る"
+
+# ISO日付として妥当な最小値でも、前期間をさらに過去へ引いて traceback にしない。
+# 「数字」の前期間計算へ入るよう、本番 writer で post_edit イベントを1件作る。
+bash -c '. "$1"; harness_log_event "$2" post_edit pass x.py' \
+  _ "$REPO/scripts/lib.sh" "$CLAUDE_PROJECT_DIR"
+run report --since 0001-01-01; RC=$?
+assert_eq "0" "$RC" "最小日付からの report も通る: $OUT"
+assert_not_contains "$OUT" "Traceback" "最小日付の前期間計算で traceback を出さない"
+assert_contains "$OUT" "PostToolUse 初回通過率" "最小日付でも当期間の数字は表示する"
 
 run report --since yesterday; RC=$?
 assert_eq "0" "$RC" "yesterday は従来どおり使える: $OUT"

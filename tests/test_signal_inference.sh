@@ -17,7 +17,7 @@ mkdir -p "$WORK/project"
 ( cd "$WORK/project" && git init -q . )
 export CLAUDE_PROJECT_DIR="$WORK/project"
 
-fb() { python3 "$CLI" "$@"; }
+fb() { tpy "$CLI" "$@"; }
 extract_id() { sed -n 's/.*(id=\(.*\))$/\1/p'; }
 entry_signal() { # entry_signal <id> — frontmatter の signal(無ければ unknown)
   local f

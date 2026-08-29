@@ -83,7 +83,7 @@ BEFORE_C="$(grep -c 'ハーネス: フィードバックループ' "$WORK/target
 BEFORE_A="$(grep -c 'フィードバックハーネス' "$WORK/target/AGENTS.md")"
 printf '\n## USER CLAUDE CONTENT\nkeep me\n' >> "$WORK/target/CLAUDE.md"
 printf '\n## USER AGENTS CONTENT\nkeep me\n' >> "$WORK/target/AGENTS.md"
-python3 - "$WORK/target/CLAUDE.md" "$WORK/target/AGENTS.md" <<'PY'
+tpy - "$WORK/target/CLAUDE.md" "$WORK/target/AGENTS.md" <<'PY'
 import sys
 from pathlib import Path
 

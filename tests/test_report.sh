@@ -14,7 +14,7 @@ mkdir -p "$WORK/project/.feedback/log" "$WORK/project2"
 ( cd "$WORK/project" && git init -q . ) >/dev/null 2>&1
 export CLAUDE_PROJECT_DIR="$WORK/project"
 
-fb() { python3 "$CLI" "$@"; }
+fb() { tpy "$CLI" "$@"; }
 extract_id() { sed -n 's/.*(id=\(.*\))$/\1/p'; }
 
 # --- フィクスチャ(期日固定のため log/rules は手書き) ---
@@ -119,14 +119,14 @@ YESTERDAY="$(tpy -c 'import datetime; print((datetime.date.today()-datetime.time
 assert_contains "$(fb report --since yesterday)" "$YESTERDAY 以降" "--since yesterday が解決される"
 
 # --- スタンプが無い状態での --last は明示的エラー ---
-ERR="$(cd "$WORK/project2" && CLAUDE_PROJECT_DIR="$WORK/project2" python3 "$CLI" report --last 2>&1 || true)"
+ERR="$(cd "$WORK/project2" && CLAUDE_PROJECT_DIR="$WORK/project2" tpy "$CLI" report --last 2>&1 || true)"
 assert_contains "$ERR" ".last-retro がありません" "スタンプ不在の --last はエラーメッセージを出す"
 
 # --- 数字: 前期間との比較(設計 §5-7)---
 # 前期間は「since から今日までと同じ長さだけ遡った区間」。窓が実行日を基準に
 # 動くため、固定日付のフィクスチャでは検証できない — 日付は今日からの相対で組む。
 # 既存フィクスチャに混ぜると上の期間フィルタの期待値が動くので別プロジェクトで測る
-days_ago() { python3 -c 'import datetime,sys; print((datetime.date.today()-datetime.timedelta(days=int(sys.argv[1]))).isoformat())' "$1"; }
+days_ago() { tpy -c 'import datetime,sys; print((datetime.date.today()-datetime.timedelta(days=int(sys.argv[1]))).isoformat())' "$1"; }
 mkdir -p "$WORK/project3/.feedback"
 SINCE_REL="$(days_ago 4)"   # span=4 → 前期間は [今日-8, 今日-5]
 {
@@ -135,14 +135,14 @@ SINCE_REL="$(days_ago 4)"   # span=4 → 前期間は [今日-8, 今日-5]
   # 前期間([今日-8, 今日-5]): 初回 fail の1ファイル → 0/1
   printf '{"ts":"%sT01:00:00Z","hook":"post_edit","file":"src/prev.py","result":"fail"}\n' "$(days_ago 6)"
 } > "$WORK/project3/.feedback/events.jsonl"
-OUT3="$(CLAUDE_PROJECT_DIR="$WORK/project3" python3 "$CLI" report --since "$SINCE_REL")"
+OUT3="$(CLAUDE_PROJECT_DIR="$WORK/project3" tpy "$CLI" report --since "$SINCE_REL")"
 assert_contains "$OUT3" "PostToolUse 初回通過率: 当期間 1/1" "当期間の初回通過率が出る"
 assert_contains "$OUT3" "(前期間 0/1)" "同じ長さだけ遡った前期間と比較される"
 
 # 前期間にイベントが無ければ比較は付かない(0/0 と書いて誤解させない)
 printf '{"ts":"%sT01:00:00Z","hook":"post_edit","file":"src/cur.py","result":"pass"}\n' "$(days_ago 2)" \
   > "$WORK/project3/.feedback/events.jsonl"
-OUT4="$(CLAUDE_PROJECT_DIR="$WORK/project3" python3 "$CLI" report --since "$SINCE_REL")"
+OUT4="$(CLAUDE_PROJECT_DIR="$WORK/project3" tpy "$CLI" report --since "$SINCE_REL")"
 assert_contains "$OUT4" "当期間 1/1" "当期間だけでも数字は出る"
 assert_not_contains "$OUT4" "前期間" "前期間にデータが無ければ比較を出さない"
 

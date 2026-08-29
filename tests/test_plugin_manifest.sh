@@ -10,7 +10,7 @@ REPO="$(cd "$HERE/.." && pwd)"
 
 # 1: JSON として妥当
 for f in .claude-plugin/plugin.json .codex-plugin/plugin.json .claude-plugin/marketplace.json hooks/hooks.json; do
-  if python3 -c "import json,sys; json.load(open(sys.argv[1]))" "$REPO/$f" 2>/dev/null; then
+  if tpy -c "import json,sys; json.load(open(sys.argv[1]))" "$REPO/$f" 2>/dev/null; then
     :
   else
     fail "$f が妥当な JSON でない"
