@@ -114,6 +114,7 @@ scripts/
   rules.template.md # Template used to initialize or regenerate rules.md
   config.yaml       # Optional project configuration (commit to share; start from config.example.yaml)
   config.example.yaml # Fully commented configuration template
+  local/config.yaml # Machine-local personal settings that override the shared file (not tracked)
   log/              # Recorded feedback as Markdown with metadata frontmatter
   .last-check       # Local Stop-hook check marker based on modification time (not tracked by Git)
   .last-retro       # Start of the retrospective reporting period (updated by report --mark; not tracked)
@@ -124,9 +125,18 @@ scripts/
 package.json        # Declares check tools such as secretlint solely for npx --no-install resolution
 tests/              # Bash tests (make check is detected and run automatically by check.sh)
 docs/
+  README.md         # Documentation index (current specification and historical material)
+  README.ja.md      # Japanese version of the documentation index
+  README.zh-CN.md   # Simplified Chinese version of the documentation index
+  configuration.md  # Configuration guide (every config.yaml setting and troubleshooting)
+  configuration.ja.md    # Japanese version of the configuration guide
+  configuration.zh-CN.md # Simplified Chinese version of the configuration guide
   pointer_claude.md # Guidance inserted into target CLAUDE.md files
   pointer_agents.md # Guidance inserted into target AGENTS.md files
-  superpowers/      # Design specifications (specs/) and implementation plans (plans/)
+  proposals/        # Pre-implementation proposals (historical material)
+  references/       # External sources consulted during design (historical material)
+  superpowers/      # Design specifications (specs/) and implementation plans (plans/) — historical
+review/             # Dated code-review records (historical material)
 .claude/
   settings.json     # Development configuration that enables the plugin in this repository (not distributed)
 ```
@@ -135,7 +145,7 @@ The harness itself is also checked by `check.sh` (which detects its `*.sh` and `
 
 ### Documentation authority
 
-For current usage, see this README, the [configuration guide](docs/configuration.md), and the [script reference](scripts/README.md). Dated files under `docs/proposals/` and `docs/superpowers/` preserve decisions made when proposals and designs were written. If they differ from the current specification, prefer the three documents listed above and the implementation. See the [documentation index](docs/README.md) for the full list.
+For current usage, see this README, the [configuration guide](docs/configuration.md), and the [script reference](scripts/README.md). Dated files under `docs/proposals/`, `docs/superpowers/`, and `review/` preserve decisions made when proposals, designs, and reviews were written. If they differ from the current specification, prefer the three documents listed above and the implementation. See the [documentation index](docs/README.md) for the full list.
 
 For current Codex behavior, see OpenAI's official [plugin usage guide](https://learn.chatgpt.com/docs/plugins), [plugin package specification](https://developers.openai.com/plugins/build/plugins), and [Hooks specification](https://developers.openai.com/codex/hooks). For Claude Code, see Anthropic's official [plugin installation guide](https://code.claude.com/docs/en/discover-plugins).
 
@@ -192,7 +202,7 @@ bash feedback-harness/scripts/init.sh /path/to/your-project
 cd /path/to/your-project && bash scripts/check.sh   # Verify stack detection
 ```
 
-The installer copies `scripts/` and AGENTS.md into the target project. It adds guidance to CLAUDE.md and AGENTS.md inside management markers that identify the section maintained by feedback-harness. Running `init.sh` again replaces only the contents inside those markers and preserves user-authored text outside them. `.feedback/rules.md` starts from an empty template.
+The installer copies the scripts into the target project's `scripts/` directory. It does not copy CLAUDE.md or AGENTS.md; instead it adds guidance to those files inside management markers that identify the section maintained by feedback-harness, creating the files if they do not exist. Running `init.sh` again replaces only the contents inside those markers and preserves user-authored text outside them. `.feedback/rules.md` starts from an empty template.
 
 ### Assets by installation method
 
@@ -307,7 +317,7 @@ Neither agent **modifies shared files automatically**. Changes outside `rules.md
 
 ### Command: `/feedback-harness:init`
 
-When using Codex or another general-purpose agent **alongside** Claude Code, this command copies `scripts/` and AGENTS.md into the current project. It is unnecessary when you use Claude Code alone because the scripts remain in the plugin.
+When using Codex or another general-purpose agent **alongside** Claude Code, this command copies `scripts/` into the current project and adds guidance to CLAUDE.md / AGENTS.md inside management markers. It is unnecessary when you use Claude Code alone because the scripts remain in the plugin.
 
 ```text
 /feedback-harness:init
@@ -393,7 +403,9 @@ bash scripts/check.sh --list-checks           # List check IDs, effective decisi
 bash scripts/check.sh --list-checks --json    # Print the same information as machine-readable JSON
 ```
 
-Precedence is environment variable > individual check > stack > global > default. See the [configuration guide](docs/configuration.md) for syntax and every available setting.
+Configuration comes in two layers. `.feedback/local/config.yaml` (git-ignored, local to this machine) overrides the shared `.feedback/config.yaml`, so you can reflect local circumstances—such as disabling a check for a tool you do not use—without editing the team's settings. Values decided by the personal layer show a source starting with `local.` in `--list-checks`.
+
+Precedence is environment variable > individual check > stack > global > default, and within the same level the personal layer wins over the shared one. See the [configuration guide](docs/configuration.md) for syntax and every available setting.
 
 ## Feedback workflow
 

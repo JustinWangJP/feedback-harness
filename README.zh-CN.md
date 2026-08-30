@@ -114,6 +114,7 @@ scripts/
   rules.template.md # 初始化或重新生成 rules.md 时使用的模板
   config.yaml       # 可选项目配置（提交到 Git 以共享；从 config.example.yaml 开始）
   config.example.yaml # 带完整注释的配置模板
+  local/config.yaml # 仅对本机生效的个人配置（优先于共享配置；不跟踪）
   log/              # 带元数据 frontmatter 的 Markdown 反馈记录
   .last-check       # Stop hook 的本地检查标记，使用修改时间（不由 Git 跟踪）
   .last-retro       # 复盘统计周期的起点（由 report --mark 更新；不跟踪）
@@ -124,9 +125,18 @@ scripts/
 package.json        # 仅用于让 npx --no-install 解析 secretlint 等检查工具
 tests/              # Bash 测试（check.sh 会检测并自动运行 make check）
 docs/
+  README.md         # 文档导航（当前规范与历史资料的索引）
+  README.ja.md      # 文档导航的日文版
+  README.zh-CN.md   # 文档导航的简体中文版
+  configuration.md  # 配置指南（config.yaml 的全部项目与故障排查）
+  configuration.ja.md    # 配置指南的日文版
+  configuration.zh-CN.md # 配置指南的简体中文版
   pointer_claude.md # 写入目标项目 CLAUDE.md 的说明
   pointer_agents.md # 写入目标项目 AGENTS.md 的说明
-  superpowers/      # 设计规范（specs/）和实现计划（plans/）
+  proposals/        # 实现前的提案（历史资料）
+  references/       # 设计时参考的外部资料（历史资料）
+  superpowers/      # 设计规范（specs/）和实现计划（plans/）——历史资料
+review/             # 带日期的代码评审记录（历史资料）
 .claude/
   settings.json     # 在本仓库中启用插件的开发配置（不分发）
 ```
@@ -135,7 +145,7 @@ docs/
 
 ### 文档的权威顺序
 
-有关当前用法，请参阅本 README、[配置指南](docs/configuration.zh-CN.md)和[脚本参考](scripts/README.zh-CN.md)。带日期的 `docs/proposals/` 和 `docs/superpowers/` 文件保留提案或设计编写时的决策。如果这些资料与当前规范不同，请以刚才列出的三份文档和实际实现为准。完整文档列表请参阅[文档导航](docs/README.zh-CN.md)。
+有关当前用法，请参阅本 README、[配置指南](docs/configuration.zh-CN.md)和[脚本参考](scripts/README.zh-CN.md)。带日期的 `docs/proposals/`、`docs/superpowers/` 和 `review/` 文件保留提案、设计或评审当时的决策。如果这些资料与当前规范不同，请以刚才列出的三份文档和实际实现为准。完整文档列表请参阅[文档导航](docs/README.zh-CN.md)。
 
 有关 Codex 当前规范，请参阅 OpenAI 官方的[插件使用指南](https://learn.chatgpt.com/docs/plugins)、[插件包规范](https://developers.openai.com/plugins/build/plugins)和 [Hooks 规范](https://developers.openai.com/codex/hooks)。有关 Claude Code，请参阅 Anthropic 官方的[插件安装指南](https://code.claude.com/docs/en/discover-plugins)。
 
@@ -192,7 +202,7 @@ bash feedback-harness/scripts/init.sh /path/to/your-project
 cd /path/to/your-project && bash scripts/check.sh   # 验证技术栈检测
 ```
 
-安装程序会将 `scripts/` 和 AGENTS.md 复制到目标项目。它会在 CLAUDE.md / AGENTS.md 中加入带有管理标记的说明，用于标识 feedback-harness 管理的范围。再次运行 `init.sh` 时，只替换管理标记内的内容，并保留标记外的用户文本。`.feedback/rules.md` 从空模板开始。
+安装程序会将脚本复制到目标项目的 `scripts/` 目录。它不会复制 CLAUDE.md 或 AGENTS.md，而是在这两个文件中加入带有管理标记的说明（文件不存在时会创建），用于标识 feedback-harness 管理的范围。再次运行 `init.sh` 时，只替换管理标记内的内容，并保留标记外的用户文本。`.feedback/rules.md` 从空模板开始。
 
 ### 不同安装方式分发的资源
 
@@ -307,7 +317,7 @@ cd /path/to/your-project && bash scripts/check.sh   # 验证技术栈检测
 
 ### Command：`/feedback-harness:init`
 
-当 Codex 或其他通用代理与 Claude Code **结合使用**时，此命令会将 `scripts/` 和 AGENTS.md 复制到当前项目。仅使用 Claude Code 时无需执行，因为脚本保留在插件中。
+当 Codex 或其他通用代理与 Claude Code **结合使用**时，此命令会将 `scripts/` 复制到当前项目，并在 CLAUDE.md / AGENTS.md 中加入带管理标记的说明。仅使用 Claude Code 时无需执行，因为脚本保留在插件中。
 
 ```text
 /feedback-harness:init
@@ -393,7 +403,9 @@ bash scripts/check.sh --list-checks           # 不执行检查，仅列出检�
 bash scripts/check.sh --list-checks --json    # 以机器可读 JSON 输出相同信息
 ```
 
-优先级为：环境变量 > 单项检查 > 技术栈 > 全局 > 默认值。语法和全部设置请参阅[配置指南](docs/configuration.zh-CN.md)。
+配置分为两层。`.feedback/local/config.yaml`（已被 `.gitignore`，仅对本机生效）优先于共享的 `.feedback/config.yaml`，可在不修改团队设置的前提下反映本地情况（例如关闭未使用工具的检查）。由个人层决定的项目，在 `--list-checks` 中的来源以 `local.` 开头。
+
+优先级为：环境变量 > 单项检查 > 技术栈 > 全局 > 默认值；在同一层级中，个人配置优先于共享配置。语法和全部设置请参阅[配置指南](docs/configuration.zh-CN.md)。
 
 ## 反馈运作流程
 

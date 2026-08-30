@@ -1,5 +1,7 @@
 # feature/enhance-fowler-feedback コードレビュー
 
+> **履歴資料:** これは `feature/enhance-fowler-feedback` ブランチに対するレビュー記録です。指摘は対応済みで、ブランチは main へマージ済みです。本文の行番号・引用は当時のもので、現在の実装とは一致しません。現在の仕様は[プロジェクト概要](../README.md)と[スクリプト仕様](../scripts/README.md)を参照してください。
+
 - 比較基準: `origin/main`
 - merge base: `cb5ba2998722cf10dd7c84443269e1d5e02797b3`
 - 対象ブランチ: `feature/enhance-fowler-feedback`

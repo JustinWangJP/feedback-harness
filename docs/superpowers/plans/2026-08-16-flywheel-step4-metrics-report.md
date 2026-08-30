@@ -1,5 +1,7 @@
 # Flywheel Step 4(signals・events/stats・report)Implementation Plan
 
+> **履歴資料:** この計画は実施済みです。チェックボックスは実施当時の作業単位をそのまま保存したもので、未チェックのままでも未着手を意味しません。**この文書に従って作業しないこと。** 現在の `--signal` / `stats` / `report` の仕様は[プロジェクト概要](../../../README.md)と[スクリプト仕様](../../../scripts/README.md)を参照してください。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** フィードバックハーネスに信号種(`--signal`)・フック合否イベントログ(`events.jsonl`)・集計(`stats`)・期間レポート(`report`)を加え、「効いているか」を測定し朝会/振り返りの議題を供給できるようにする。

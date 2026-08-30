@@ -22,5 +22,6 @@ This directory contains documentation for current usage and historical material 
 | `superpowers/specs/` | Specifications and rationale as they stood during design |
 | `superpowers/plans/` | Implementation plans and verification procedures |
 | `references/` | Translations and summaries of external sources consulted during design. The included Feedback Flywheel translation is in Simplified Chinese (`zh-CN`) |
+| `../review/` | Dated code-review records. The findings have been addressed; the counts and line numbers are snapshots from the review date |
 
 Dated historical material exists to preserve decisions made at that time. When it differs from the current implementation, prefer the documents listed under “Current specification” and the implementation itself.

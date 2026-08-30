@@ -1,5 +1,7 @@
 # 適用範囲拡張 P1(基盤と既存欠陥)Implementation Plan
 
+> **履歴資料:** この計画は実施済みです。チェックボックスは実施当時の作業単位をそのまま保存したもので、未チェックのままでも未着手を意味しません。**この文書に従って作業しないこと。** 現在の検査内容は[プロジェクト概要](../../../README.md)と[スクリプト仕様](../../../scripts/README.md)を参照してください。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 設定ファイル構文検証の既存欠陥(D1〜D3)を解消し、以降の全検査が乗る土台として **WARN 結果クラス**とその測定連携を作る。

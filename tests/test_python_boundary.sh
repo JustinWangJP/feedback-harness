@@ -132,6 +132,64 @@ assert_contains "$MUTATIONS" "test_direct.sh:1" "前置代入つきの直接捕�
 assert_contains "$MUTATIONS" "test_helper.sh:1" "関数経由の Python 起動を検出する"
 assert_contains "$MUTATIONS" "test_resolved.sh:1" "解決済み interpreter の直接起動を検出する"
 
+# tpy へ heredoc でスクリプトを渡し、その出力を判定に使う形は「問題が無ければ
+# 何も出力しない」契約になる。この形では Python が例外で死んでも出力が空になり、
+# assert_eq "" が成立して緑になる — 検査したはずの項目が丸ごと無検証で通る
+# (2026-08-30 のレビューで test_doc_inventory.sh に実際に存在し、同じ穴が
+# test_config.sh / test_plugin_manifest.sh の5箇所にもあった)。出力を見る前に
+# 終了コードを見る、という契約を走査で固定する。値を取り出すだけの一行 tpy は
+# 対象外 — 空になれば後続のアサーションが落ちるため、沈黙して緑にならない。
+unchecked_tpy_capture() { # unchecked_tpy_capture <tests-dir>
+  local root="$1" file base
+  for file in "$root"/test_*.sh; do
+    [[ -f "$file" ]] || continue
+    base="$(basename "$file")"
+    # このファイルは下で欠陥のある fixture を heredoc に書くため、自分自身は
+    # 走査対象から外す(raw_test_python が低レベル検証の2ファイルを外すのと同じ理由)
+    case "$base" in
+      test_python_boundary.sh) continue ;;
+    esac
+    awk '
+      /=[[:space:]]*"[$][(]tpy - / { start = FNR; state = "open"; next }
+      state == "open" && /^\)"$/ { state = "closed"; next }
+      state == "closed" {
+        if ($0 ~ /^[[:space:]]*$/ || $0 ~ /^[[:space:]]*#/) next
+        if ($0 !~ /[$][?]/) print start
+        state = ""
+      }
+    ' "$file" | sed "s#^#$base:#"
+  done
+  return 0
+}
+
+UNCHECKED="$(unchecked_tpy_capture "$REPO/tests")"
+assert_eq "" "$UNCHECKED" "出力を判定に使う tpy 捕捉は直後に終了コードを検査する"
+
+# 護欄自身の変異テスト。実リポジトリが偶然きれいなだけでは保証にならない
+STATUS_FIXTURE="$WORK/tpy-status-guard"
+mkdir -p "$STATUS_FIXTURE"
+cat > "$STATUS_FIXTURE/test_unchecked.sh" <<'SH'
+MISSING="$(tpy - "$REPO" <<'PY'
+print("")
+PY
+)"
+assert_eq "" "$MISSING" "何かの検査"
+SH
+cat > "$STATUS_FIXTURE/test_checked.sh" <<'SH'
+MISSING="$(tpy - "$REPO" <<'PY'
+print("")
+PY
+)"
+STATUS=$?
+assert_eq "0" "$STATUS" "正常終了する"
+assert_eq "" "$MISSING" "何かの検査"
+SH
+STATUS_MUTATIONS="$(unchecked_tpy_capture "$STATUS_FIXTURE")"
+assert_contains "$STATUS_MUTATIONS" "test_unchecked.sh:1" \
+  "終了コードを見ない tpy 捕捉を検出する"
+assert_not_contains "$STATUS_MUTATIONS" "test_checked.sh" \
+  "終了コードを見ている tpy 捕捉は誤検出しない"
+
 # 契約が「境界で一度だけ」であること。フック側が自前で CR を落とし始めると
 # 「どこで落ちているのか」が経路ごとに分かれ、抜けが生まれる。
 for hook in "$REPO"/scripts/hooks/*.sh; do
