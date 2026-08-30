@@ -266,6 +266,8 @@ hc.effective = special_effective
 hc._cmd_shell(sys.argv[2], {})
 PY
 )"
+STATUS=$?
+assert_eq "0" "$STATUS" "出所の特殊文字を作る Python が正常終了する"
 eval "$SPECIAL_SHELL_OUT"
 assert_eq $'local: path\t日本語' "$(harness_check_source vulture)" \
   "出所の内容を区切り文字で再解釈しない"
@@ -383,6 +385,8 @@ issues += [f"CHECKSにあるが未使用: {cid}" for cid in missing]
 print("; ".join(issues))
 PY
 )"
+STATUS=$?
+assert_eq "0" "$STATUS" "ID ドリフト検査が正常終了する(異常終了を空出力=合格にしない)"
 assert_eq "" "$DRIFT" "check.sh の呼び出し検査ID・ステージが CHECKS と一致する"
 
 # --- 個人設定レイヤ(.feedback/local/config.yaml) ---

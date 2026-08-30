@@ -1,5 +1,7 @@
 # プロジェクト設定ファイル(config.yaml)Implementation Plan
 
+> **履歴資料:** この計画は実施済みです。チェックボックスは実施当時の作業単位をそのまま保存したもので、未チェックのままでも未着手を意味しません。**この文書に従って作業しないこと。** 現在の設定方法は[設定ガイド](../../configuration.ja.md)を参照してください。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** `.feedback/config.yaml` でハーネスの挙動をプロジェクトごとに調整できるようにする(3層 + 環境変数の優先順位、実効設定の表示つき)。

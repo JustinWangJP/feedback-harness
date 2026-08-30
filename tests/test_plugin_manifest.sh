@@ -50,6 +50,8 @@ for key in ("displayName", "shortDescription", "longDescription", "developerName
 print("; ".join(errors))
 PY
 )"
+STATUS=$?
+assert_eq "0" "$STATUS" "Codex マニフェスト検査が正常終了する(異常終了を空出力=合格にしない)"
 assert_eq "" "$CODEX_MANIFEST_ERROR" "Codex マニフェストの必須フィールド"
 
 # 3: コンポーネントが規定の場所にある
@@ -77,6 +79,8 @@ for entries in cfg["hooks"].values():
 print(" ".join(missing))
 PY
 )"
+STATUS=$?
+assert_eq "0" "$STATUS" "参照先の実在検査が正常終了する(異常終了を空出力=合格にしない)"
 assert_eq "" "$MISSING" "hooks.json の参照先が実在する"
 
 # 5: 開発用 .claude/settings.json と配布用 hooks.json が同じイベント構造
@@ -110,6 +114,7 @@ def normalize(path):
 print(json.dumps(normalize(sys.argv[1]), sort_keys=True))
 PY
 )"
+STATUS_A=$?
 NORM_B="$(tpy - "$REPO/hooks/hooks.json" <<'PY'
 import json, re, sys
 
@@ -134,6 +139,11 @@ def normalize(path):
 print(json.dumps(normalize(sys.argv[1]), sort_keys=True))
 PY
 )"
+STATUS_B=$?
+# 正規化の両側とも、死んだ Python の空出力は "差分なし" と区別できない。
+# NORM_A が空だと下の "{}" 判定にも当たらず、else 側で "" == "" が成立して緑になる。
+assert_eq "0" "$STATUS_A" "開発用フック定義の正規化が正常終了する"
+assert_eq "0" "$STATUS_B" "配布用フック定義の正規化が正常終了する"
 # 開発用 settings.json に hooks が無いのは、このリポジトリ自身がプラグイン導入へ
 # 移行した状態(enabledPlugins で自己ドッグフーディングする)。両方に定義を置くと
 # Stop のたびに check.sh が二重に走るため、移行後は dev 側を空にするのが正しい。

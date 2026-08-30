@@ -1,5 +1,7 @@
 # feedback-harness プラグイン化 実装計画
 
+> **履歴資料:** この計画は実施済みです。チェックボックスは実施当時の作業単位をそのまま保存したもので、未チェックのままでも未着手を意味しません。**この文書に従って作業しないこと。** 実施後、開発用 `.claude/settings.json` に Hooks を複製する方式から、同ファイルでプラグインを有効化する方式へ移行しました。現在の構成は[プロジェクト概要](../../../README.md)を参照してください。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** feedback-harness を Claude Code Plugin として配布可能にし、導入先が本体の更新に自動追従できるようにする(Codex 対応は維持)。

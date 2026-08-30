@@ -114,6 +114,7 @@ scripts/
   rules.template.md # rules.md の初期ファイル (導入時・再生成時に使う雛形)
   config.yaml       # プロジェクト設定 (任意・Git にコミットして共有。config.example.yaml から始める)
   config.example.yaml # config.yaml の雛形 (全項目をコメント付きで並べたもの)
+  local/config.yaml # この端末だけの個人設定 (共有設定より優先・Git 管理外)
   log/              # 記録したフィードバック (先頭にメタデータを持つ Markdown)
   .last-check       # Stop フックの検査記録 (更新日時の比較に使うローカル状態・Git 管理外)
   .last-retro       # 振り返り期間の開始点 (report --mark が更新・Git 管理外)
@@ -124,9 +125,18 @@ scripts/
 package.json        # 検査ツール(secretlint 等)を npx --no-install で解決するためだけの宣言
 tests/              # bash テスト (make check → check.sh から自動実行される)
 docs/
+  README.md         # ドキュメント案内 (現在の仕様と履歴資料の索引)
+  README.ja.md      # ドキュメント案内の日本語版
+  README.zh-CN.md   # ドキュメント案内の簡体字中国語版
+  configuration.md  # 設定ガイド (config.yaml の全項目とトラブルシューティング)
+  configuration.ja.md    # 設定ガイドの日本語版
+  configuration.zh-CN.md # 設定ガイドの簡体字中国語版
   pointer_claude.md # 導入先の CLAUDE.md に追加する案内文
   pointer_agents.md # 導入先の AGENTS.md に追加する案内文
-  superpowers/      # 設計書 (specs/) と実装計画 (plans/)
+  proposals/        # 実装前の提案 (履歴資料)
+  references/       # 設計の背景として参照した外部資料 (履歴資料)
+  superpowers/      # 設計書 (specs/) と実装計画 (plans/) — 履歴資料
+review/             # 日付付きのコードレビュー記録 (履歴資料)
 .claude/
   settings.json     # このリポジトリでプラグインを有効化する開発用設定 (配布対象外)
 ```
@@ -135,7 +145,7 @@ docs/
 
 ### ドキュメントの位置づけ
 
-現在の使い方は、この README、[設定ガイド](docs/configuration.ja.md)、[スクリプト仕様](scripts/README.ja.md)を参照してください。日付付きの `docs/proposals/` と `docs/superpowers/` は、提案や設計を行った時点の判断を残す履歴資料です。現在の仕様と内容が異なる場合は、先に挙げた3つの文書と実装を優先してください。文書の一覧は[ドキュメント案内](docs/README.ja.md)にまとめています。
+現在の使い方は、この README、[設定ガイド](docs/configuration.ja.md)、[スクリプト仕様](scripts/README.ja.md)を参照してください。日付付きの `docs/proposals/`・`docs/superpowers/`・`review/` は、提案・設計・レビューを行った時点の判断を残す履歴資料です。現在の仕様と内容が異なる場合は、先に挙げた3つの文書と実装を優先してください。文書の一覧は[ドキュメント案内](docs/README.ja.md)にまとめています。
 
 Codex 側の現在の仕様は、OpenAI 公式の[プラグイン利用ガイド](https://learn.chatgpt.com/docs/plugins)、[プラグインのパッケージ仕様](https://developers.openai.com/plugins/build/plugins)、[Hooks 仕様](https://developers.openai.com/codex/hooks)を参照してください。Claude Code 側は、Anthropic 公式の[プラグイン導入ガイド](https://code.claude.com/docs/en/discover-plugins)を参照してください。
 
@@ -192,7 +202,7 @@ bash feedback-harness/scripts/init.sh /path/to/your-project
 cd /path/to/your-project && bash scripts/check.sh   # スタック検出の確認
 ```
 
-`scripts/` と `AGENTS.md` が導入先にコピーされます。`CLAUDE.md` / `AGENTS.md` には、feedback-harness が管理する範囲を示すコメント（管理マーカー）付きで案内文を追加します。`init.sh` を再実行すると、管理マーカーの内側だけを最新版に置き換え、外側にある利用者の記述は残します。`.feedback/rules.md` は空のテンプレートから始まります。
+導入先の `scripts/` にスクリプト一式がコピーされます。`CLAUDE.md` / `AGENTS.md` はコピーではなく、feedback-harness が管理する範囲を示すコメント（管理マーカー）付きの案内文を追記します（ファイルが無ければ作成します）。`init.sh` を再実行すると、管理マーカーの内側だけを最新版に置き換え、外側にある利用者の記述は残します。`.feedback/rules.md` は空のテンプレートから始まります。
 
 ### 導入形態ごとの配布物
 
@@ -307,7 +317,7 @@ cd /path/to/your-project && bash scripts/check.sh   # スタック検出の確�
 
 ### Command: `/feedback-harness:init`
 
-Codex や他の汎用エージェントと**併用する**場合に、現在のプロジェクトへ `scripts/` と `AGENTS.md` をコピーします。Claude Code だけで使う場合は必要ありません（スクリプトはプラグイン側にあるため）。
+Codex や他の汎用エージェントと**併用する**場合に、現在のプロジェクトへ `scripts/` をコピーし、`CLAUDE.md` / `AGENTS.md` へ管理マーカー付きの案内文を追記します。Claude Code だけで使う場合は必要ありません（スクリプトはプラグイン側にあるため）。
 
 ```
 /feedback-harness:init
@@ -393,7 +403,9 @@ bash scripts/check.sh --list-checks           # 検査ID・実効判定・「出
 bash scripts/check.sh --list-checks --json    # 同じ内容を機械可読な JSON で出力
 ```
 
-設定の優先順位は、環境変数 > 検査単位 > スタック単位 > 全体 > 既定値です。書き方とすべての項目は、[設定ガイド](docs/configuration.ja.md)を参照してください。
+設定ファイルは2層あります。共有する `.feedback/config.yaml` に対し、`.feedback/local/config.yaml`（`.gitignore` 済み・この端末だけの設定）が優先されます。未導入ツールの検査を切るといった手元の事情を、チームの設定を書き換えずに反映するためのものです。個人設定で決まった項目は、`--list-checks` の「出所」が `local.` で始まります。
+
+設定の優先順位は、環境変数 > 検査単位 > スタック単位 > 全体 > 既定値です（同じ層では個人設定が共有設定に優先します）。書き方とすべての項目は、[設定ガイド](docs/configuration.ja.md)を参照してください。
 
 ## フィードバック運用フロー
 

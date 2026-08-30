@@ -1,5 +1,7 @@
 # 適用範囲拡張 P2(速い検査群)Implementation Plan
 
+> **履歴資料:** この計画は実施済みです。チェックボックスは実施当時の作業単位をそのまま保存したもので、未チェックのままでも未着手を意味しません。**この文書に従って作業しないこと。** 現在の検査内容は[プロジェクト概要](../../../README.md)と[スクリプト仕様](../../../scripts/README.md)を参照してください。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** ネットワークを使わず数秒で終わる検査を7系統追加し、秘密情報・設計制約・依存整合性・フォーマット・デッドコード・ドキュメント整合性を自動フィードバックの対象にする。

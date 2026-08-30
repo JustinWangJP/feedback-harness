@@ -1,5 +1,7 @@
 # 適用範囲拡張 P3(重い検査群・2026-08-17 改訂版)Implementation Plan
 
+> **履歴資料:** この計画は実施済みです。チェックボックスは実施当時の作業単位をそのまま保存したもので、未チェックのままでも未着手を意味しません。**この文書に従って作業しないこと。** 現在のカバレッジ計装・契約差分・脆弱性監査の仕様は[プロジェクト概要](../../../README.md)と[スクリプト仕様](../../../scripts/README.md)を参照してください。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** カバレッジ計装を test ステージに相乗りさせ(M3)、API契約差分を宣言ゲートで載せ、脆弱性監査をオンデマンド経路(scripts/audit.sh + 最終監査日の可視化)に分離する。
