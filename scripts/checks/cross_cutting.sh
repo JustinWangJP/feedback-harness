@@ -13,8 +13,10 @@ run_cross_cutting_checks() {
   # 何も検証しないまま成功が返り、ステージが PASS になる — tsconfig.json だけの
   # プロジェクトが「JSON を検証済み」に見える(2026-09-02 の再レビュー由来)
   JSON_FILES=()
+  JSON_SEEN=0
   while IFS= read -r f; do
     [[ -n "$f" && -f "$f" ]] || continue
+    JSON_SEEN=1
     harness_is_jsonc "$f" && continue
     JSON_FILES+=("$f")
   done < <(list_files '*.json')
@@ -29,6 +31,13 @@ run_cross_cutting_checks() {
     else
       record_skip "json-syntax" lint "config: json 構文" "Python 未検出"
     fi
+  elif [[ $JSON_SEEN -eq 1 ]]; then
+    # 検査対象が JSONC だけだった。ステージごと消すと --list-checks からも
+    # 結果からも行が無くなり、「検査していない」ことが見えない(record_skip の
+    # 契約は、事前に判定できる SKIP も同じ出口へ載せること)。
+    # RESULTS が空のままだと anything_detected も false になり、
+    # secretlint 等の案内まで巻き添えで消える
+    record_skip "json-syntax" lint "config: json 構文" "JSONC のみ(コメント付きJSONは構文検査の対象外)"
   fi
 
   YAML_FILES=()

@@ -94,6 +94,20 @@ TOML
 IDS="$(check_ids "$P4")"
 assert_contains "$IDS" "mypy" "[tool.mypy.*] のサブテーブルでも mypy を走らせる: $IDS"
 
+# TOML は見出しの前の空白を許す。行頭アンカーだけだとインデントされた見出しを
+# 取りこぼし、宣言しているのに検査が走らない(mypy は WARN フォールバックが
+# 無いため、取りこぼしはそのまま「型検査ゼロ」になる)
+P5="$(new_project mypy_indented)"
+cat > "$P5/pyproject.toml" <<'TOML'
+[project]
+name = "demo"
+
+  [tool.mypy]
+  strict = false
+TOML
+IDS="$(check_ids "$P5")"
+assert_contains "$IDS" "mypy" "インデントされた見出しでも宣言として扱う: $IDS"
+
 # --- 走査: pyproject.toml を見る宣言ゲートはすべて行頭アンカーを持つ ---
 # 個別ケースだけを直すと、同じ抜けが隣のゲートへ再発する(実際 mypy だけが
 # ruff / deptry / vulture と違う書き方のまま残っていた)。パターンの形を走査で固定する。

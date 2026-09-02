@@ -133,10 +133,16 @@ case "$FILE" in
           *)
             # 判定は得られていない。差し戻しはしない(壊れた設定は利用者の
             # コードの問題ではない)。WARN へ載せるのは、このスクリプトを
-            # 直接叩いたときに設定の破綻が見えるようにするため — PostToolUse
-            # 経由では post_edit.sh が exit 0 の出力を捨てるためエージェントには
-            # 届かない。フック経路での気づきは Stop 側の `$PM run lint` が担う
-            # (未導入時に素通しするのと同じ分担)
+            # 直接叩いたときに設定の破綻が見えるようにするため。
+            #
+            # 既知の限界: PostToolUse 経由ではこの WARN は届かない
+            # (post_edit.sh は exit 0 の出力を捨てる)。Stop 側も
+            # `node-lint` は `npm_script_exists lint` がゲートなので、
+            # lint スクリプトを持たないプロジェクトでは**どちらの経路でも
+            # 報告されない**。.js/.mjs/.cjs は下の構文検査が拾うが、
+            # .ts/.tsx/.jsx は拾えない。WARN 経路そのものの是正
+            # (PostToolUse の JSON 出力)は Codex 互換の確認が要るため、
+            # review/2026-09-02-overall-review.md へ申し送りとして残している
             # 全文は出さない。この WARN は編集のたびに出るため、原因の行だけに絞る
             # (ESLint の致命的エラーは冒頭数行に理由が出る)
             emit warn "check_file: ESLint を実行できませんでした(exit ${eslint_rc})。設定を確認してください:

@@ -93,6 +93,10 @@ printf '{\n  // コメント\n  "a": 1\n}\n' > "$P8/tsconfig.json"
 OUT="$(bash "$CHECK" "$P8" 2>&1)"
 assert_not_contains "$OUT" "PASS  config: json 構文" \
   "JSONC だけのプロジェクトで json 構文を PASS と報告しない: $OUT"
+# 否定形だけだと「ステージごと消す」実装でも成立してしまう。消すのも誤りで、
+# 検査していないことが一覧から見えなくなる(record_skip の契約)。SKIP 行の存在を求める
+assert_contains "$OUT" "SKIP  config: json 構文" \
+  "検査対象が残らないことを SKIP として見せる: $OUT"
 
 # 対になるケース: 検証対象が1件でもあれば従来どおり検証する
 printf '{"a": 1,\n' > "$P8/broken.json"
