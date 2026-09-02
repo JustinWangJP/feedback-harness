@@ -302,8 +302,15 @@ harness_node_pm() {
 # PostToolUse の ESLint 検査が丸ごと飛び、同じ違反を Stop 側の
 # `$PM run lint` だけが報告する食い違いになっていた(2026-09-02 の全体レビュー由来)。
 # 判定は glob に寄せる — 新しい拡張子が増えても列挙を足して回らずに済む。
+# package.json の "eslintConfig" キー(ESLint 8 以前の置き場)も設定に数える。
+# ここを見落とすと、設定ファイルを持たないだけで実際は ESLint を使っている
+# プロジェクトで PostToolUse だけが検査を飛ばす — 埋めたはずの食い違いが残る。
+# 判定は grep で足りる(node を起動するのは毎編集フックには重く、
+# glob が外れたときだけ評価されるので誤検出の代償も小さい)
 harness_has_eslint_config() {
-  compgen -G ".eslintrc*" >/dev/null 2>&1 || compgen -G "eslint.config.*" >/dev/null 2>&1
+  compgen -G ".eslintrc*" >/dev/null 2>&1 \
+    || compgen -G "eslint.config.*" >/dev/null 2>&1 \
+    || { [[ -f package.json ]] && grep -q '"eslintConfig"[[:space:]]*:' package.json 2>/dev/null; }
 }
 
 # harness_relpath <パス> <ルート> — ルート相対パスへ正規化(先頭の ./ や / を除く)。

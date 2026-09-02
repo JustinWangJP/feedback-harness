@@ -179,7 +179,18 @@ printf '{"rules":{}}' > "$PE/.eslintrc.json"   # ESLint 9+ が読まない旧形
 printf 'var x = 1\n' > "$PE/bad.js"
 OUT="$(cd "$PE" && run_cf "$PE/bad.js")"; RC=$?
 assert_eq "0" "$RC" "ESLint の致命的エラー(exit 2)では差し戻さない: $OUT"
-assert_not_contains "$OUT" "eslint.config" "ツール側の都合をファイルの問題として出さない: $OUT"
+assert_not_contains "$OUT" "問題があります" "ツール側の都合をファイルの問題として差し戻さない: $OUT"
+# 黙って捨てない。壊れた設定は非ブロッキングの WARN として見せる —
+# 見せないと「lint されているつもりで一度も lint されない」状態が続く
+assert_contains "$OUT" "ESLint を実行できませんでした" "設定の破綻は WARN として見せる: $OUT"
+
+# ESLint が判定を返せないときは構文検査へ倒す。
+# 「lint を試みた」ことを理由に検査ゼロで素通しすると、壊れた設定の
+# プロジェクトだけ PostToolUse が無検査になる(exit 2 対応で作りかけた穴)
+printf 'function f( {\n' > "$PE/broken-syntax.js"
+OUT="$(cd "$PE" && run_cf "$PE/broken-syntax.js")"; RC=$?
+assert_eq "1" "$RC" "ESLint が使えなくても構文エラーは捕まえる: $OUT"
+assert_contains "$OUT" "問題があります" "構文エラーは差し戻す: $OUT"
 
 # 対になるケース: exit 1(本物の lint 違反)は従来どおり差し戻す
 { echo '#!/usr/bin/env bash'

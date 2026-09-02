@@ -108,6 +108,10 @@ case "$FILE" in
       # PostToolUse だけが見逃して Stop で初めて出る食い違いになっていた。
       # check.sh の prettier / knip と同じく compgen のグロブで列挙漏れを避ける
       # (2026-09-02 の全体レビュー由来)
+      # ESLint が判定を返したか。返していない(起動できない・致命的エラー)
+      # ときは構文検査へ倒す — 「lint を試みた」ことを理由に検査ゼロで
+      # 素通しすると、壊れた設定のプロジェクトだけ PostToolUse が無検査になる
+      eslint_verdict=0
       if has npx && harness_has_eslint_config \
          && npx --no-install eslint --version >/dev/null 2>&1; then
         # formatter は指定しない。`--format unix` / `compact` は ESLint 10 で
@@ -122,10 +126,24 @@ case "$FILE" in
         # (設定が見つからない・プラグイン解決失敗など)。「非0なら違反」と
         # 扱うと、eslintrc しか持たないプロジェクト(ESLint 9 以降は読まない)で
         # 「eslint.config.js が見つからない」というツール側の都合が、
-        # 編集のたびにユーザーのファイルの問題として差し戻される(実測 10.1.0)。
-        # 違反(1)のときだけ差し戻し、それ以外は未導入時と同じく素通しする
-        [[ $eslint_rc -eq 1 ]] || cur=""
-      elif has node && [[ "$FILE" == *.js || "$FILE" == *.mjs || "$FILE" == *.cjs ]]; then
+        # 編集のたびにユーザーのファイルの問題として差し戻される(実測 10.1.0)
+        case "$eslint_rc" in
+          0) eslint_verdict=1; cur="" ;;
+          1) eslint_verdict=1 ;;
+          *)
+            # 判定は得られていない。差し戻しはしないが、黙って捨てると
+            # 「lint されているつもりで一度も lint されない」状態が続くため、
+            # 非ブロッキングの WARN として設定の破綻だけは見せる
+            # 全文は出さない。この WARN は編集のたびに出るため、原因の行だけに絞る
+            # (ESLint の致命的エラーは冒頭数行に理由が出る)
+            emit warn "check_file: ESLint を実行できませんでした(exit ${eslint_rc})。設定を確認してください:
+$(printf '%s\n' "$cur" | grep -v '^[[:space:]]*$' | head -n 3)"
+            cur=""
+            ;;
+        esac
+      fi
+      if [[ "$eslint_verdict" -eq 0 ]] && has node \
+         && [[ "$FILE" == *.js || "$FILE" == *.mjs || "$FILE" == *.cjs ]]; then
         cur="$(node --check "$FILE" 2>&1)" && cur=""
       fi
       emit "$sev" "$cur"

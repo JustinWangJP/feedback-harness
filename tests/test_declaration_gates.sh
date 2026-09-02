@@ -29,7 +29,15 @@ new_project() { # new_project <名前>
 }
 
 check_ids() { # check_ids <プロジェクト> — --list-checks の検査ID列だけを返す
-  bash "$CHECK" "$1" --list-checks 2>&1 | awk '{print $1}'
+  # 出力を見る前に終了コードを見る。--list-checks が落ちると ID 列は空になり、
+  # 「mypy が含まれないこと」を確かめる否定形のアサーションが素通しで成立する
+  local out rc
+  out="$(bash "$CHECK" "$1" --list-checks 2>&1)"; rc=$?
+  if [[ $rc -ne 0 ]]; then
+    fail "--list-checks が失敗した(exit $rc): $out"
+    return 0
+  fi
+  printf '%s\n' "$out" | awk '{print $1}'
 }
 
 # --- 宣言ではない位置の文言でゲートが成立しない ---
@@ -54,6 +62,9 @@ name = "demo"
 # [tool.mypy] はまだ有効にしていない
 TOML
 IDS="$(check_ids "$P2")"
+# 否定形だけだと、--list-checks が何も出さなくなった場合に素通しで成立する。
+# 同じ出力に必ず現れるものを対にして、走っていること自体を確かめる
+assert_contains "$IDS" "ruff" "前提: pyproject.toml があるので ruff は列挙される: $IDS"
 assert_not_contains "$IDS" "mypy" "コメント行の [tool.mypy] では mypy を走らせない: $IDS"
 
 # --- 実在する宣言は従来どおり検出する(検出しない側への退行防止) ---

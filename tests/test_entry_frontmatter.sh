@@ -88,6 +88,20 @@ REPORT3="$(fb report --since "$TODAY" | sed -n '/^## close・retire$/,/^## /p')"
 assert_contains "$REPORT3" "$ID3" \
   "close したエントリが report の close・retire 節に出る: $REPORT3"
 
+# frontmatter に絞っても、部分文字列の置換は「他のキーの値」に引っかかる。
+# --category は自由テキストで、しかも cmd_add の並びでは status より前に出る。
+# 値に `status: open` と書けばそちらが先に一致し、category が壊れて status は
+# 元のまま残る(close は成功したと report する)。キー名で行を特定する契約の回帰。
+ID5="$(fb add --category "testing (status: open のまま)" --summary "値にstatusを含む指摘" \
+  --detail "本文" | extract_id)"
+fb close "$ID5" --reason "一回限りの事情" >/dev/null
+ENTRY5="$(cat "$WORK/project/.feedback/log/$ID5"-*.md)"
+FRONT5="$(printf '%s\n' "$ENTRY5" | awk 'NR>1 && /^---[[:space:]]*$/{exit} NR>1{print}')"
+assert_contains "$FRONT5" "status: closed" "他キーの値ではなく status 行が書き換わる: $FRONT5"
+assert_contains "$FRONT5" "category: testing (status: open のまま)" \
+  "category の値が壊れない: $FRONT5"
+assert_contains "$(fb list --status closed)" " $ID5 " "状態が closed として読める"
+
 # promote 経路も同じ関数を通る(close だけ直して他が残る形を防ぐ)
 ID4="$(fb add --category testing --summary "昇華する注記" \
   --detail "手順書に status_changed: 2019-12-31 と書かれていた" | extract_id)"

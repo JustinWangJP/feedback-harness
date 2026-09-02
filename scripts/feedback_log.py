@@ -629,17 +629,31 @@ def updated_status_text(target: dict, new_status: str, text: str | None = None) 
     if text is None:
         text = target["path"].read_text(encoding="utf-8")
     front, body = split_frontmatter(text)
-    front = front.replace(f"status: {target.get('status')}", f"status: {new_status}", 1)
-    if "status_changed:" in front:
+    # frontmatter に絞ってもなお、部分文字列の置換は「キーの値」に引っかかる。
+    # category など status より前にあるフィールドの値へ `status: open` と書けば
+    # (--category は自由テキスト)、そちらが先に一致して値が壊れ、status は
+    # 元のまま残る。キー名で行を特定して置き換える — 境界を絞るだけでなく、
+    # 「何を探しているか」をキーとして表現する
+    out = []
+    status_index = None
+    changed_done = False
+    for line in front.splitlines(keepends=True):
+        eol = line[len(line.rstrip("\r\n")):]  # 手書きファイルの CRLF を保つ
+        key = line.split(":", 1)[0].strip() if ":" in line else ""
+        if key == "status" and status_index is None:
+            out.append(f"status: {new_status}{eol}")
+            status_index = len(out) - 1
+            continue
         # 1キー・上書き(report の期間集計は「最後の状態変化」を基準にする)
-        front = re.sub(
-            r"status_changed: \d{4}-\d{2}-\d{2}", f"status_changed: {today}", front, count=1
-        )
-    else:
-        front = front.replace(
-            f"status: {new_status}", f"status: {new_status}\nstatus_changed: {today}", 1
-        )
-    return front + body
+        if key == "status_changed" and not changed_done:
+            out.append(f"status_changed: {today}{eol}")
+            changed_done = True
+            continue
+        out.append(line)
+    if status_index is not None and not changed_done:
+        eol = out[status_index][len(out[status_index].rstrip("\r\n")):] or "\n"
+        out.insert(status_index + 1, f"status_changed: {today}{eol}")
+    return "".join(out) + body
 RULE_SOURCE_RE = re.compile(r"^(\s*<sub>出典: )(.+?)( \(.*)$")
 
 
