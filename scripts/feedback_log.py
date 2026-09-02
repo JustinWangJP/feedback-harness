@@ -604,7 +604,11 @@ def require_open(target: dict, verb: str) -> None:
             f"すでに rules.md へ昇華済みです(出典 {entry_id})。"
             "重ねて昇華すると同じ出典のルールが2件になり、以後この id では"
             " merge / retire が実行できなくなります。"
-            "ルールを取り下げるなら retire を使ってください"
+            # retire の影響範囲を明示する。「取り下げるなら retire」とだけ書くと、
+            # merge をやり直したいだけの利用者が統合先ルールごと消してしまう
+            f"なお retire {entry_id} は、この id を出典に持つ**ルール本体**を"
+            "撤去し、同じルールの他の出典もまとめて retired にします — "
+            "ルールごと取り下げるときだけ使ってください"
         )
     else:
         recovery = (
@@ -706,15 +710,19 @@ def cmd_merge(args):
     重複だらけになる。既存ルールの出典に追記し、必要なら本文を更新する。
     """
     target = find_entry(args.entry_id)
-    require_open(target, "merge")
     if not RULES.exists():
         sys.exit("ERROR: rules.md がありません。先に promote でルールを作成してください")
 
     lines = RULES.read_text(encoding="utf-8").splitlines()
     i, m = find_rule_by_source(lines, args.into)
     sources = [s.strip() for s in m.group(2).split(",")]
+    # 「このルールの出典として既にいる」かを状態ガードより先に見る。順序を逆にすると
+    # 同じ merge を2回実行したときに、具体的な「すでにこのルールの出典です」ではなく
+    # 汎用の状態エラーが出る。後者は retire を案内するため、利用者がそれに従うと
+    # 統合先ルールごと撤去される — 案内どおりに操作して壊れるのが最悪の形
     if args.entry_id in sources:
         sys.exit(f"ERROR: {args.entry_id} はすでにこのルールの出典です")
+    require_open(target, "merge")
     sources.append(args.entry_id)
     lines[i] = f"{m.group(1)}{', '.join(sources)}{m.group(3)}"
 

@@ -85,6 +85,21 @@ assert_eq "1" "$DUP_SOURCES" "出典行が重複しない"
 MERGE_ERR="$(fb merge "$ID_D" --into "$ID_B" 2>&1 || true)"
 assert_contains "$MERGE_ERR" "open ではありません" "昇華済みのエントリは merge できない: $MERGE_ERR"
 
+# ただし「同じ merge のやり直し」は状態ガードより先に、具体的なエラーで止める。
+# 汎用の状態エラーは retire を案内するため、それに従うと統合先ルールごと
+# 撤去される — 案内どおりに操作して壊れるのが最悪の形なので順序で防ぐ。
+# ルールA は既に退役済みなので、この検証専用のルールを新しく作る
+ID_F="$(fb add --category naming --summary "指摘F" --source human | extract_id)"
+ID_G="$(fb add --category naming --summary "指摘Fの再発" --source human | extract_id)"
+fb promote "$ID_F" --rule "ルールF本文" >/dev/null
+fb merge "$ID_G" --into "$ID_F" >/dev/null
+REMERGE_ERR="$(fb merge "$ID_G" --into "$ID_F" 2>&1 || true)"
+assert_contains "$REMERGE_ERR" "すでにこのルールの出典です" \
+  "同じルールへの再 merge は具体的なエラーで止まる: $REMERGE_ERR"
+assert_not_contains "$REMERGE_ERR" "retire" \
+  "再 merge のエラーが破壊的な操作を案内しない: $REMERGE_ERR"
+assert_contains "$(cat "$RULES_FILE")" "ルールF本文" "再 merge を弾いてもルールFは残る"
+
 # 遮断したうえで、正規の出口(retire)は塞がっていないこと — 袋小路を作らない
 assert_contains "$(fb retire "$ID_D" --reason "重複を作らずに退役できる" 2>&1)" "retired:" \
   "二重昇華を弾いた後も retire は通る"
