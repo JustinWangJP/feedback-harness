@@ -113,4 +113,21 @@ assert_contains "$FRONT4" "status_changed: $TODAY" \
 assert_contains "$ENTRY4" "status_changed: 2019-12-31" \
   "promote でも本文の日付が書き換わらない: $ENTRY4"
 
+# --- 終端していない手書き frontmatter でも行が連結しない ---
+# parse_entry は「閉じの --- が無いファイルは末尾まで frontmatter」として読む
+# 契約(手書きされた壊れたファイルの扱い)。その末尾行が status で、改行で
+# 終わっていないと、status_changed の挿入が `status: closedstatus_changed: …` と
+# 連結し、status も status_changed も読めなくなる
+#
+# --reason は付けない。理由ブロックの追記は末尾へ改行を足すため、付けると
+# status 行が改行で終わる形になり、この経路を通らない(--reason 無しの close は
+# CLI の既定の使い方なので、実際に起こりうる組み合わせである)
+HAND="$WORK/project/.feedback/log/20200101-000000-手書き.md"
+printf -- '---\nid: 20200101-000000\ncategory: style\nstatus: open' > "$HAND"  # 末尾に改行なし
+fb close "20200101-000000" >/dev/null
+HAND_TEXT="$(cat "$HAND")"
+assert_not_contains "$HAND_TEXT" "closedstatus_changed" "行が連結しない: $HAND_TEXT"
+assert_contains "$(fb list --status closed)" " 20200101-000000 " \
+  "手書きエントリの状態が closed として読める"
+
 assert_summary

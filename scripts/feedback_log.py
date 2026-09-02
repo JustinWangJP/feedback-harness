@@ -655,7 +655,14 @@ def updated_status_text(target: dict, new_status: str, text: str | None = None) 
             continue
         out.append(line)
     if status_index is not None and not changed_done:
-        eol = out[status_index][len(out[status_index].rstrip("\r\n")):] or "\n"
+        line = out[status_index]
+        eol = line[len(line.rstrip("\r\n")):]
+        if not eol:
+            # status 行が改行で終わっていない(終端していない手書き frontmatter の
+            # 末尾行)。そのまま挿入すると `status: closedstatus_changed: …` と
+            # 連結され、status も status_changed も読めなくなる
+            eol = "\n"
+            out[status_index] = line + eol
         out.insert(status_index + 1, f"status_changed: {today}{eol}")
     return "".join(out) + body
 RULE_SOURCE_RE = re.compile(r"^(\s*<sub>出典: )(.+?)( \(.*)$")
