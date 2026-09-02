@@ -163,6 +163,34 @@ assert_contains "$ARGS" "eslint" "前提: eslint を実際に起動している:
 assert_not_contains "$ARGS" "--format" "core から外れた formatter を指定しない: $ARGS"
 rm -f "$FAKEBIN/npx"
 
+# --- ESLint の致命的エラー(exit 2)は差し戻さない ---
+# ESLint の終了コードは 0=指摘なし / 1=lint 違反 / 2=致命的エラー。
+# 「非0なら違反」と扱うと、eslintrc しか持たないプロジェクト(ESLint 9 以降は
+# eslintrc を読まない)で「eslint.config.js が見つからない」というツール側の
+# 都合が、編集のたびにユーザーのファイルの問題として差し戻される(実測 10.1.0)。
+{ echo '#!/usr/bin/env bash'
+  echo 'case "$*" in *--version*) exit 0 ;; esac'
+  echo 'echo "Oops! Something went wrong! :("'
+  echo 'echo "ESLint couldn'"'"'t find an eslint.config.(js|mjs|cjs) file."'
+  echo 'exit 2'
+} > "$FAKEBIN/npx"; chmod +x "$FAKEBIN/npx"
+PE="$(new_project node_eslint_fatal)"
+printf '{"rules":{}}' > "$PE/.eslintrc.json"   # ESLint 9+ が読まない旧形式
+printf 'var x = 1\n' > "$PE/bad.js"
+OUT="$(cd "$PE" && run_cf "$PE/bad.js")"; RC=$?
+assert_eq "0" "$RC" "ESLint の致命的エラー(exit 2)では差し戻さない: $OUT"
+assert_not_contains "$OUT" "eslint.config" "ツール側の都合をファイルの問題として出さない: $OUT"
+
+# 対になるケース: exit 1(本物の lint 違反)は従来どおり差し戻す
+{ echo '#!/usr/bin/env bash'
+  echo 'case "$*" in *--version*) exit 0 ;; esac'
+  echo 'echo "bad.js:1:1: warning: unexpected var [no-var]"'
+  echo 'exit 1'
+} > "$FAKEBIN/npx"; chmod +x "$FAKEBIN/npx"
+OUT="$(cd "$PE" && run_cf "$PE/bad.js")"; RC=$?
+assert_eq "1" "$RC" "exit 1(lint 違反)は従来どおり差し戻す: $OUT"
+rm -f "$FAKEBIN/npx"
+
 # --- 壊れた config.yaml は check_file.sh 自身をブロックする ---
 # AGENTS.md §2 で check_file.sh は編集直後の必須ゲート。黙って exit 0 で
 # 通すと、設定の打ち間違いに誰も気づけない

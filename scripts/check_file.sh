@@ -116,7 +116,15 @@ case "$FILE" in
         # として差し戻される(実測: eslint 10.1.0)。既定の stylish は core に
         # 残り続けている唯一の選択肢で、1件1行+位置つきでエージェントにも読める。
         # 環境の問題をユーザーのコードの失敗として報告しない、という check の契約側を優先する
-        cur="$(npx --no-install eslint "$FILE" 2>&1)" && cur=""
+        cur="$(npx --no-install eslint "$FILE" 2>&1)"
+        eslint_rc=$?
+        # ESLint の終了コードは 0=指摘なし / 1=lint 違反 / 2=致命的エラー
+        # (設定が見つからない・プラグイン解決失敗など)。「非0なら違反」と
+        # 扱うと、eslintrc しか持たないプロジェクト(ESLint 9 以降は読まない)で
+        # 「eslint.config.js が見つからない」というツール側の都合が、
+        # 編集のたびにユーザーのファイルの問題として差し戻される(実測 10.1.0)。
+        # 違反(1)のときだけ差し戻し、それ以外は未導入時と同じく素通しする
+        [[ $eslint_rc -eq 1 ]] || cur=""
       elif has node && [[ "$FILE" == *.js || "$FILE" == *.mjs || "$FILE" == *.cjs ]]; then
         cur="$(node --check "$FILE" 2>&1)" && cur=""
       fi

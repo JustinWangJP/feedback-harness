@@ -1,6 +1,6 @@
 # feedback-harness 全体レビュー(main)
 
-> **履歴資料:** これは 2026-09-02 時点の `main` に対する定期レビュー記録です。件数・行数・SHA はレビュー実施時点のスナップショットで、現在の値とは一致しません。現在の仕様は[プロジェクト概要](../README.md)・[設定ガイド](../docs/configuration.ja.md)・[スクリプト仕様](../scripts/README.ja.md)と実装を参照してください。
+> **履歴資料:** これは 2026-09-02 時点の `main` に対する定期レビュー記録です。**指摘は §0 のとおり対応済み**で、件数・行数・SHA はレビュー実施時点のスナップショットです(現在の値とは一致しません)。現在の仕様は[プロジェクト概要](../README.md)・[設定ガイド](../docs/configuration.ja.md)・[スクリプト仕様](../scripts/README.ja.md)と実装を参照してください。
 
 - レビュー日: 2026-09-02(Asia/Tokyo、月・水・金・日 9:00 の定期実行)
 - 対象リポジトリ: `JustinWangJP/feedback-harness`
@@ -8,11 +8,43 @@
 - 規模: shell 7,590 行 / Python 2,265 行 / Markdown 14,060 行、コミット 182 件(2026-08-09〜)、git tag 10件(最新 `v0.1.11` = HEAD)
 - 前回レビューからの差分: `ad5de82`(2026-08-27 レビュー対象)から 56ファイル / +1,352 −123
 
+## 0. 改修状況(このブランチ)
+
+本レポートの指摘5件は `claude/fix-overall-review-2026-09-02` で対応済み(`c538607` ほか)。
+各修正は欠陥を再注入して護欄テストが落ちることを確認している。
+
+| 指摘 | 対応 | 護欄 |
+|------|------|------|
+| ①[P1] `status_changed` の全文判定 | 境界判定を `split_frontmatter` へ集約し、読み書き双方が同じ関数を通る形へ | `tests/test_entry_frontmatter.sh` |
+| ②[P2] `promote`/`merge` の状態ガード欠落 | `require_open` で open 以外を復旧手順つきに拒否 | `tests/test_feedback_log_retire.sh` |
+| ③[P2] ESLint 設定検出の固定列挙 | `harness_has_eslint_config` で2系統を glob 網羅 | `tests/test_check_file_severity.sh` |
+| ④[P3] `json-syntax`/`md-links` の偽 PASS | `yaml-syntax` と同じ事前ゲートで `SKIP` を明示 | `tests/test_check_config.sh` |
+| ⑤[P3] mypy 宣言ゲートの緩い `grep` | 他の宣言ゲートと同じ `^\[tool\.` 形式へ + 走査で固定 | `tests/test_declaration_gates.sh` |
+
+改修中に**同じ契約(環境の問題をユーザーのコードの失敗として報告しない)を破る欠陥を2件**
+検出し、その場で塞いだ。どちらも③の修正で ESLint が実際に起動するようになって初めて表面化した:
+
+- `--format unix` は ESLint 10 で core から外れており、指定すると「The unix formatter is no
+  longer part of core ESLint」というツール自身のエラーが**ユーザーのファイルの問題**として
+  差し戻される(実測 10.1.0)。formatter を指定しない形へ変更した。
+- ESLint の終了コードは 0=指摘なし / 1=lint 違反 / 2=致命的エラーだが、実装は「非0なら違反」と
+  扱っていた。そのため eslintrc しか持たないプロジェクト(ESLint 9 以降は eslintrc を読まない)で
+  「`eslint.config.js` が見つからない」という設定エラーが、編集のたびに差し戻されていた。
+  終了コード 1 のみを違反として扱う形へ変更した。
+
+後者は改修版に対するコードレビューで見つかった。③の列挙拡大が `.eslintrc.*` を検出対象へ
+含めたことで、この経路を実際に通るプロジェクトが増える — 修正が既存の欠陥の露出面を広げる形で、
+「直した結果として別の欠陥が届くようになる」典型である。
+
+なお §6 の拡張案は未着手で、レポートの記載のまま残している。
+
+---
+
 ## 前回レビューについての注記
 
 `review/` 配下で `main` にマージ済みの `*-overall-review.md` は 2026-08-27 版のみだが、この定期タスクと同形式のレビューが `origin/claude/scheduled-review-2026-08-28`(未マージ、PR化していないブランチ)にも存在し、日付はこちらの方が新しい。今回はこれを実質的な「前回レビュー」として解消状況を確認した(2026-08-27 版の指摘は 2026-08-28 版がすでに解消済みとして再確認済みのため、二重には辿らない)。同ブランチが `main` へマージされていない点は運用上の注意点として §5 に記す。
 
-## 0. 対象固定と実測結果
+## 実測結果(レビュー時点)
 
 ### リポジトリの最新化
 
@@ -52,7 +84,7 @@ GitHub CLI(`gh`)・GitHub 連携ツールともにこの実行環境で利用不
 | 前回 | 状況 | 確認内容 |
 |---|---|---|
 | ①[P3] Python 境界の護欄が前置代入・関数経由の捕捉を見逃す | **解消済み** | `tests/test_python_boundary.sh` の走査(`raw_test_python()`)が前置代入つき command substitution・関数経由・解決済み `$TEST_PYTHON` 直接起動まで拡張され(`:91-134`)、護欄自身の変異テスト(3fixture)が検出を固定している。 |
-| ②[P4] `--days` / report の前期間計算が `date.min` 境界で `OverflowError` になる | **解消済み** | `resolve_since()` が `max_days` を超える `--days` をエラーメッセージで拒否し(`scripts/feedback_log.py:213-218`)、`cmd_report` の前期間計算も `date.min` 境界を回避する(`:962-969`)。隔離プロジェクトで `stats --days 1000000000` と `report --since 0001-01-01` を再実行し、どちらも traceback なく終了することを確認した(§9 付録)。 |
+| ②[P4] `--days` / report の前期間計算が `date.min` 境界で `OverflowError` になる | **解消済み** | `resolve_since()` が `max_days` を超える `--days` をエラーメッセージで拒否し(`scripts/feedback_log.py:213-218`)、`cmd_report` の前期間計算も `date.min` 境界を回避する(`:962-969`)。隔離プロジェクトで `stats --days 1000000000` と `report --since 0001-01-01` を再実行し、どちらも traceback なく終了することを確認した(付録)。 |
 
 その後の 2026-08-30 のドキュメント整合性点検(`34857eb`)の指摘(review/ が索引に無い、`docs/superpowers/plans/` の履歴注記欠落、tpy 捕捉の終了コード未検査、doc inventory のパス比較が部分文字列一致、README×3 の記述ずれ)も同一コミットで対応済みであることを、該当テスト(`tests/test_python_boundary.sh` の `unchecked_tpy_capture()`、`tests/test_doc_inventory.sh`)を読んで確認した。今回は「解消済み」の再検証に留め、本文は再掲しない。
 
@@ -76,7 +108,7 @@ GitHub CLI(`gh`)・GitHub 連携ツールともにこの実行環境で利用不
 
 - **`close` / `merge` / `retire` を安心して使えない場面がある。** §7-① により、事情(reason)や本文(detail)に日付を含む文言を書くと、その文言が silently 書き換わり、かつ振り返りレポートから消える。ハーネスの中心的価値は「記録すれば必ず辿れる」ことであり、これはその約束を部分的に破る。
 - **`promote` の誤操作から自力で回復できない。** §7-② により、同じエントリを2回 promote すると `retire` が永久にエラーになり、`rules.md` の手編集(ドキュメントが明示的に避けるよう求めている操作)以外の回復経路が無い。
-- 監査・棚卸しの「未実行」が長期化しても、通常の使用感には現れない(§0)。
+- 監査・棚卸しの「未実行」が長期化しても、通常の使用感には現れない(「実測結果」節)。
 - git tag による配布追跡は前回指摘から改善した(`v0.1.11` が HEAD と一致)。`V0.1.2` / `V0.1.3` のみ表記が不揃い(実害なし)。CONTRIBUTING.md / SECURITY.md / Issue テンプレート / dependabot は引き続き未整備。
 - PostToolUse(`check_file.sh`)と Stop(`check.sh`)の判定が、ESLint の設定ファイル形式によって食い違う場合がある(§7-③)。
 
@@ -114,7 +146,7 @@ GitHub CLI(`gh`)・GitHub 連携ツールともにこの実行環境で利用不
 
 ## 7. 不具合検知
 
-各項目は**隔離した一時プロジェクト**(作業ディレクトリ配下に `git init` した空ディレクトリ、`CLAUDE_PROJECT_DIR` を明示)で実際に再現し、本リポジトリの `.feedback/` には触れていない。再現ログは §9 付録に収めた。
+各項目は**隔離した一時プロジェクト**(作業ディレクトリ配下に `git init` した空ディレクトリ、`CLAUDE_PROJECT_DIR` を明示)で実際に再現し、本リポジトリの `.feedback/` には触れていない。再現ログは付録に収めた。
 
 ### ① [P1] `close`/`promote`/`merge`/`retire` が、本文中の `status_changed:` 文言に釣られて frontmatter を更新せず、書いた本文まで書き換える
 
@@ -366,3 +398,8 @@ bash <repo>/scripts/check.sh "$WORK"     # FAIL python: mypy が出る
 | P2 | 2 | 0 | +2(新規: promote/merge 状態ガード欠落、ESLint 設定検出漏れ) |
 | P3 | 2 | 1 | +1(前回分は解消、新規2件と入れ替わり: json-syntax 偽PASS、mypy誤検出) |
 | P4 | 0 | 1 | -1(前回分は解消) |
+
+上表はレビュー時点(`951f783`)の件数。**改修ブランチではこの5件に加えて、改修中に検出した
+ESLint 経路の2件(formatter の core 外れ・終了コードの一律扱い)も塞いでいる**(§0)。
+いずれも「環境の問題をユーザーのコードの失敗として報告しない」という同じ契約に属し、
+③の修正で ESLint が実際に起動するようになったことで初めて観測可能になった。

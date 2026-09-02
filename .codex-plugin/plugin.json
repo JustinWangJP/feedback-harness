@@ -1,6 +1,6 @@
 {
   "name": "feedback-harness",
-  "version": "0.1.11",
+  "version": "0.1.12",
   "description": "Run project checks through Codex lifecycle hooks and carry human feedback into future sessions.",
   "author": {
     "name": "JustinWangJP",

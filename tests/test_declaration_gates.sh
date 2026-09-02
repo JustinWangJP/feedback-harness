@@ -90,10 +90,12 @@ unanchored_gates() { # unanchored_gates <checks ディレクトリ> — アン�
   local root="$1" file
   for file in "$root"/*.sh; do
     [[ -f "$file" ]] || continue
-    # pyproject.toml / setup.cfg を対象にした grep -q "..." のうち、
-    # パターンが ^ で始まらないものを拾う
-    grep -nE 'grep -q "[^"]+" (pyproject\.toml|setup\.cfg)' "$file" \
-      | grep -vE 'grep -q "\^' \
+    # 行ではなく**一致した grep 呼び出しごと**に取り出して判定する(-o)。
+    # 行単位でフィルタすると、1行にアンカー済みと未アンカーの grep が並んだとき
+    # 「アンカーを含む行」として丸ごと見逃す。あわせてクォートは両種類、
+    # -q / -qE / -qF の別も受ける — 検出漏れは護欄が緑のまま欠陥を通す形で出る
+    grep -noE "grep -q[EF]? *(\"[^\"]*\"|'[^']*') *(pyproject\.toml|setup\.cfg)" "$file" \
+      | grep -vE "grep -q[EF]? *[\"']\\^" \
       | sed "s#^#$(basename "$file"):#"
   done
   return 0
@@ -105,10 +107,22 @@ assert_eq "" "$UNANCHORED" "宣言ゲートの grep は行頭アンカー(^)を�
 # 護欄自身の変異テスト。実リポジトリが偶然きれいなだけでは保証にならない
 FIXTURE="$WORK/gate-guard"
 mkdir -p "$FIXTURE"
+# 再注入は1つの形だけではない。走査が「たまたま見つけられる書き方」しか
+# 拾わないと、別の書き方で戻したときに緑のまま通る(2026-09-02 のレビューで
+# 実際にこの穴を指摘された)。想定される4形をすべて fixture にする
 cat > "$FIXTURE/python.sh" <<'SH'
 if grep -q "\[tool.mypy\]" pyproject.toml 2>/dev/null; then
   run_stage typecheck "mypy" "mypy" "python: mypy" mypy .
 fi
+SH
+cat > "$FIXTURE/single_quote.sh" <<'SH'
+if grep -q '\[tool.mypy\]' pyproject.toml 2>/dev/null; then :; fi
+SH
+cat > "$FIXTURE/extended.sh" <<'SH'
+if grep -qE "\[tool.mypy\]" pyproject.toml 2>/dev/null; then :; fi
+SH
+cat > "$FIXTURE/mixed_line.sh" <<'SH'
+if grep -q "^\[tool\.ruff" pyproject.toml || grep -q "\[tool.mypy\]" pyproject.toml; then :; fi
 SH
 cat > "$FIXTURE/ok.sh" <<'SH'
 if grep -q "^\[tool\.ruff" pyproject.toml 2>/dev/null; then
@@ -117,6 +131,10 @@ fi
 SH
 MUTATIONS="$(unanchored_gates "$FIXTURE")"
 assert_contains "$MUTATIONS" "python.sh:1" "アンカー無しの宣言ゲートを検出する"
+assert_contains "$MUTATIONS" "single_quote.sh:1" "シングルクォートの再注入も検出する"
+assert_contains "$MUTATIONS" "extended.sh:1" "grep -qE での再注入も検出する"
+assert_contains "$MUTATIONS" "mixed_line.sh:1" \
+  "アンカー済みと同じ行に並べた再注入も検出する: $MUTATIONS"
 assert_not_contains "$MUTATIONS" "ok.sh" "アンカー済みのゲートは誤検出しない"
 
 assert_summary
