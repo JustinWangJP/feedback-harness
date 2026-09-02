@@ -385,36 +385,54 @@ def recurrence_candidates() -> list:
     return out
 
 
-def parse_entry(path: Path) -> dict:
-    """frontmatter は「先頭ブロック」だけを読む。
+def split_frontmatter(text: str) -> tuple[str, str]:
+    """エントリを「先頭 frontmatter ブロック」と本文へ分ける。
+
+    frontmatter の境界判定はこの関数だけに置く。読み取り(parse_entry)と
+    書き込み(updated_status_text)で別々に判定すると、片方だけが本文へ
+    はみ出す — 実際 2026-08-27 に読み取り側を先頭ブロック限定へ直した後も、
+    書き込み側は全文を対象にしたままで 2026-09-02 のレビューまで残った。
 
     `---` を見るたびにモードを反転すると、本文中の水平線より後ろにある
     `キー: 値` 形式の行がメタデータとして解釈される。detail に区切り線と
     箇条書きを書くのはエージェントの日常的な形式なので、これは容易に起きる。
 
+    戻り値は (frontmatter部, 本文部) で、連結すると元の text に戻る
+    (書き込み側が本文を1バイトも変えずに frontmatter だけ差し替えられる形)。
+    先頭が `---` でなければ frontmatter は空文字。閉じの `---` が無い
+    ファイルは終端していないため末尾までを frontmatter として扱う(本文は空)
+    — 生成物は cmd_add が必ず閉じるので、これは手書きされた壊れたファイルの扱い。
+    """
+    lines = text.splitlines(keepends=True)
+    if not lines or lines[0].strip() != "---":
+        return "", text
+    index = 1
+    while index < len(lines) and lines[index].strip() != "---":
+        index += 1
+    if index < len(lines):
+        index += 1  # 閉じの --- まで frontmatter に含める
+    return "".join(lines[:index]), "".join(lines[index:])
+
+
+def parse_entry(path: Path) -> dict:
+    """frontmatter は「先頭ブロック」だけを読む(境界の判定は split_frontmatter)。
+
     実害は「記録が消える」ではなく「記録したものが辿れない」形で出る:
     detail に `---` と `id: 99999999` を書いたエントリは、cmd_add が印字した
     id では find_entry に掛からず promote できなくなる(status / category /
     signal も同様に本文で上書きできてしまう)。読み取り側を先頭ブロック限定に
-    直すことで、既存の記録もその場で正しく読めるようになる(書き込み側の
+    することで、既存の記録もその場で正しく読めるようになる(書き込み側の
     エスケープでは、すでに書かれたエントリを救えない)。
-
-    閉じの `---` が無いファイルは frontmatter が終端していないため、
-    従来どおり末尾まで frontmatter として読む(body は空)。生成物は
-    cmd_add が必ず閉じるので、これは手書きされた壊れたファイルの扱いである。
     """
     meta = {}
-    lines = path.read_text(encoding="utf-8").splitlines()
-    index = 0
-    if lines and lines[0].strip() == "---":
-        index = 1
-        while index < len(lines) and lines[index].strip() != "---":
-            if ":" in lines[index]:
-                k, v = lines[index].split(":", 1)
-                meta[k.strip()] = v.strip()
-            index += 1
-        index += 1  # 閉じの --- を飛ばす(無ければ末尾を越えるだけ)
-    meta["body"] = "\n".join(lines[index:]).strip()
+    front, body = split_frontmatter(path.read_text(encoding="utf-8"))
+    for line in front.splitlines()[1:]:  # 開始の --- を飛ばす
+        if line.strip() == "---":
+            break  # 閉じの ---
+        if ":" in line:
+            k, v = line.split(":", 1)
+            meta[k.strip()] = v.strip()
+    meta["body"] = body.strip()
     meta["path"] = path
     return meta
 
@@ -524,6 +542,7 @@ def ensure_sections(text: str) -> str:
 
 def cmd_promote(args):
     target = find_entry(args.entry_id)
+    require_open(target, "promote")
     RULES.parent.mkdir(parents=True, exist_ok=True)
     text = ensure_sections(
         RULES.read_text(encoding="utf-8") if RULES.exists() else rules_seed()
@@ -566,19 +585,61 @@ def find_entry(entry_id: str) -> dict:
     return matches[0]
 
 
+def require_open(target: dict, verb: str) -> None:
+    """昇華系コマンド(promote / merge)の前提条件。close と同じ強さで確認する。
+
+    状態を確認していたのは close だけだったため、同じエントリを2回 promote
+    すると同じ出典を持つルールが rules.md に2件でき、以後その id では
+    find_rule_by_source が曖昧性で失敗して merge / retire が一切通らなくなる —
+    出口が rules.md の手編集(このハーネスが禁じている操作)しか無い袋小路に
+    入る。「入力の検証は入口ごとに強さを変えない」を状態の検証にも適用する
+    (2026-09-02 の全体レビュー由来)。
+    """
+    status = target.get("status")
+    if status == "open":
+        return
+    entry_id = target.get("id")
+    if status == "promoted":
+        recovery = (
+            f"すでに rules.md へ昇華済みです(出典 {entry_id})。"
+            "重ねて昇華すると同じ出典のルールが2件になり、以後この id では"
+            " merge / retire が実行できなくなります。"
+            "ルールを取り下げるなら retire を使ってください"
+        )
+    else:
+        recovery = (
+            f"{verb} できるのは open のエントリだけです。"
+            "同じ指摘を改めて扱うなら add で記録し直してください"
+        )
+    sys.exit(f"ERROR: id={entry_id} は open ではありません (status={status})。{recovery}")
+
+
 def updated_status_text(target: dict, new_status: str, text: str | None = None) -> str:
+    """frontmatter の status / status_changed だけを書き換える。
+
+    判定も置換も先頭 frontmatter ブロックに閉じ込める(split_frontmatter)。
+    全文を対象にすると、detail や close / retire の理由に
+    `status_changed: 2020-01-01` のような文言があるだけで「フィールドは既に
+    ある」と誤判定し、frontmatter へ追加せず**本文側の日付を書き換える**。
+    結果、記録した文言が黙って変わり、status_changed を持たないエントリは
+    report の「close・統合」節から永久に消える(2026-09-02 の全体レビュー由来 —
+    読み取り側の parse_entry と同じ欠陥が書き込み側に残っていた)。
+    """
     today = datetime.date.today().isoformat()
     if text is None:
         text = target["path"].read_text(encoding="utf-8")
-    text = text.replace(f"status: {target.get('status')}", f"status: {new_status}", 1)
-    if "status_changed:" in text:
+    front, body = split_frontmatter(text)
+    front = front.replace(f"status: {target.get('status')}", f"status: {new_status}", 1)
+    if "status_changed:" in front:
         # 1キー・上書き(report の期間集計は「最後の状態変化」を基準にする)
-        text = re.sub(r"status_changed: \d{4}-\d{2}-\d{2}", f"status_changed: {today}", text, count=1)
+        front = re.sub(
+            r"status_changed: \d{4}-\d{2}-\d{2}", f"status_changed: {today}", front, count=1
+        )
     else:
-        text = text.replace(
+        front = front.replace(
             f"status: {new_status}", f"status: {new_status}\nstatus_changed: {today}", 1
         )
-    return text
+    return front + body
 RULE_SOURCE_RE = re.compile(r"^(\s*<sub>出典: )(.+?)( \(.*)$")
 
 
@@ -631,6 +692,7 @@ def cmd_merge(args):
     重複だらけになる。既存ルールの出典に追記し、必要なら本文を更新する。
     """
     target = find_entry(args.entry_id)
+    require_open(target, "merge")
     if not RULES.exists():
         sys.exit("ERROR: rules.md がありません。先に promote でルールを作成してください")
 

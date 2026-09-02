@@ -111,6 +111,58 @@ assert_eq "1" "$RC" "eslint 導入済みなら lint 違反で exit 1"
 assert_contains "$OUT" "no-var" "eslint の指摘内容が出る"
 rm -f "$FAKEBIN/npx"
 
+# --- ESLint の設定ファイル名を固定列挙にしない ---
+# ESLint は eslintrc 系(.eslintrc / .eslintrc.{js,cjs,mjs,json,yml,yaml})と
+# フラット系(eslint.config.{js,mjs,cjs,ts,mts,cts})の2系統を探索する。
+# 4種だけを見ていたため .eslintrc.cjs(package.json が "type": "module" の
+# ときの定番)等では検査が丸ごと飛び、同じ違反を Stop 側の `$PM run lint` だけが
+# 報告する食い違いになっていた。名前ごとに if を足す形にすると必ず取りこぼすので、
+# 代表的な名前を**並べて回す**形で固定する(1つでも漏れれば落ちる)
+{ echo '#!/usr/bin/env bash'
+  echo 'case "$*" in *--version*) exit 0 ;; esac'
+  echo 'echo "bad.js:1:1: warning: unexpected var [no-var]"'
+  echo 'exit 1'
+} > "$FAKEBIN/npx"; chmod +x "$FAKEBIN/npx"
+for cfg in .eslintrc .eslintrc.cjs .eslintrc.yml .eslintrc.yaml .eslintrc.json \
+           eslint.config.js eslint.config.cjs eslint.config.mjs eslint.config.ts; do
+  PC="$(new_project "node_cfg_$(printf '%s' "$cfg" | tr -c 'a-zA-Z0-9' '_')")"
+  printf '{}' > "$PC/$cfg"
+  printf 'var x = 1\n' > "$PC/bad.js"
+  OUT="$(cd "$PC" && run_cf "$PC/bad.js")"; RC=$?
+  assert_eq "1" "$RC" "$cfg を設定として認識し ESLint を実行する"
+  assert_contains "$OUT" "no-var" "$cfg のとき指摘内容が出る: $OUT"
+done
+
+# 設定がまったく無ければ従来どおり ESLint を起動しない(過剰検出への退行防止)
+PN="$(new_project node_cfg_none)"
+printf 'var x = 1\n' > "$PN/bad.js"
+OUT="$(cd "$PN" && run_cf "$PN/bad.js")"; RC=$?
+assert_eq "0" "$RC" "ESLint 設定が無ければ差し戻さない: $OUT"
+rm -f "$FAKEBIN/npx"
+
+# --- formatter を指定しない(core から外れた formatter を渡さない) ---
+# `--format unix` / `compact` は ESLint 10 で core から外れ、指定すると
+# "The unix formatter is no longer part of core ESLint" というツール自身の
+# エラーが**ユーザーのファイルの問題**として差し戻される(実測 eslint 10.1.0)。
+# 「環境の問題をユーザーのコードの失敗として報告しない」という check の契約に
+# 反するため、実際の起動引数を記録して --format を渡していないことを固定する
+# (ソース文字列ではなく本番の呼び出しを見る)
+ARGLOG="$WORK/npx-args.log"
+{ echo '#!/usr/bin/env bash'
+  echo 'case "$*" in *--version*) exit 0 ;; esac'
+  echo "printf '%s\\n' \"\$*\" >> '$ARGLOG'"
+  echo 'echo "bad.js:1:1: warning: unexpected var [no-var]"'
+  echo 'exit 1'
+} > "$FAKEBIN/npx"; chmod +x "$FAKEBIN/npx"
+PF="$(new_project node_formatter)"
+printf '{}' > "$PF/eslint.config.js"
+printf 'var x = 1\n' > "$PF/bad.js"
+( cd "$PF" && run_cf "$PF/bad.js" ) >/dev/null
+ARGS="$(cat "$ARGLOG" 2>/dev/null || true)"
+assert_contains "$ARGS" "eslint" "前提: eslint を実際に起動している: $ARGS"
+assert_not_contains "$ARGS" "--format" "core から外れた formatter を指定しない: $ARGS"
+rm -f "$FAKEBIN/npx"
+
 # --- 壊れた config.yaml は check_file.sh 自身をブロックする ---
 # AGENTS.md §2 で check_file.sh は編集直後の必須ゲート。黙って exit 0 で
 # 通すと、設定の打ち間違いに誰も気づけない

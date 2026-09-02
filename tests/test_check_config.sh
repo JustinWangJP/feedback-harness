@@ -70,4 +70,25 @@ OUT="$(bash "$CHECK" "$P6" 2>&1)"
 assert_not_contains "$OUT" "config: json 構文" "対象ファイルが無ければステージを出さない"
 assert_contains "$OUT" "検出できたスタックがありません" "スタック未検出のメッセージは従来どおり"
 
+# --- 検証器が使えないときは PASS ではなく SKIP ---
+# harness_validate_json / harness_check_md_links は Python 不在で「検証せず成功」を
+# 返すため、run_stage からは合格と区別がつかない。事前ゲートが無いと、1件も
+# 検証していないのに `PASS config: json 構文` と報告する — 未検証を検証済みに
+# 見せる、このハーネスが最も避けてきた形の報告になる(yaml-syntax だけが
+# PyYAML で事前ゲートしていて正しかった)。
+P7="$(new_project no_python)"
+printf '{ invalid\n' > "$P7/broken.json"
+printf '# doc\n\n[dead](./nope.md)\n' > "$P7/doc.md"
+OUT="$(HARNESS_PYTHON=/nonexistent/python bash "$CHECK" "$P7" 2>&1)"
+assert_contains "$OUT" "SKIP  config: json 構文" "Python 不在なら json 構文は SKIP: $OUT"
+assert_contains "$OUT" "SKIP  docs: 内部リンク" "Python 不在なら 内部リンク は SKIP: $OUT"
+assert_not_contains "$OUT" "PASS  config: json 構文" "検証していないのに PASS と報告しない"
+assert_not_contains "$OUT" "PASS  docs: 内部リンク" "検証していないのに PASS と報告しない"
+
+# 対になるケース。SKIP へ倒しすぎる退行(常に SKIP)も同時に禁じる
+OUT="$(bash "$CHECK" "$P7" 2>&1)"; RC=$?
+assert_eq "1" "$RC" "Python があれば壊れたJSON・リンク切れで exit 1"
+assert_contains "$OUT" "FAIL  config: json 構文" "Python があれば json 構文は実際に検証する: $OUT"
+assert_contains "$OUT" "FAIL  docs: 内部リンク" "Python があれば 内部リンク は実際に検証する: $OUT"
+
 assert_summary

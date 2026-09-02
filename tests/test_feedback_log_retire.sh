@@ -69,4 +69,30 @@ assert_contains "$(cat "$RULES_FILE")" "ルールD本文" "退役後も promote 
 ERR="$(fb retire "99999999-999999" --reason "存在しない" 2>&1 || true)"
 assert_contains "$ERR" "ありません" "存在しないIDはエラーになる"
 
+# --- 二重昇華の遮断(close と同じ強さで状態を確認する) ---
+# 状態を見ていたのは close だけだったため、同じエントリを2回 promote すると
+# 同じ出典を持つルールが2件でき、以後その id では find_rule_by_source が
+# 曖昧性で失敗して merge / retire が一切通らなくなる(出口が rules.md の
+# 手編集しか無い袋小路)。入口ごとに検証の強さを変えない、という原則の回帰。
+DUP_ERR="$(fb promote "$ID_D" --rule "ルールD本文(2回目)" 2>&1 || true)"
+assert_contains "$DUP_ERR" "open ではありません" "昇華済みのエントリは promote できない: $DUP_ERR"
+assert_contains "$DUP_ERR" "retire" "エラー文が復旧手順(retire)を案内する: $DUP_ERR"
+assert_not_contains "$(cat "$RULES_FILE")" "ルールD本文(2回目)" "2回目のルール本文は書き込まれない"
+DUP_SOURCES="$(grep -c "出典: $ID_D" "$RULES_FILE" || true)"
+assert_eq "1" "$DUP_SOURCES" "出典行が重複しない"
+
+# merge も同じ状態ガードを通る(片方だけ直して他が残る形を防ぐ)
+MERGE_ERR="$(fb merge "$ID_D" --into "$ID_B" 2>&1 || true)"
+assert_contains "$MERGE_ERR" "open ではありません" "昇華済みのエントリは merge できない: $MERGE_ERR"
+
+# 遮断したうえで、正規の出口(retire)は塞がっていないこと — 袋小路を作らない
+assert_contains "$(fb retire "$ID_D" --reason "重複を作らずに退役できる" 2>&1)" "retired:" \
+  "二重昇華を弾いた後も retire は通る"
+
+# close 済みのエントリも昇華できない(open 以外は一律で弾く)
+ID_E="$(fb add --category style --summary "指摘E" --source human | extract_id)"
+fb close "$ID_E" --reason "一回限り" >/dev/null
+CLOSED_ERR="$(fb promote "$ID_E" --rule "ルールE本文" 2>&1 || true)"
+assert_contains "$CLOSED_ERR" "open ではありません" "close 済みのエントリは promote できない: $CLOSED_ERR"
+
 assert_summary

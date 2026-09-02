@@ -16,7 +16,12 @@ run_python_checks() {
     else
       run_stage_soft format "ruff-format" "ruff" "python: ruff format" ruff format --check .
     fi
-    if [[ -f pyproject.toml ]] && grep -q "\[tool.mypy\]" pyproject.toml 2>/dev/null; then
+    # 宣言の検出は行頭アンカー + ドットのエスケープで行う(他の宣言ゲートと同形式)。
+    # `\[tool.mypy\]` のように緩めると、[project] の description など**宣言では
+    # ない位置**にその文字列があるだけで検出が成立する。mypy には他と違って
+    # WARN フォールバック(run_stage_soft)が無く、誤検出がそのまま完了ブロックの
+    # FAIL になる(2026-09-02 の全体レビュー由来)
+    if [[ -f pyproject.toml ]] && grep -q "^\[tool\.mypy" pyproject.toml 2>/dev/null; then
       run_stage typecheck "mypy" "mypy" "python: mypy" mypy .
     fi
     # カバレッジ相乗り(M3): テストを2回走らせず、計装フラグを足すだけ。

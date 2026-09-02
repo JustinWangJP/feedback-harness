@@ -292,6 +292,20 @@ harness_node_pm() {
   fi
 }
 
+# harness_has_eslint_config — カレントディレクトリに ESLint の設定があるか。
+#
+# ESLint が探索する設定ファイルは eslintrc 系(.eslintrc / .eslintrc.js /
+# .cjs / .mjs / .json / .yml / .yaml)とフラット系(eslint.config.js / .mjs /
+# .cjs / .ts / .mts / .cts)の2系統あり、固定列挙にすると必ず取りこぼす。
+# 実際 check_file.sh は4種だけを見ていたため、.eslintrc.cjs(package.json が
+# "type": "module" のときの定番)や eslint.config.cjs のプロジェクトで
+# PostToolUse の ESLint 検査が丸ごと飛び、同じ違反を Stop 側の
+# `$PM run lint` だけが報告する食い違いになっていた(2026-09-02 の全体レビュー由来)。
+# 判定は glob に寄せる — 新しい拡張子が増えても列挙を足して回らずに済む。
+harness_has_eslint_config() {
+  compgen -G ".eslintrc*" >/dev/null 2>&1 || compgen -G "eslint.config.*" >/dev/null 2>&1
+}
+
 # harness_relpath <パス> <ルート> — ルート相対パスへ正規化(先頭の ./ や / を除く)。
 # check.sh の list_files は git ls-files / find 由来で自然にこの形になるが、
 # check_file.sh が受け取るのは Hooks からの絶対パスなので、harness_excluded に

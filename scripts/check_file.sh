@@ -99,9 +99,24 @@ case "$FILE" in
       # npm の内部エラー(missing packages)がそのまま差し戻される。check.sh の
       # prettier / knip / secretlint と同じく --version で事前プローブし、
       # 未導入は検査せず素通しする(単一ファイル検査に SKIP の出口は無いため)
-      if has npx && [[ -f .eslintrc.json || -f .eslintrc.js || -f eslint.config.js || -f eslint.config.mjs ]] \
+      # 設定ファイル名は固定列挙にしない。ESLint は eslintrc 系(.eslintrc /
+      # .eslintrc.{js,cjs,mjs,json,yml,yaml})とフラット系(eslint.config.{js,mjs,
+      # cjs,ts,mts,cts})を探索するため、4種だけを列挙すると .eslintrc.cjs
+      # (package.json が "type": "module" のときの定番)や eslint.config.cjs を
+      # 使うプロジェクトで検査が丸ごと飛ぶ。Stop 側(checks/node.sh)は
+      # `$PM run lint` を実行するため設定形式に依存せず動くので、
+      # PostToolUse だけが見逃して Stop で初めて出る食い違いになっていた。
+      # check.sh の prettier / knip と同じく compgen のグロブで列挙漏れを避ける
+      # (2026-09-02 の全体レビュー由来)
+      if has npx && harness_has_eslint_config \
          && npx --no-install eslint --version >/dev/null 2>&1; then
-        cur="$(npx --no-install eslint --format unix "$FILE" 2>&1)" && cur=""
+        # formatter は指定しない。`--format unix` / `compact` は ESLint 10 で
+        # core から外れ、指定すると "The unix formatter is no longer part of
+        # core ESLint" というツール自身のエラーが**ユーザーのファイルの問題**
+        # として差し戻される(実測: eslint 10.1.0)。既定の stylish は core に
+        # 残り続けている唯一の選択肢で、1件1行+位置つきでエージェントにも読める。
+        # 環境の問題をユーザーのコードの失敗として報告しない、という check の契約側を優先する
+        cur="$(npx --no-install eslint "$FILE" 2>&1)" && cur=""
       elif has node && [[ "$FILE" == *.js || "$FILE" == *.mjs || "$FILE" == *.cjs ]]; then
         cur="$(node --check "$FILE" 2>&1)" && cur=""
       fi

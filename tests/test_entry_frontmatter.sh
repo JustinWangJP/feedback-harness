@@ -61,4 +61,42 @@ fb close "$ID2" --reason "一回限りの事情" >/dev/null
 assert_contains "$(fb list --status closed)" " $ID2 " "close 後も状態を正しく読める"
 assert_contains "$(fb search "一回限りの事情")" "$ID2" "close理由が本文として残る"
 
+# --- 4. 本文中の `status_changed:` が frontmatter の更新を横取りしない ---
+# updated_status_text は close / promote / merge / retire が共有する。
+# 「フィールドが既にあるか」を全文で判定すると、detail や理由に
+# `status_changed: 2020-01-01` という文言があるだけで既存とみなし、
+# frontmatter へ追加せず**本文側の日付**を置換してしまう。実害は2つあり、
+# どちらも静かに起きるので両方を固定する:
+#   (a) 記録した文言が黙って書き換わる
+#   (b) frontmatter に status_changed が付かず、report の close・retire 節から
+#       そのエントリが永久に消える(status_changed >= since で絞るため)
+TODAY="$(date +%F)"
+ID3="$(fb add --category workflow --summary "frontmatter の注記" \
+  --detail "旧テンプレートに status_changed: 2020-01-01 の行が混じっていた" | extract_id)"
+fb close "$ID3" --reason "一回限りの事情" >/dev/null
+ENTRY3="$(cat "$WORK/project/.feedback/log/$ID3"-*.md)"
+# 先頭 frontmatter ブロックだけを取り出す(1行目の --- の次から、閉じの --- まで)
+FRONT3="$(printf '%s\n' "$ENTRY3" | awk 'NR>1 && /^---[[:space:]]*$/{exit} NR>1{print}')"
+assert_contains "$FRONT3" "status_changed: $TODAY" \
+  "本文に status_changed の文言があっても frontmatter へ追加される: $FRONT3"
+assert_contains "$ENTRY3" "status_changed: 2020-01-01" \
+  "本文に記録した日付が書き換わらない: $ENTRY3"
+# 節を切り出してから照合する。report 全文への部分一致では、同じ id が
+# 「新規エントリ」節にも出るため欠陥があっても成立してしまう(実際、欠陥を
+# 再注入した最初の版はこのアサーションだけ緑のままだった)
+REPORT3="$(fb report --since "$TODAY" | sed -n '/^## close・retire$/,/^## /p')"
+assert_contains "$REPORT3" "$ID3" \
+  "close したエントリが report の close・retire 節に出る: $REPORT3"
+
+# promote 経路も同じ関数を通る(close だけ直して他が残る形を防ぐ)
+ID4="$(fb add --category testing --summary "昇華する注記" \
+  --detail "手順書に status_changed: 2019-12-31 と書かれていた" | extract_id)"
+fb promote "$ID4" --rule "本文の日付を書き換えない" >/dev/null
+ENTRY4="$(cat "$WORK/project/.feedback/log/$ID4"-*.md)"
+FRONT4="$(printf '%s\n' "$ENTRY4" | awk 'NR>1 && /^---[[:space:]]*$/{exit} NR>1{print}')"
+assert_contains "$FRONT4" "status_changed: $TODAY" \
+  "promote でも frontmatter へ status_changed が追加される: $FRONT4"
+assert_contains "$ENTRY4" "status_changed: 2019-12-31" \
+  "promote でも本文の日付が書き換わらない: $ENTRY4"
+
 assert_summary

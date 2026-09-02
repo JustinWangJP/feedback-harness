@@ -12,8 +12,17 @@ run_cross_cutting_checks() {
   while IFS= read -r f; do
     [[ -n "$f" && -f "$f" ]] && JSON_FILES+=("$f")
   done < <(list_files '*.json')
+  # 検証器の可用性は run_stage の外でゲートする。harness_validate_json は
+  # Python 不在で「検証せず成功」を返すため、run_stage からは合格と区別が
+  # つかず `PASS config: json 構文` を出す — 1件も検証していないのに検証済みだと
+  # 報告する形になる。yaml-syntax が PyYAML でやっているのと同じく、
+  # 検証できないことは SKIP として見せる(2026-09-02 の全体レビュー由来)
   if [[ ${#JSON_FILES[@]} -gt 0 ]]; then
-    run_stage lint "json-syntax" "-" "config: json 構文" harness_validate_json "${JSON_FILES[@]}"
+    if harness_has_python; then
+      run_stage lint "json-syntax" "-" "config: json 構文" harness_validate_json "${JSON_FILES[@]}"
+    else
+      record_skip "json-syntax" lint "config: json 構文" "Python 未検出"
+    fi
   fi
 
   YAML_FILES=()
@@ -38,7 +47,12 @@ run_cross_cutting_checks() {
     [[ -n "$f" && -f "$f" ]] && MD_FILES+=("$f")
   done < <(list_files '*.md')
   if [[ ${#MD_FILES[@]} -gt 0 ]]; then
-    run_stage docs "md-links" "-" "docs: 内部リンク" harness_check_md_links "${MD_FILES[@]}"
+    # json-syntax と同じ理由で、検証器が使えないことを PASS で隠さない
+    if harness_has_python; then
+      run_stage docs "md-links" "-" "docs: 内部リンク" harness_check_md_links "${MD_FILES[@]}"
+    else
+      record_skip "md-links" docs "docs: 内部リンク" "Python 未検出"
+    fi
   fi
 
   # 検査対象を何か検出できたか。ここまでの全ステージの結果を見て判断する。
