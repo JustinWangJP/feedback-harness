@@ -709,8 +709,9 @@ def cmd_close(args):
     「open が3件以上」の通知が永久に鳴り続ける。
     """
     target = find_entry(args.entry_id)
-    if target.get("status") != "open":
-        sys.exit(f"ERROR: id={args.entry_id} は open ではありません (status={target.get('status')})")
+    # 前提条件は promote / merge と同じ関数に載せる。close だけインラインで
+    # 持つと、文言も復旧手順も片方にしか反映されない形でドリフトする
+    require_open(target, "close")
     text = target["path"].read_text(encoding="utf-8")
     if args.reason:
         text = text.rstrip("\n")

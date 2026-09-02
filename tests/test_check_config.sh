@@ -97,6 +97,10 @@ assert_not_contains "$OUT" "PASS  config: json 構文" \
 # 検査していないことが一覧から見えなくなる(record_skip の契約)。SKIP 行の存在を求める
 assert_contains "$OUT" "SKIP  config: json 構文" \
   "検査対象が残らないことを SKIP として見せる: $OUT"
+# SKIP 行が1本立つと RESULTS が空でなくなる。スタック未検出の案内を
+# ${#RESULTS[@]} だけで判定していると、この案内が黙って消える
+assert_contains "$OUT" "検出できたスタックがありません" \
+  "SKIP しか無くてもスタック未検出の案内は残る: $OUT"
 
 # 対になるケース: 検証対象が1件でもあれば従来どおり検証する
 printf '{"a": 1,\n' > "$P8/broken.json"

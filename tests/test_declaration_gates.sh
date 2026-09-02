@@ -28,16 +28,16 @@ new_project() { # new_project <名前>
   printf '%s\n' "$d"
 }
 
-check_ids() { # check_ids <プロジェクト> — --list-checks の検査ID列だけを返す
-  # 出力を見る前に終了コードを見る。--list-checks が落ちると ID 列は空になり、
+check_ids() { # check_ids <プロジェクト> — --list-checks を実行し検査ID列を IDS へ入れる
+  # 標準出力で返さない。`IDS="$(check_ids …)"` の形にすると、失敗時の fail が
+  # command substitution の subshell で起き、ASSERT_FAILURES の加算ごと捨てられる
+  # (護欄が自力で落ちられなくなる)。呼び出し側は直接呼んで $IDS を読む。
+  # 出力を見る前に終了コードを見る — 落ちると ID 列は空になり、
   # 「mypy が含まれないこと」を確かめる否定形のアサーションが素通しで成立する
   local out rc
   out="$(bash "$CHECK" "$1" --list-checks 2>&1)"; rc=$?
-  if [[ $rc -ne 0 ]]; then
-    fail "--list-checks が失敗した(exit $rc): $out"
-    return 0
-  fi
-  printf '%s\n' "$out" | awk '{print $1}'
+  assert_eq "0" "$rc" "--list-checks が成功する($1): $out"
+  IDS="$(printf '%s\n' "$out" | awk '{print $1}')"
 }
 
 # --- 宣言ではない位置の文言でゲートが成立しない ---
@@ -50,7 +50,7 @@ description = "Type-checked with [tool.mypy] settings inherited from the base co
 [tool.ruff]
 line-length = 100
 TOML
-IDS="$(check_ids "$P1")"
+check_ids "$P1"
 assert_contains "$IDS" "ruff" "前提: 実在する宣言([tool.ruff])は検出される: $IDS"
 assert_not_contains "$IDS" "mypy" "説明文中の [tool.mypy] では mypy を走らせない: $IDS"
 
@@ -61,7 +61,7 @@ cat > "$P2/pyproject.toml" <<'TOML'
 name = "demo"
 # [tool.mypy] はまだ有効にしていない
 TOML
-IDS="$(check_ids "$P2")"
+check_ids "$P2"
 # 否定形だけだと、--list-checks が何も出さなくなった場合に素通しで成立する。
 # 同じ出力に必ず現れるものを対にして、走っていること自体を確かめる
 assert_contains "$IDS" "ruff" "前提: pyproject.toml があるので ruff は列挙される: $IDS"
@@ -76,7 +76,7 @@ name = "demo"
 [tool.mypy]
 strict = false
 TOML
-IDS="$(check_ids "$P3")"
+check_ids "$P3"
 assert_contains "$IDS" "mypy" "[tool.mypy] セクションがあれば mypy を走らせる: $IDS"
 
 # サブテーブルも前方一致で検出する(ruff / deptry / vulture と同じ形)。
@@ -91,7 +91,7 @@ name = "demo"
 [tool.mypy.plugins]
 foo = "bar"
 TOML
-IDS="$(check_ids "$P4")"
+check_ids "$P4"
 assert_contains "$IDS" "mypy" "[tool.mypy.*] のサブテーブルでも mypy を走らせる: $IDS"
 
 # TOML は見出しの前の空白を許す。行頭アンカーだけだとインデントされた見出しを
@@ -105,7 +105,7 @@ name = "demo"
   [tool.mypy]
   strict = false
 TOML
-IDS="$(check_ids "$P5")"
+check_ids "$P5"
 assert_contains "$IDS" "mypy" "インデントされた見出しでも宣言として扱う: $IDS"
 
 # --- 走査: pyproject.toml を見る宣言ゲートはすべて行頭アンカーを持つ ---

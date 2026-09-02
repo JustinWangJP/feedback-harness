@@ -295,9 +295,15 @@ done
 . "$LIBDIR/checks/cross_cutting.sh"
 run_cross_cutting_checks
 # ---------- 結果出力 ----------
+# スタック未検出の案内。SKIP しか無いときにも出す必要があるため関数にする —
+# 「対象が JSONC だけ」等で SKIP 行が1本立つと RESULTS が空でなくなり、
+# 条件を ${#RESULTS[@]} だけに置くと案内が黙って消える(実際に消えた)
+no_stack_hint() {
+  echo "検出できたスタックがありません (pyproject.toml / package.json / go.mod / Cargo.toml / pom.xml / *.sh / Makefile:check を確認)"
+}
 echo "=== feedback-harness check ==="
 if [[ $STACK_FOUND -eq 0 && ${#RESULTS[@]} -eq 0 ]]; then
-  echo "検出できたスタックがありません (pyproject.toml / package.json / go.mod / Cargo.toml / pom.xml / *.sh / Makefile:check を確認)"
+  no_stack_hint
   exit 0
 fi
 if [[ ${#RESULTS[@]} -eq 0 ]]; then
@@ -333,6 +339,8 @@ for r in "${RESULTS[@]}"; do
 done
 if [[ $((PASSED + WARNS)) -eq 0 ]]; then
   echo "実行できたステージがありません(すべてSKIP)"
+  # 全SKIPかつスタック未検出なら、SKIP の理由より先に「どこを見ればよいか」が要る
+  [[ $STACK_FOUND -eq 0 ]] && no_stack_hint
   exit 0
 fi
 if [[ $WARNS -gt 0 && $SKIPPED -gt 0 ]]; then

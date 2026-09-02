@@ -110,4 +110,11 @@ fb close "$ID_E" --reason "一回限り" >/dev/null
 CLOSED_ERR="$(fb promote "$ID_E" --rule "ルールE本文" 2>&1 || true)"
 assert_contains "$CLOSED_ERR" "open ではありません" "close 済みのエントリは promote できない: $CLOSED_ERR"
 
+# close 自身も同じ関数(require_open)を通る。インラインの確認を残すと、
+# 文言も復旧手順も片方にしか反映されない形でドリフトする
+DOUBLE_CLOSE_ERR="$(fb close "$ID_E" --reason "二重close" 2>&1 || true)"
+assert_contains "$DOUBLE_CLOSE_ERR" "open ではありません" "close 済みは再 close できない: $DOUBLE_CLOSE_ERR"
+assert_contains "$DOUBLE_CLOSE_ERR" "add で記録し直して" \
+  "close のエラーも復旧手順を案内する(promote / merge と同じ関数を通る): $DOUBLE_CLOSE_ERR"
+
 assert_summary
