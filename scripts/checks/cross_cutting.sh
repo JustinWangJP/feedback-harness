@@ -8,9 +8,15 @@ run_cross_cutting_checks() {
   # Bash 経由・外部エディタで壊された設定ファイルが完了前チェックをすり抜ける
   # (Shell ステージを追加したときと同じ非対称性)。
   # STACK_FOUND は立てない — 設定ファイルの存在は「スタックの検出」ではない。
+  # JSONC(コメント付きが慣例のファイル)はここで落とす。harness_validate_json の
+  # 内部でも同じ除外をするが、そちらに任せると「対象が1件も残らなかった」場合に
+  # 何も検証しないまま成功が返り、ステージが PASS になる — tsconfig.json だけの
+  # プロジェクトが「JSON を検証済み」に見える(2026-09-02 の再レビュー由来)
   JSON_FILES=()
   while IFS= read -r f; do
-    [[ -n "$f" && -f "$f" ]] && JSON_FILES+=("$f")
+    [[ -n "$f" && -f "$f" ]] || continue
+    harness_is_jsonc "$f" && continue
+    JSON_FILES+=("$f")
   done < <(list_files '*.json')
   # 検証器の可用性は run_stage の外でゲートする。harness_validate_json は
   # Python 不在で「検証せず成功」を返すため、run_stage からは合格と区別が

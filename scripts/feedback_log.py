@@ -684,7 +684,20 @@ def find_rule_by_source(lines: list, entry_id: str) -> tuple:
     if not hits:
         sys.exit(f"ERROR: 出典に {entry_id} を含むルールが rules.md にありません")
     if len(hits) > 1:
-        sys.exit(f"ERROR: 出典に {entry_id} を含むルールが{len(hits)}件あります。rules.md の出典の重複を解消してください")
+        # 0.1.12 より前は promote / merge に状態ガードが無く、同じエントリを
+        # 2回昇華できた。その結果できた重複は既存データとして残るため、
+        # ガードを足しただけでは救えない。ここで止まると merge / retire の
+        # どちらも通らず出口が無くなるので、どの行を残すかまで具体的に案内する。
+        # rules.md の手編集は通常禁止だが、この復旧だけは例外として明示する
+        where = "\n".join(f"    {n + 1}行目: {mm.group(0).strip()}" for n, mm in hits)
+        sys.exit(
+            f"ERROR: 出典に {entry_id} を含むルールが{len(hits)}件あります"
+            "(0.1.12 より前の二重昇華で作られた重複です)。\n"
+            f"{where}\n"
+            "  復旧: 残す1件を決め、他のルール(本文行 `- **[...]**` と直下の出典行)を"
+            " rules.md から削除してください。"
+            "通常 rules.md の手編集は行いませんが、この重複の解消だけは例外です"
+        )
     return hits[0]
 
 

@@ -150,8 +150,8 @@ bash scripts/feedback.sh <子命令> [参数]
 | `add` | `--category <cat>` `--summary "<摘要>"` `[--detail "<详情>"]` `[--source human\|hook\|agent]` `[--signal <context\|instruction\|workflow\|failure>]` | 记录条目。open 条目达到 3 个或更多时提示存在 promote 候选。`--signal` 表示信号类型，省略时根据 detail/category 推断。存在 `根因:` 行时，只允许填写定义好的五种分类之一，并且只能填写一项 |
 | `list` | `[--status open\|promoted\|closed\|retired\|all]` `[--category <cat>]` `[--signal <context\|instruction\|workflow\|failure\|unknown>]` | 列出条目（默认为 `open`）。`--signal unknown` 用于选择没有 signal 的旧条目 |
 | `search` | `<关键字>` | 对条目执行全文搜索 |
-| `promote` | `<entry-id>` `--rule "<一条通用规则>"` | 向 `rules.md` **添加新规则**，并将目标条目标记为 `promoted` |
-| `merge` | `<entry-id>` `--into <现有规则的来源id>` `[--rule "<更新后的文本>"]` | 在不增加新规则行的情况下向**现有规则**追加来源，并将目标条目标记为 `promoted`。用于同一原则再次出现时 |
+| `promote` | `<entry-id>` `--rule "<一条通用规则>"` | 向 `rules.md` **添加新规则**，并将目标条目标记为 `promoted`。仅当条目为 `open` 时才可执行（重复整理会生成两条来源相同的规则，此后该 id 无法再执行 `merge` / `retire`） |
+| `merge` | `<entry-id>` `--into <现有规则的来源id>` `[--rule "<更新后的文本>"]` | 在不增加新规则行的情况下向**现有规则**追加来源，并将目标条目标记为 `promoted`。用于同一原则再次出现时。与 `promote` 相同，仅当条目为 `open` 时才可执行 |
 | `close` | `<entry-id>` `[--reason "<原因>"]` | 不整理为规则，直接标记为 `closed`。用于无法通用化的一次性反馈 |
 | `retire` | `<来源entry-id>` `--reason "<停用原因>"` | 从 rules.md **移除已整理的规则**，并将其来源条目（包括已经 merge 的条目）标记为 `retired`。在规则盘点并由人工裁定后使用 |
 | `rules` | （无） | 显示当前 `rules.md` |

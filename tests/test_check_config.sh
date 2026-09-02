@@ -85,6 +85,21 @@ assert_contains "$OUT" "SKIP  docs: 内部リンク" "Python 不在なら 内部
 assert_not_contains "$OUT" "PASS  config: json 構文" "検証していないのに PASS と報告しない"
 assert_not_contains "$OUT" "PASS  docs: 内部リンク" "検証していないのに PASS と報告しない"
 
+# JSONC しか無いプロジェクトでも「検証済み」に見せない。
+# harness_validate_json は内部で JSONC を除外するため、対象が1件も残らないと
+# 何も検証しないまま成功が返り、ステージが PASS になる(同じ偽 PASS の別経路)
+P8="$(new_project jsonc_only)"
+printf '{\n  // コメント\n  "a": 1\n}\n' > "$P8/tsconfig.json"
+OUT="$(bash "$CHECK" "$P8" 2>&1)"
+assert_not_contains "$OUT" "PASS  config: json 構文" \
+  "JSONC だけのプロジェクトで json 構文を PASS と報告しない: $OUT"
+
+# 対になるケース: 検証対象が1件でもあれば従来どおり検証する
+printf '{"a": 1,\n' > "$P8/broken.json"
+OUT="$(bash "$CHECK" "$P8" 2>&1)"; RC=$?
+assert_eq "1" "$RC" "JSONC と壊れた JSON が混在すれば exit 1"
+assert_contains "$OUT" "FAIL  config: json 構文" "JSONC を除いた残りは検証される: $OUT"
+
 # 対になるケース。SKIP へ倒しすぎる退行(常に SKIP)も同時に禁じる
 OUT="$(bash "$CHECK" "$P7" 2>&1)"; RC=$?
 assert_eq "1" "$RC" "Python があれば壊れたJSON・リンク切れで exit 1"
