@@ -35,7 +35,7 @@ run_cross_cutting_checks() {
     # 検査対象が JSONC だけだった。ステージごと消すと --list-checks からも
     # 結果からも行が無くなり、「検査していない」ことが見えない(record_skip の
     # 契約は、事前に判定できる SKIP も同じ出口へ載せること)。
-    # RESULTS が空のままだと anything_detected も false になり、
+    # 1件も記録しないと anything_detected も false になり、
     # secretlint 等の案内まで巻き添えで消える
     record_skip "json-syntax" lint "config: json 構文" "JSONC のみ(コメント付きJSONは構文検査の対象外)"
   fi
@@ -72,8 +72,14 @@ run_cross_cutting_checks() {
 
   # 検査対象を何か検出できたか。ここまでの全ステージの結果を見て判断する。
   # 何も検出できていないディレクトリに「設定すれば有効になる」と案内しても
-  # 相手がいない上に、案内行が残ることで「スタック未検出」の報告を潰してしまう
-  anything_detected() { [[ $STACK_FOUND -eq 1 || ${#RESULTS[@]} -gt 0 ]]; }
+  # 相手がいない上に、案内行が残ることで「スタック未検出」の報告を潰してしまう。
+  #
+  # 材料は RECORDED_CHECKS であって ${#RESULTS[@]} ではない。RESULTS は通常
+  # モードでしか積まれないため、--list-checks では常に 0 になり、この判定が
+  # 実質 STACK_FOUND だけに退化する。結果、スタック無し + 設定ファイルだけの
+  # プロジェクト(tsconfig.json のみ・yml のみ等)で、通常実行には出る
+  # secretlint / gitleaks の案内が一覧からだけ消えていた(2026-09-03 のレビュー由来)
+  anything_detected() { [[ $STACK_FOUND -eq 1 || $RECORDED_CHECKS -gt 0 ]]; }
 
   # 秘密情報スキャン。secretlint は .secretlintrc.* が無いと exit 2 で実行できない
   # (実測)ため、設定の有無をゲートにする。設定を書いた=チームが検査を選んだ、

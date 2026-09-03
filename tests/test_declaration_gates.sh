@@ -111,20 +111,41 @@ assert_contains "$IDS" "mypy" "インデントされた見出しでも宣言と�
 # --- 走査: pyproject.toml を見る宣言ゲートはすべて行頭アンカーを持つ ---
 # 個別ケースだけを直すと、同じ抜けが隣のゲートへ再発する(実際 mypy だけが
 # ruff / deptry / vulture と違う書き方のまま残っていた)。パターンの形を走査で固定する。
-unanchored_gates() { # unanchored_gates <checks ディレクトリ> — アンカー無しの grep を列挙
+# 走査の形。フラグは固定列挙にしない — `-q` / `-qE` / `-qF` だけを受ける正規表現に
+# したところ、`grep -qs`・`grep -q --`・`grep "pat" file >/dev/null` がすべて素通りした
+# (2026-09-03 のレビューで実測)。「設定ファイル名を固定列挙しない」と同じ誤りを
+# 護欄側で繰り返していたので、フラグ列は任意個の `-...` として受ける。
+# パターンはクォート両種類と裸の3形を受ける。
+GATE_CALL='grep +(-[^ ]+ +)*("[^"]*"|'"'"'[^'"'"']*'"'"'|[^ ]+) +(pyproject\.toml|setup\.cfg)'
+# アンカー済み = フラグ列の直後に来るパターンが(クォートの有無を問わず)^ で始まる
+GATE_ANCHORED='grep +(-[^ ]+ +)*["'"'"']?\^'
+
+declaration_gates() { # declaration_gates <ディレクトリ> — 宣言ゲートの grep 呼び出しを全件列挙
   local root="$1" file
   for file in "$root"/*.sh; do
     [[ -f "$file" ]] || continue
     # 行ではなく**一致した grep 呼び出しごと**に取り出して判定する(-o)。
     # 行単位でフィルタすると、1行にアンカー済みと未アンカーの grep が並んだとき
-    # 「アンカーを含む行」として丸ごと見逃す。あわせてクォートは両種類、
-    # -q / -qE / -qF の別も受ける — 検出漏れは護欄が緑のまま欠陥を通す形で出る
-    grep -noE "grep -q[EF]? *(\"[^\"]*\"|'[^']*') *(pyproject\.toml|setup\.cfg)" "$file" \
-      | grep -vE "grep -q[EF]? *[\"']\\^" \
-      | sed "s#^#$(basename "$file"):#"
+    # 「アンカーを含む行」として丸ごと見逃す
+    grep -noE "$GATE_CALL" "$file" | sed "s#^#$(basename "$file"):#"
   done
   return 0
 }
+
+unanchored_gates() { # unanchored_gates <ディレクトリ> — うちアンカー無しのものだけ
+  declaration_gates "$1" | grep -vE "$GATE_ANCHORED"
+  return 0
+}
+
+# 走査が実物のゲートに触れていることを先に固定する。これが無いと、
+# scripts/checks が移動・改名されただけで対象が0件になり、
+# `assert_eq "" "$UNANCHORED"` が「1件も見ていないから空」で成立してしまう
+# (否定形のアサーションだけを置いたときの典型的な素通し)。
+ALL_GATES="$(declaration_gates "$REPO/scripts/checks")"
+assert_contains "$ALL_GATES" "python.sh:" "走査が実際の宣言ゲートを見ている: $ALL_GATES"
+for gate in "tool\.ruff" "tool\.mypy" "tool\.deptry" "tool\.vulture" "importlinter"; do
+  assert_contains "$ALL_GATES" "$gate" "既知の宣言ゲート($gate)が走査に含まれる: $ALL_GATES"
+done
 
 UNANCHORED="$(unanchored_gates "$REPO/scripts/checks")"
 assert_eq "" "$UNANCHORED" "宣言ゲートの grep は行頭アンカー(^)を持つ"
@@ -149,10 +170,26 @@ SH
 cat > "$FIXTURE/mixed_line.sh" <<'SH'
 if grep -q "^\[tool\.ruff" pyproject.toml || grep -q "\[tool.mypy\]" pyproject.toml; then :; fi
 SH
+# 以下3形は、フラグを -q/-qE/-qF に固定列挙していた旧走査がすべて取りこぼしていた
+cat > "$FIXTURE/combined_flag.sh" <<'SH'
+if grep -qs "\[tool.mypy\]" pyproject.toml; then :; fi
+SH
+cat > "$FIXTURE/dash_dash.sh" <<'SH'
+if grep -q -- "\[tool.mypy\]" pyproject.toml; then :; fi
+SH
+cat > "$FIXTURE/redirect.sh" <<'SH'
+if grep "\[tool.mypy\]" pyproject.toml >/dev/null 2>&1; then :; fi
+SH
 cat > "$FIXTURE/ok.sh" <<'SH'
 if grep -q "^\[tool\.ruff" pyproject.toml 2>/dev/null; then
   run_stage format "ruff-format" "ruff" "python: ruff format" ruff format --check .
 fi
+SH
+# アンカー済みの別表記は誤検出しない(走査を広げた副作用で真のゲートを弾かないこと)
+cat > "$FIXTURE/ok_variants.sh" <<'SH'
+if grep -qs "^\[tool\.mypy" pyproject.toml; then :; fi
+if grep -q -- "^\[tool\.deptry" pyproject.toml; then :; fi
+if grep "^\[importlinter\]" setup.cfg >/dev/null 2>&1; then :; fi
 SH
 MUTATIONS="$(unanchored_gates "$FIXTURE")"
 assert_contains "$MUTATIONS" "python.sh:1" "アンカー無しの宣言ゲートを検出する"
@@ -160,6 +197,14 @@ assert_contains "$MUTATIONS" "single_quote.sh:1" "シングルクォートの再
 assert_contains "$MUTATIONS" "extended.sh:1" "grep -qE での再注入も検出する"
 assert_contains "$MUTATIONS" "mixed_line.sh:1" \
   "アンカー済みと同じ行に並べた再注入も検出する: $MUTATIONS"
+assert_contains "$MUTATIONS" "combined_flag.sh:1" \
+  "結合フラグ(-qs)での再注入も検出する: $MUTATIONS"
+assert_contains "$MUTATIONS" "dash_dash.sh:1" \
+  "-- 区切りを挟んだ再注入も検出する: $MUTATIONS"
+assert_contains "$MUTATIONS" "redirect.sh:1" \
+  "-q を使わず >/dev/null で黙らせた再注入も検出する: $MUTATIONS"
 assert_not_contains "$MUTATIONS" "ok.sh" "アンカー済みのゲートは誤検出しない"
+assert_not_contains "$MUTATIONS" "ok_variants.sh" \
+  "アンカー済みなら別表記(-qs / -- / リダイレクト)も誤検出しない: $MUTATIONS"
 
 assert_summary

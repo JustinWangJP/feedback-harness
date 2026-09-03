@@ -57,6 +57,20 @@ fi
 
 # has() / SHELLCHECK_SEVERITY は lib.sh で定義(check.sh と共有)
 
+# check_sev <検査ID> <既定severity> — SEV に実効 severity を、CHECK_ID に検査IDを設定する。
+#
+# severity の解決と「いまどの検査を実行しているか」の記録を1つの入口に束ねる。
+# 別々に持つと、検査を足したときに CHECK_ID の設定だけ書き漏れ、その検査の
+# WARN が無ラベルで記録される — 書き漏れが静かに通る形になる。
+# 戻り値は $(...) ではなく変数で返す。command substitution は subshell を作るため、
+# 関数内での CHECK_ID の更新が呼び出し側へ届かない(CLAUDE.md の既知の落とし穴)。
+SEV=""
+CHECK_ID=""
+check_sev() {
+  CHECK_ID="$1"
+  SEV="$(harness_check_severity "$1" "$2")"
+}
+
 # emit <検査ID既定severity取得済みの値> <出力> — severity: warn は指摘を
 # 表示するだけで非ブロッキング(WARN_OUT)、それ以外(既定 fail を含む)は
 # ブロッキング(OUT)に振り分ける。skip の呼び出し元では呼ばない。
@@ -67,6 +81,14 @@ emit() {
   [[ -z "$text" ]] && return
   if [[ "$sev" == "warn" ]]; then
     WARN_OUT="${WARN_OUT:+$WARN_OUT$'\n'}$text"
+    # WARN だけのときこのスクリプトは exit 0 で返り、post_edit.sh は
+    # 成功した実行の出力を捨てて pass を記録する。記録まで捨てると
+    # 「検査が何も見ずに素通しした」ことが件数からも消え、件数が減るのではなく
+    # 初回通過率が上がったように見える形で壊れる(ESLint が致命的エラーで
+    # 判定を返せず、.ts/.tsx/.jsx には構文検査のフォールバックも無い場合が
+    # まさにこれ)。本体は止めないまま、記録だけは残す
+    # (CLAUDE.md「握り潰しと記録が消えるを混同しない」— 2026-09-03 のレビュー由来)
+    harness_log_warn "$ROOT" "${CHECK_ID:-check_file}" post_edit
   else
     OUT="${OUT:+$OUT$'\n'}$text"
   fi
@@ -74,8 +96,8 @@ emit() {
 
 case "$FILE" in
   *.py)
-    sev="$(harness_check_severity ruff fail)"
-    if [[ "$sev" != "skip" ]]; then
+    check_sev ruff fail
+    if [[ "$SEV" != "skip" ]]; then
       cur=""
       if has ruff; then
         # exit code で判定する(ruffは成功時も "All checks passed!" を出力するため)
@@ -87,12 +109,12 @@ case "$FILE" in
         # CR は capture 側で落とす
         cur="${cur//$'\r'/}"
       fi
-      emit "$sev" "$cur"
+      emit "$SEV" "$cur"
     fi
     ;;
   *.ts|*.tsx|*.js|*.jsx|*.mjs|*.cjs)
-    sev="$(harness_check_severity node-lint fail)"
-    if [[ "$sev" != "skip" ]]; then
+    check_sev node-lint fail
+    if [[ "$SEV" != "skip" ]]; then
       cur=""
       # npx --no-install は「未インストール」も「lint 違反」も非0で返すため、
       # 設定ファイルの有無だけをゲートにすると eslint 未導入のプロジェクトで
@@ -135,14 +157,16 @@ case "$FILE" in
             # コードの問題ではない)。WARN へ載せるのは、このスクリプトを
             # 直接叩いたときに設定の破綻が見えるようにするため。
             #
-            # 既知の限界: PostToolUse 経由ではこの WARN は届かない
-            # (post_edit.sh は exit 0 の出力を捨てる)。Stop 側も
-            # `node-lint` は `npm_script_exists lint` がゲートなので、
-            # lint スクリプトを持たないプロジェクトでは**どちらの経路でも
-            # 報告されない**。.js/.mjs/.cjs は下の構文検査が拾うが、
-            # .ts/.tsx/.jsx は拾えない。WARN 経路そのものの是正
-            # (PostToolUse の JSON 出力)は Codex 互換の確認が要るため、
-            # review/2026-09-02-overall-review.md へ申し送りとして残している
+            # PostToolUse 経由ではこの WARN 本文はエージェントへ届かない
+            # (post_edit.sh は exit 0 の出力を捨てる)。Stop 側も `node-lint` は
+            # `npm_script_exists lint` がゲートなので、lint スクリプトを持たない
+            # プロジェクトでは**どちらの経路でも本文は報告されない**。
+            # .js/.mjs/.cjs は下の構文検査が拾うが .ts/.tsx/.jsx は拾えず、
+            # このとき lint 被覆はゼロになる。本文を届ける経路の是正
+            # (PostToolUse の JSON 出力)は Codex 互換の確認が要るため
+            # review/2026-09-02-overall-review.md への申し送りのままだが、
+            # **記録**は emit が harness_log_warn で残す — 被覆ゼロが
+            # 初回通過率の上昇として現れる状態は先に断ってある
             # 全文は出さない。この WARN は編集のたびに出るため、原因の行だけに絞る
             # (ESLint の致命的エラーは冒頭数行に理由が出る)
             emit warn "check_file: ESLint を実行できませんでした(exit ${eslint_rc})。設定を確認してください:
@@ -155,49 +179,49 @@ $(printf '%s\n' "$cur" | grep -v '^[[:space:]]*$' | head -n 3)"
          && [[ "$FILE" == *.js || "$FILE" == *.mjs || "$FILE" == *.cjs ]]; then
         cur="$(node --check "$FILE" 2>&1)" && cur=""
       fi
-      emit "$sev" "$cur"
+      emit "$SEV" "$cur"
     fi
     ;;
   *.go)
-    sev="$(harness_check_severity gofmt fail)"
-    if [[ "$sev" != "skip" ]] && has gofmt; then
+    check_sev gofmt fail
+    if [[ "$SEV" != "skip" ]] && has gofmt; then
       UNFMT="$(gofmt -l "$FILE" 2>&1)"
-      [[ -n "$UNFMT" ]] && emit "$sev" "gofmt: 未フォーマット: $UNFMT (gofmt -w を実行せよ)"
+      [[ -n "$UNFMT" ]] && emit "$SEV" "gofmt: 未フォーマット: $UNFMT (gofmt -w を実行せよ)"
     fi
     ;;
   *.rs)
-    sev="$(harness_check_severity cargo-fmt fail)"
-    if [[ "$sev" != "skip" ]] && has rustfmt; then
-      rustfmt --check "$FILE" >/dev/null 2>&1 || emit "$sev" "rustfmt: 未フォーマット: $FILE"
+    check_sev cargo-fmt fail
+    if [[ "$SEV" != "skip" ]] && has rustfmt; then
+      rustfmt --check "$FILE" >/dev/null 2>&1 || emit "$SEV" "rustfmt: 未フォーマット: $FILE"
     fi
     ;;
   *.sh)
-    bsev="$(harness_check_severity bash-syntax fail)"
-    if [[ "$bsev" != "skip" ]]; then
+    check_sev bash-syntax fail
+    if [[ "$SEV" != "skip" ]]; then
       cur="$(bash -n "$FILE" 2>&1)" || true
-      emit "$bsev" "$cur"
+      emit "$SEV" "$cur"
     fi
-    scsev="$(harness_check_severity shellcheck fail)"
-    if [[ "$scsev" != "skip" ]] && has shellcheck; then
+    check_sev shellcheck fail
+    if [[ "$SEV" != "skip" ]] && has shellcheck; then
       # -S: style/info まで拾うと導入初日のプロジェクトが既存コードで詰まる
       # -x: source 先を追う(追えないだけの SC1091 を問題として報告しない)
       SC="$(shellcheck -x -S "$SHELLCHECK_SEVERITY" -f gcc "$FILE" 2>&1)" || true
-      emit "$scsev" "$SC"
+      emit "$SEV" "$SC"
     fi
     ;;
   *.json)
     # 検証ロジックは lib.sh に集約(check.sh と同じ判定を保つため)
-    sev="$(harness_check_severity json-syntax fail)"
-    if [[ "$sev" != "skip" ]]; then
+    check_sev json-syntax fail
+    if [[ "$SEV" != "skip" ]]; then
       cur="$(harness_validate_json "$FILE" 2>&1)" && cur=""
-      emit "$sev" "$cur"
+      emit "$SEV" "$cur"
     fi
     ;;
   *.yaml|*.yml)
-    sev="$(harness_check_severity yaml-syntax fail)"
-    if [[ "$sev" != "skip" ]]; then
+    check_sev yaml-syntax fail
+    if [[ "$SEV" != "skip" ]]; then
       cur="$(harness_validate_yaml "$FILE" 2>&1)" && cur=""
-      emit "$sev" "$cur"
+      emit "$SEV" "$cur"
     fi
     ;;
 esac

@@ -422,20 +422,25 @@ harness_log_event() {
   return 0
 }
 
-# harness_log_warn <ルート> <ラベル> — WARN を events.jsonl に1行追記する。
+# harness_log_warn <ルート> <ラベル> [フック名] — WARN を events.jsonl に1行追記する。
 #
 # Stop フックは成功時(exit 0)の出力をエージェントへ渡さないため、WARN は
 # そのままでは誰にも届かない。記録して stats/report に載せることで、
 # 反復する WARN が「設定を入れて FAIL に昇格させるか」の判断材料になる。
+#
+# フック名は既定 stop。PostToolUse(post_edit)も同じ問題を持つ — check_file.sh が
+# WARN だけを出して exit 0 したとき、post_edit.sh は出力を捨てて pass を記録する。
+# 記録先を stop 固定にすると post_edit の WARN が stop の件数に混ざるため、
+# 呼び出し側がフック名を渡せるようにする(2026-09-03 のレビュー由来)。
 harness_log_warn() {
-  local root="$1" label="$2"
+  local root="$1" label="$2" hook="${3:-stop}"
   local dir="$root/.feedback"
   mkdir -p "$dir" 2>/dev/null || return 0
   local ts
   ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)" || return 0
   local event_json
-  event_json="$(printf '{"ts":"%s","hook":"stop","result":"warn","check":"%s"}' \
-    "$ts" "$(harness_json_escape "$label")")" || return 0
+  event_json="$(printf '{"ts":"%s","hook":"%s","result":"warn","check":"%s"}' \
+    "$ts" "$(harness_json_escape "$hook")" "$(harness_json_escape "$label")")" || return 0
   _harness_append_event "$root" "$event_json"
   return 0
 }

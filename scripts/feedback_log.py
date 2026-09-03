@@ -585,8 +585,61 @@ def find_entry(entry_id: str) -> dict:
     return matches[0]
 
 
+# retire の影響範囲。promoted の案内は verb ごとに書き分けるが、retire が
+# 何を壊すかの説明だけは1箇所に持つ(3箇所へ複製すると文言がドリフトする)
+RETIRE_SCOPE = (
+    "この id を出典に持つ**ルール本体**を撤去し、"
+    "同じルールの他の出典もまとめて retired にします"
+)
+
+
+def _promoted_recovery(verb: str, entry_id: str) -> str:
+    """status=promoted のエントリに対する、コマンド別の復旧案内を返す。
+
+    verb を無視して promote 向けの文言(「重ねて昇華すると…」+ retire の案内)
+    を全コマンドで返していたため、close / merge が二重昇華の説明を受け取り
+    retire へ誘導されていた。案内どおり retire を実行すると**統合先のルール本体
+    が消え、その出典すべてが retired になる**うえ、目的の merge は
+    status=retired で依然として失敗する — 案内に従うほど壊れて先に進めない、
+    という最悪の形になっていた(cmd_merge の順序修正が防ごうとした失敗そのもの
+    が、別の入口から残っていた。2026-09-03 のレビュー由来)。
+    """
+    already = f"すでに rules.md へ昇華済みです(出典 {entry_id})。"
+    if verb == "promote":
+        return (
+            already
+            + "重ねて昇華すると同じ出典のルールが2件になり、以後この id では"
+            " merge / retire が実行できなくなります。"
+            # retire の影響範囲を明示する。「取り下げるなら retire」とだけ書くと、
+            # ルールを作り直したいだけの利用者が既存ルールごと消してしまう
+            f"なお retire {entry_id} は、{RETIRE_SCOPE} — "
+            "ルールごと取り下げるときだけ使ってください"
+        )
+    if verb == "merge":
+        return (
+            already
+            + "この指摘はすでにいずれかのルールへ反映されているため、重ねて統合する"
+            "必要はありません(同じ merge を2回実行した場合は、このままで意図どおりです)。"
+            "別のルールへ移すのはルールの統廃合であり merge では扱えません — "
+            "feedback-loop スキルの棚卸しで裁定してください。"
+            # ここで retire を「やり直しの手段」として案内しない。
+            f"retire {entry_id} は{RETIRE_SCOPE}ため、統合のやり直しには使えません"
+        )
+    if verb == "close":
+        return (
+            already
+            + "close は昇華しないと決めた指摘のための出口なので、昇華済みの"
+            "エントリには使えません(rules.md に残ったまま記録だけ closed にすると、"
+            "ルールと出典の対応が崩れます)。"
+            f"ルールごと取り下げるなら retire {entry_id} を使ってください — "
+            f"{RETIRE_SCOPE}"
+        )
+    # 未知の verb。安全側に倒し、破壊的な retire は案内しない
+    return already + f"{verb} は昇華済みのエントリには実行できません"
+
+
 def require_open(target: dict, verb: str) -> None:
-    """昇華系コマンド(promote / merge)の前提条件。close と同じ強さで確認する。
+    """状態を変えるコマンド(promote / merge / close)の前提条件。
 
     状態を確認していたのは close だけだったため、同じエントリを2回 promote
     すると同じ出典を持つルールが rules.md に2件でき、以後その id では
@@ -594,22 +647,18 @@ def require_open(target: dict, verb: str) -> None:
     出口が rules.md の手編集(このハーネスが禁じている操作)しか無い袋小路に
     入る。「入力の検証は入口ごとに強さを変えない」を状態の検証にも適用する
     (2026-09-02 の全体レビュー由来)。
+
+    復旧案内は verb ごとに変える。前提条件を共通化したこと自体は正しいが、
+    「弾くときは復旧手順を添える」の復旧手順までコマンド非依存にすると、
+    あるコマンドには正しく別のコマンドには破壊的な案内が出る
+    (_promoted_recovery を参照)。
     """
     status = target.get("status")
     if status == "open":
         return
     entry_id = target.get("id")
     if status == "promoted":
-        recovery = (
-            f"すでに rules.md へ昇華済みです(出典 {entry_id})。"
-            "重ねて昇華すると同じ出典のルールが2件になり、以後この id では"
-            " merge / retire が実行できなくなります。"
-            # retire の影響範囲を明示する。「取り下げるなら retire」とだけ書くと、
-            # merge をやり直したいだけの利用者が統合先ルールごと消してしまう
-            f"なお retire {entry_id} は、この id を出典に持つ**ルール本体**を"
-            "撤去し、同じルールの他の出典もまとめて retired にします — "
-            "ルールごと取り下げるときだけ使ってください"
-        )
+        recovery = _promoted_recovery(verb, entry_id)
     else:
         recovery = (
             f"{verb} できるのは open のエントリだけです。"

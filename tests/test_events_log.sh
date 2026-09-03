@@ -155,4 +155,18 @@ assert_contains "$(cat "$EVENTS")" '"result":"fail"' "フォールバック追�
 HARNESS_PYTHON="$WORK/no-such-python" harness_log_warn "$WORK/proj" "python: ruff"
 assert_contains "$(tail -n 1 "$EVENTS")" '"result":"warn"' "WARN もフォールバックで残る"
 
+# --- WARN の記録先フックは呼び出し側が決める ---------------------------
+# 既定は stop(Stop フックの WARN 行)。PostToolUse も同じ「exit 0 で出力が
+# 捨てられる」問題を持つため post_edit からも記録するが、hook を stop 固定に
+# すると両者の件数が混ざり、どちらの経路が素通ししているか読めなくなる
+: > "$EVENTS"
+harness_log_warn "$WORK/proj" "python: ruff"
+assert_contains "$(tail -n 1 "$EVENTS")" '"hook":"stop"' \
+  "フック名を省略すると stop として記録する: $(tail -n 1 "$EVENTS")"
+harness_log_warn "$WORK/proj" "node-lint" post_edit
+assert_contains "$(tail -n 1 "$EVENTS")" '"hook":"post_edit"' \
+  "フック名を渡すとその名前で記録する: $(tail -n 1 "$EVENTS")"
+assert_contains "$(tail -n 1 "$EVENTS")" '"check":"node-lint"' \
+  "ラベル(検査ID)も記録される: $(tail -n 1 "$EVENTS")"
+
 assert_summary

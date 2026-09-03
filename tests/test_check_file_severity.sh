@@ -184,6 +184,39 @@ assert_not_contains "$OUT" "問題があります" "ツール側の都合をフ�
 # 見せないと「lint されているつもりで一度も lint されない」状態が続く
 assert_contains "$OUT" "ESLint を実行できませんでした" "設定の破綻は WARN として見せる: $OUT"
 
+# WARN は exit 0 で返るため、post_edit.sh は出力を捨てて pass を記録する。
+# 記録まで捨てると「一度も lint していない」ことが件数からも消え、件数が減る
+# のではなく初回通過率が上がったように見える形で壊れる — 指標を読む側からは
+# 気づけない。.ts は構文検査のフォールバックも無く被覆が完全にゼロになるので、
+# この経路こそ記録が要る(2026-09-03 のレビュー由来)
+printf 'const x: number = 1\n' > "$PE/typed.ts"
+: > "$PE/.feedback/events.jsonl"
+OUT="$(cd "$PE" && run_cf "$PE/typed.ts")"; RC=$?
+assert_eq "0" "$RC" "前提: .ts でも致命的エラーでは差し戻さない: $OUT"
+EV="$(cat "$PE/.feedback/events.jsonl" 2>/dev/null || true)"
+assert_contains "$EV" '"result":"warn"' \
+  "WARN を events.jsonl に記録する(記録まで握り潰さない): $EV"
+assert_contains "$EV" '"hook":"post_edit"' \
+  "記録は post_edit として残す(stop の件数に混ぜない): $EV"
+assert_contains "$EV" '"check":"node-lint"' \
+  "どの検査が素通ししたかを検査IDで残す: $EV"
+
+# 対になるケース: 問題なしの実行は WARN を記録しない(常に記録する退行を禁じる)
+{ echo '#!/usr/bin/env bash'
+  echo 'case "$*" in *--version*) exit 0 ;; esac'
+  echo 'exit 0'
+} > "$FAKEBIN/npx"; chmod +x "$FAKEBIN/npx"
+: > "$PE/.feedback/events.jsonl"
+( cd "$PE" && run_cf "$PE/typed.ts" ) >/dev/null
+assert_eq "" "$(cat "$PE/.feedback/events.jsonl")" \
+  "指摘が無ければ WARN は記録しない: $(cat "$PE/.feedback/events.jsonl")"
+# exit 2 を返す偽 npx へ戻す(以降のケースが前提にしている)
+{ echo '#!/usr/bin/env bash'
+  echo 'case "$*" in *--version*) exit 0 ;; esac'
+  echo 'echo "Oops! Something went wrong! :("'
+  echo 'exit 2'
+} > "$FAKEBIN/npx"; chmod +x "$FAKEBIN/npx"
+
 # ESLint が判定を返せないときは構文検査へ倒す。
 # 「lint を試みた」ことを理由に検査ゼロで素通しすると、壊れた設定の
 # プロジェクトだけ PostToolUse が無検査になる(exit 2 対応で作りかけた穴)
