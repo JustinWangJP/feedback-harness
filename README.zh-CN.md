@@ -60,7 +60,7 @@
 | 报告 | `report` | 生成仅限当前工作副本的周期摘要，用于晨会或复盘，并与上一周期比较 |
 | 漏洞审计 | `audit.sh` | 仅在需要时执行（工具链中专门进行联网审计的处理） |
 
-curator 对 `rules.md` 之外的自动化建议使用结构化 `automation_candidates` 契约（`candidate`、`evidence`、`recommended_check`、`human_decision`），在人工批准之前保持待定。
+curator 使用 `automation_candidates`（`candidate`、`evidence`、`recommended_check`、`human_decision`）提交自动检查建议，使用 `document_candidates`（`target_path`、`section`、`proposed_text`、`reason`、`read_path`、`evidence`、`human_decision`）提交文档补充建议。先阅读目标项目的指令文档及其引用，再按文档职责选择位置。仅有 AGENTS.md 或仅有 CLAUDE.md 的项目也受支持；位置未定时使用 `target_path: null`。两类建议均在人工批准前保持待定。
 
 ## 可以做什么 / 不会做什么
 
@@ -73,7 +73,7 @@ curator 对 `rules.md` 之外的自动化建议使用结构化 `automation_candi
 | 不额外下载依赖或查询远程服务地运行检查 | **`check.sh` 本身不会主动发起网络访问。** 但项目定义的命令和外部工具仍可能根据自身配置访问网络。漏洞审计被独立到 `audit.sh`，Stop hook 不会调用它 |
 | 测量覆盖率 | **不会运行两次测试。** 只在现有 test 命令中加入覆盖率测量，或切换到 `test:coverage` |
 | 通过与 Git 基线比较来检测破坏性变更 | **不会访问远程仓库。** 比较基线为 `git merge-base HEAD <默认分支>`；无法解析时使用 `HEAD` |
-| `apply-feedback` skill 读取已记录的反馈并应用到下一项工作 | **不会擅自修改共享文件。** 对 `rules.md` 以外的变更（如追加 CLAUDE.md 或引入 lint）只提出建议，经人工批准后才应用 |
+| `apply-feedback` skill 读取已记录的反馈并应用到下一项工作 | **不会擅自修改共享文件。** 对 `rules.md` 以外的变更（如补充共通规则、参考文档或引入 lint）只提出建议，经人工批准后才应用 |
 | 通过 `stats` / `report` 输出数值 | **不会创建仪表盘。** 不运行持续驻留的后台进程，不生成图表，也不向外部发送数据；只在请求时输出文本 |
 | 检测密钥 | **不会输出密钥值本身。** secretlint 默认会屏蔽值，gitleaks 必须使用 `--redact`，因为失败日志会传递给代理 |
 
@@ -133,6 +133,8 @@ docs/
   configuration.zh-CN.md # 配置指南的简体中文版
   pointer_claude.md # 写入目标项目 CLAUDE.md 的说明
   pointer_agents.md # 写入目标项目 AGENTS.md 的说明
+  development-guide.md # 开发背景与规则迁移对照表（日文）
+  history/          # 开发历史（历史资料，日文）
   proposals/        # 实现前的提案（历史资料）
   references/       # 设计时参考的外部资料（历史资料）
   superpowers/      # 设计规范（specs/）和实现计划（plans/）——历史资料
@@ -310,7 +312,7 @@ cd /path/to/your-project && bash scripts/check.sh   # 验证技术栈检测
 
 | Agent | 启动方 | 职责 | 输出 |
 |---|---|---|---|
-| `feedback-curator` | `feedback-loop` Phase 1（Phase 4 不启动，只使用其判断框架） | 将反馈整理为共享规则。先按 signal 选择反映位置，再按根因进一步处理失败反馈 | `promote`、`merge` 或 `close` 的结果和判断摘要。对 `rules.md` 以外的变更（如追加 CLAUDE.md 或引入 lint）**只提出建议** |
+| `feedback-curator` | `feedback-loop` Phase 1（Phase 4 不启动，只使用其判断框架） | 将反馈整理为共享规则。先按 signal 选择反映位置，再按根因进一步处理失败反馈 | `promote`、`merge` 或 `close` 的结果和判断摘要。对 `rules.md` 以外的变更（如补充共通规则、参考文档或引入 lint）**只提出建议** |
 | `harness-qa` | `feedback-loop` Phase 2 | 检查脚本能否运行、Hooks 配置是否正确，以及 CLAUDE.md、AGENTS.md 和 rules.md 是否一致 | 在 `_workspace/qa_report_{日期}.md` 生成 PASS/FAIL/SKIP 报告 |
 
 两个 agent 都**不会自动修改共享文件**。对 `rules.md` 以外的变更只提出建议，由用户决定是否实际应用。
@@ -422,7 +424,7 @@ bash scripts/check.sh --list-checks --json    # 以机器可读 JSON 输出相�
              promote → 向 .feedback/rules.md 添加新规则      （主要用于指示缺陷）
              merge   → 合并到现有规则；复发时强化措辞
              close   → 关闭无法通用化的一次性反馈
-             建议    → 缺少上下文：向 CLAUDE.md 等添加前提信息
+             建议    → 缺少上下文：向职责合适的参考文档添加前提信息
                        执行错误：添加 lint、测试或检查清单
                        模型限制：切换到人工确认或确定性工具（需要复现证据）
                        未判定：保持 open，等待更多信息
@@ -442,7 +444,7 @@ bash scripts/check.sh --list-checks --json    # 以机器可读 JSON 输出相�
 
 测量对应 Feedback Flywheel 中的“测量变化”。本工具链不会创建仪表盘。`stats` 只在请求时输出文本，数值只出现在 `report` 的“数字”部分。`events.jsonl`（Hook 结果）和 `.last-retro`（统计周期标记）都是仅在本机使用的状态文件，不通过 Git 共享。
 
-规则并非唯一的反映位置，因为合适的共享成果物取决于 signal 类型。缺少知识时，应补充 CLAUDE.md 等前提文档。对于能够机械检测的失败，将其加入 lint 或测试，比仅依赖文字规则更可靠。参阅 [Feedback Flywheel](docs/references/fowler-feedback-flywheel-translation.md)。
+规则并非唯一的反映位置，因为合适的共享成果物取决于 signal 类型。缺少知识时，应阅读目标项目的指令文档及其引用，按文档职责选择补充位置。对于能够机械检测的失败，将其加入 lint 或测试，比仅依赖文字规则更可靠。参阅 [Feedback Flywheel](docs/references/fowler-feedback-flywheel-translation.md)。
 
 ## 许可证
 

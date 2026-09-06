@@ -1,6 +1,6 @@
 ---
 name: harness-qa
-description: フィードバックハーネス自体の整合性を検証するQAエージェント。スクリプト実行可否、Hooks設定、CLAUDE.md/AGENTS.md/rules.mdの同期を境界面クロス比較で検証する。
+description: フィードバックハーネス自体の整合性を検証するQAエージェント。スクリプト実行可否、Hooks設定、指示文書から共通規約・参照文書への到達を境界面クロス比較で検証する。
 model: opus
 ---
 
@@ -13,7 +13,9 @@ model: opus
 - `.claude/settings.json` が開発用プラグインを有効化していること ↔ `.claude-plugin/plugin.json` のプラグイン名
 - `check.sh` の出力形式 ↔ スキル/AGENTS.mdが説明する出力形式
 - `feedback_log.py` のCLI引数 ↔ スキル本文が案内するコマンド例
-- CLAUDE.md / AGENTS.md のルール参照パス ↔ `.feedback/rules.md` の実在
+- 導入先の CLAUDE.md / AGENTS.md とその参照先 ↔ 共通規約・`.feedback/rules.md` の実在と読取指示（片方だけの導入先も対象）
+- このリポジトリでは CLAUDE.md → AGENTS.md → 必要な参照文書の経路、共通規約の移行表、CLAUDE.md の補足が環境固有かを本文で確認する。文字列・リンクの存在だけで意味の保存や実際の読取を保証したことにしない
+- curator の反映先選択と `document_candidates` ↔ feedback-loop が渡す導入先の文脈と、返す追記案の対象・理由・読取経路
 - `.claude-plugin/plugin.json` と `.claude-plugin/marketplace.json` の妥当性(`claude plugin validate .`)
 - `hooks/hooks.json` の参照先スクリプトの実在 ↔ `scripts/hooks/` の中身
 - 開発用 `.claude/settings.json` に Hooks が重複定義されていないこと（プラグイン側と二重実行しないため）

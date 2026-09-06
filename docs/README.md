@@ -8,6 +8,8 @@ This directory contains documentation for current usage and historical material 
 
 | Document | Contents |
 |---|---|
+| [Shared development instructions](../AGENTS.md) | Required rules for every agent working on this repository (Japanese) |
+| [Development guide](development-guide.md) | Rationale, examples, and the instruction migration map (Japanese) |
 | [Project overview](../README.md) | Features, installation, and daily usage |
 | [Configuration guide](configuration.md) | Configuration and troubleshooting for `.feedback/config.yaml` |
 | [Script reference](../scripts/README.md) | Responsibilities, behavior, and exit codes for each script |
@@ -18,6 +20,7 @@ This directory contains documentation for current usage and historical material 
 
 | Directory | Purpose |
 |---|---|
+| [Development history](history/development-history.md) (`history/`) | Dated development decisions and changes (Japanese) |
 | `proposals/` | Pre-implementation proposals, including rejected ideas and approaches that changed later |
 | `superpowers/specs/` | Specifications and rationale as they stood during design |
 | `superpowers/plans/` | Implementation plans and verification procedures |
