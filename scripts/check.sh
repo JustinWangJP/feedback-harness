@@ -94,6 +94,13 @@ WARNED=0
 SOFT_STAGE=0
 STACK_FOUND=0   # マニフェストを検出したか。RESULTS の空判定とは分離する
                 # (全ステージがSKIPでも「スタック未検出」とは報告しないため)
+# 記録した検査の件数。RESULTS の件数では代用できない — RESULTS は通常モード
+# でしか積まれないため、--list-checks では常に空になる。これを
+# anything_detected の材料にすると「検査対象を検出できたか」がモードで食い違い、
+# 通常実行には出る secretlint 等の案内が一覧からだけ消える。
+# run_stage / record_skip はどちらのモードでも必ず1件記録するので、
+# その入口で数える(2026-09-03 のレビュー由来)
+RECORDED_CHECKS=0
 LOGDIR="$(mktemp -d)"
 trap 'rm -rf "$LOGDIR"' EXIT
 : > "$LOGDIR/list.txt"
@@ -116,6 +123,10 @@ fi
 # ツール判定が不要なステージは "-" を渡す。
 run_stage() {
   local stage="$1" id="$2" tool="$3" label="$4"; shift 4
+  # どちらのモードでも、この先のあらゆる分岐がちょうど1件記録する
+  # (LIST_MODE は list.txt へ1行、通常は RESULTS へ1要素)。入口で数えることで
+  # 「検査を1件でも記録したか」をモードに依らず判定できる
+  RECORDED_CHECKS=$((RECORDED_CHECKS + 1))
   if [[ "$LIST_MODE" == "1" ]]; then
     # 検査コマンドは実行しない。ツール存在確認だけは通常経路と同じに保ち、
     # 未導入・起動不能が skip として現れるようにする。command -v だけでは
@@ -238,6 +249,7 @@ run_stage_soft() {
 # run_stage と同じ出口(list.txt / RESULTS)を通すことで一覧・通常実行の両方に載せる。
 record_skip() {
   local id="$1" stage="$2" label="$3" reason="$4"
+  RECORDED_CHECKS=$((RECORDED_CHECKS + 1))   # run_stage と同じ理由で入口で数える
   if [[ "$LIST_MODE" == "1" ]]; then
     printf '%s\t%s\t%s\t%s\t%s\n' "$id" "$label" "$stage" "skip" "$reason" >> "$LOGDIR/list.txt"
   else
@@ -295,9 +307,15 @@ done
 . "$LIBDIR/checks/cross_cutting.sh"
 run_cross_cutting_checks
 # ---------- 結果出力 ----------
+# スタック未検出の案内。SKIP しか無いときにも出す必要があるため関数にする —
+# 「対象が JSONC だけ」等で SKIP 行が1本立つと RESULTS が空でなくなり、
+# 条件を ${#RESULTS[@]} だけに置くと案内が黙って消える(実際に消えた)
+no_stack_hint() {
+  echo "検出できたスタックがありません (pyproject.toml / package.json / go.mod / Cargo.toml / pom.xml / *.sh / Makefile:check を確認)"
+}
 echo "=== feedback-harness check ==="
 if [[ $STACK_FOUND -eq 0 && ${#RESULTS[@]} -eq 0 ]]; then
-  echo "検出できたスタックがありません (pyproject.toml / package.json / go.mod / Cargo.toml / pom.xml / *.sh / Makefile:check を確認)"
+  no_stack_hint
   exit 0
 fi
 if [[ ${#RESULTS[@]} -eq 0 ]]; then
@@ -333,6 +351,8 @@ for r in "${RESULTS[@]}"; do
 done
 if [[ $((PASSED + WARNS)) -eq 0 ]]; then
   echo "実行できたステージがありません(すべてSKIP)"
+  # 全SKIPかつスタック未検出なら、SKIP の理由より先に「どこを見ればよいか」が要る
+  [[ $STACK_FOUND -eq 0 ]] && no_stack_hint
   exit 0
 fi
 if [[ $WARNS -gt 0 && $SKIPPED -gt 0 ]]; then

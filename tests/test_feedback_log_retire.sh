@@ -69,4 +69,104 @@ assert_contains "$(cat "$RULES_FILE")" "ルールD本文" "退役後も promote 
 ERR="$(fb retire "99999999-999999" --reason "存在しない" 2>&1 || true)"
 assert_contains "$ERR" "ありません" "存在しないIDはエラーになる"
 
+# --- 二重昇華の遮断(close と同じ強さで状態を確認する) ---
+# 状態を見ていたのは close だけだったため、同じエントリを2回 promote すると
+# 同じ出典を持つルールが2件でき、以後その id では find_rule_by_source が
+# 曖昧性で失敗して merge / retire が一切通らなくなる(出口が rules.md の
+# 手編集しか無い袋小路)。入口ごとに検証の強さを変えない、という原則の回帰。
+DUP_ERR="$(fb promote "$ID_D" --rule "ルールD本文(2回目)" 2>&1 || true)"
+assert_contains "$DUP_ERR" "open ではありません" "昇華済みのエントリは promote できない: $DUP_ERR"
+assert_contains "$DUP_ERR" "retire" "エラー文が復旧手順(retire)を案内する: $DUP_ERR"
+assert_not_contains "$(cat "$RULES_FILE")" "ルールD本文(2回目)" "2回目のルール本文は書き込まれない"
+DUP_SOURCES="$(grep -c "出典: $ID_D" "$RULES_FILE" || true)"
+assert_eq "1" "$DUP_SOURCES" "出典行が重複しない"
+
+# merge も同じ状態ガードを通る(片方だけ直して他が残る形を防ぐ)
+MERGE_ERR="$(fb merge "$ID_D" --into "$ID_B" 2>&1 || true)"
+assert_contains "$MERGE_ERR" "open ではありません" "昇華済みのエントリは merge できない: $MERGE_ERR"
+
+# ただし「同じ merge のやり直し」は状態ガードより先に、具体的なエラーで止める。
+# 汎用の状態エラーは retire を案内するため、それに従うと統合先ルールごと
+# 撤去される — 案内どおりに操作して壊れるのが最悪の形なので順序で防ぐ。
+# ルールA は既に退役済みなので、この検証専用のルールを新しく作る
+ID_F="$(fb add --category naming --summary "指摘F" --source human | extract_id)"
+ID_G="$(fb add --category naming --summary "指摘Fの再発" --source human | extract_id)"
+fb promote "$ID_F" --rule "ルールF本文" >/dev/null
+fb merge "$ID_G" --into "$ID_F" >/dev/null
+REMERGE_ERR="$(fb merge "$ID_G" --into "$ID_F" 2>&1 || true)"
+assert_contains "$REMERGE_ERR" "すでにこのルールの出典です" \
+  "同じルールへの再 merge は具体的なエラーで止まる: $REMERGE_ERR"
+assert_not_contains "$REMERGE_ERR" "retire" \
+  "再 merge のエラーが破壊的な操作を案内しない: $REMERGE_ERR"
+assert_contains "$(cat "$RULES_FILE")" "ルールF本文" "再 merge を弾いてもルールFは残る"
+
+# 遮断したうえで、正規の出口(retire)は塞がっていないこと — 袋小路を作らない
+assert_contains "$(fb retire "$ID_D" --reason "重複を作らずに退役できる" 2>&1)" "retired:" \
+  "二重昇華を弾いた後も retire は通る"
+
+# close 済みのエントリも昇華できない(open 以外は一律で弾く)
+ID_E="$(fb add --category style --summary "指摘E" --source human | extract_id)"
+fb close "$ID_E" --reason "一回限り" >/dev/null
+CLOSED_ERR="$(fb promote "$ID_E" --rule "ルールE本文" 2>&1 || true)"
+assert_contains "$CLOSED_ERR" "open ではありません" "close 済みのエントリは promote できない: $CLOSED_ERR"
+
+# close 自身も同じ関数(require_open)を通る。インラインの確認を残すと、
+# 文言も復旧手順も片方にしか反映されない形でドリフトする
+DOUBLE_CLOSE_ERR="$(fb close "$ID_E" --reason "二重close" 2>&1 || true)"
+assert_contains "$DOUBLE_CLOSE_ERR" "open ではありません" "close 済みは再 close できない: $DOUBLE_CLOSE_ERR"
+assert_contains "$DOUBLE_CLOSE_ERR" "add で記録し直して" \
+  "close のエラーも復旧手順を案内する(promote / merge と同じ関数を通る): $DOUBLE_CLOSE_ERR"
+
+# --- promoted に対する復旧案内は verb ごとに変える ---
+# 前提条件を共通化したのは正しいが、復旧手順までコマンド非依存にすると
+# 「あるコマンドには正しく、別のコマンドには破壊的」な案内になる。
+# 実際 require_open は verb を無視して promote 向けの文言を返しており、
+# merge / close が二重昇華の説明を受け取って retire へ誘導されていた。
+# 案内どおり retire するとルール本体が消え、目的の操作は status=retired で
+# 依然として失敗する — 案内に従うほど壊れて先へ進めない(2026-09-03 のレビュー由来)
+ID_H="$(fb add --category naming --summary "指摘H" --source human | extract_id)"
+ID_I="$(fb add --category naming --summary "指摘I" --source human | extract_id)"
+fb promote "$ID_H" --rule "ルールH本文" >/dev/null
+fb promote "$ID_I" --rule "ルールI本文" >/dev/null
+
+# promote: 二重昇華の説明でよい。retire は「ルールごと取り下げる」ときの出口として案内する
+REPROMOTE_ERR="$(fb promote "$ID_H" --rule "ルールH本文(再)" 2>&1 || true)"
+assert_contains "$REPROMOTE_ERR" "重ねて昇華すると" \
+  "promote には二重昇華の説明を出す: $REPROMOTE_ERR"
+
+# merge: 別ルールへの統合は棚卸しの裁定事項。retire を「やり直しの手段」として案内しない
+MERGE_PROMOTED_ERR="$(fb merge "$ID_I" --into "$ID_H" 2>&1 || true)"
+assert_contains "$MERGE_PROMOTED_ERR" "統合のやり直しには使えません" \
+  "merge のエラーは retire がやり直しに使えないと明示する: $MERGE_PROMOTED_ERR"
+assert_not_contains "$MERGE_PROMOTED_ERR" "重ねて昇華すると" \
+  "merge に promote 向けの二重昇華の説明を出さない: $MERGE_PROMOTED_ERR"
+
+# close: 昇華済みには使えない。ルールごと取り下げる出口としてだけ retire を案内する
+CLOSE_PROMOTED_ERR="$(fb close "$ID_H" --reason "やっぱり取り下げ" 2>&1 || true)"
+assert_contains "$CLOSE_PROMOTED_ERR" "close は昇華しないと決めた指摘" \
+  "close には close 固有の説明を出す: $CLOSE_PROMOTED_ERR"
+assert_not_contains "$CLOSE_PROMOTED_ERR" "重ねて昇華すると" \
+  "close に promote 向けの二重昇華の説明を出さない: $CLOSE_PROMOTED_ERR"
+
+# 3コマンドの案内が実際に別物であること(verb を無視する退行の直接の検出)
+assert_not_contains "$MERGE_PROMOTED_ERR" "$REPROMOTE_ERR" \
+  "merge と promote の案内が同一文言でない"
+
+# 案内に従っても壊れないこと。merge を弾かれた後もルールH・Iは rules.md に残る
+RULES_AFTER="$(cat "$RULES_FILE")"
+assert_contains "$RULES_AFTER" "ルールH本文" "merge を弾いても統合先ルールは残る"
+assert_contains "$RULES_AFTER" "ルールI本文" "merge を弾いても対象側のルールも残る"
+
+# 走査: require_open を呼ぶ verb はすべて _promoted_recovery に固有の分岐を持つ。
+# 個別に直すと、次に足した verb だけが既定の文言(あるいは他コマンド向けの案内)を
+# 受け取る形で再発する
+FB_PY="$REPO/scripts/feedback_log.py"
+VERBS="$(grep -oE 'require_open\([^,]+, "[a-z]+"\)' "$FB_PY" | grep -oE '"[a-z]+"' | tr -d '"' | sort -u)"
+assert_contains "$VERBS" "promote" "前提: 走査が require_open の呼び出しを拾えている: $VERBS"
+while IFS= read -r verb; do
+  [[ -n "$verb" ]] || continue
+  assert_contains "$(grep -c "verb == \"$verb\"" "$FB_PY")" "1" \
+    "require_open を呼ぶ $verb は _promoted_recovery に固有の分岐を持つ"
+done <<< "$VERBS"
+
 assert_summary

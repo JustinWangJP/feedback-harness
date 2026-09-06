@@ -111,6 +111,130 @@ assert_eq "1" "$RC" "eslint 導入済みなら lint 違反で exit 1"
 assert_contains "$OUT" "no-var" "eslint の指摘内容が出る"
 rm -f "$FAKEBIN/npx"
 
+# --- ESLint の設定ファイル名を固定列挙にしない ---
+# ESLint は eslintrc 系(.eslintrc / .eslintrc.{js,cjs,mjs,json,yml,yaml})と
+# フラット系(eslint.config.{js,mjs,cjs,ts,mts,cts})の2系統を探索する。
+# 4種だけを見ていたため .eslintrc.cjs(package.json が "type": "module" の
+# ときの定番)等では検査が丸ごと飛び、同じ違反を Stop 側の `$PM run lint` だけが
+# 報告する食い違いになっていた。名前ごとに if を足す形にすると必ず取りこぼすので、
+# 代表的な名前を**並べて回す**形で固定する(1つでも漏れれば落ちる)
+{ echo '#!/usr/bin/env bash'
+  echo 'case "$*" in *--version*) exit 0 ;; esac'
+  echo 'echo "bad.js:1:1: warning: unexpected var [no-var]"'
+  echo 'exit 1'
+} > "$FAKEBIN/npx"; chmod +x "$FAKEBIN/npx"
+for cfg in .eslintrc .eslintrc.cjs .eslintrc.yml .eslintrc.yaml .eslintrc.json \
+           eslint.config.js eslint.config.cjs eslint.config.mjs eslint.config.ts; do
+  PC="$(new_project "node_cfg_$(printf '%s' "$cfg" | tr -c 'a-zA-Z0-9' '_')")"
+  printf '{}' > "$PC/$cfg"
+  printf 'var x = 1\n' > "$PC/bad.js"
+  OUT="$(cd "$PC" && run_cf "$PC/bad.js")"; RC=$?
+  assert_eq "1" "$RC" "$cfg を設定として認識し ESLint を実行する"
+  assert_contains "$OUT" "no-var" "$cfg のとき指摘内容が出る: $OUT"
+done
+
+# 設定がまったく無ければ従来どおり ESLint を起動しない(過剰検出への退行防止)
+PN="$(new_project node_cfg_none)"
+printf 'var x = 1\n' > "$PN/bad.js"
+OUT="$(cd "$PN" && run_cf "$PN/bad.js")"; RC=$?
+assert_eq "0" "$RC" "ESLint 設定が無ければ差し戻さない: $OUT"
+rm -f "$FAKEBIN/npx"
+
+# --- formatter を指定しない(core から外れた formatter を渡さない) ---
+# `--format unix` / `compact` は ESLint 10 で core から外れ、指定すると
+# "The unix formatter is no longer part of core ESLint" というツール自身の
+# エラーが**ユーザーのファイルの問題**として差し戻される(実測 eslint 10.1.0)。
+# 「環境の問題をユーザーのコードの失敗として報告しない」という check の契約に
+# 反するため、実際の起動引数を記録して --format を渡していないことを固定する
+# (ソース文字列ではなく本番の呼び出しを見る)
+ARGLOG="$WORK/npx-args.log"
+{ echo '#!/usr/bin/env bash'
+  echo 'case "$*" in *--version*) exit 0 ;; esac'
+  echo "printf '%s\\n' \"\$*\" >> '$ARGLOG'"
+  echo 'echo "bad.js:1:1: warning: unexpected var [no-var]"'
+  echo 'exit 1'
+} > "$FAKEBIN/npx"; chmod +x "$FAKEBIN/npx"
+PF="$(new_project node_formatter)"
+printf '{}' > "$PF/eslint.config.js"
+printf 'var x = 1\n' > "$PF/bad.js"
+( cd "$PF" && run_cf "$PF/bad.js" ) >/dev/null
+ARGS="$(cat "$ARGLOG" 2>/dev/null || true)"
+assert_contains "$ARGS" "eslint" "前提: eslint を実際に起動している: $ARGS"
+assert_not_contains "$ARGS" "--format" "core から外れた formatter を指定しない: $ARGS"
+rm -f "$FAKEBIN/npx"
+
+# --- ESLint の致命的エラー(exit 2)は差し戻さない ---
+# ESLint の終了コードは 0=指摘なし / 1=lint 違反 / 2=致命的エラー。
+# 「非0なら違反」と扱うと、eslintrc しか持たないプロジェクト(ESLint 9 以降は
+# eslintrc を読まない)で「eslint.config.js が見つからない」というツール側の
+# 都合が、編集のたびにユーザーのファイルの問題として差し戻される(実測 10.1.0)。
+{ echo '#!/usr/bin/env bash'
+  echo 'case "$*" in *--version*) exit 0 ;; esac'
+  echo 'echo "Oops! Something went wrong! :("'
+  echo 'echo "ESLint couldn'"'"'t find an eslint.config.(js|mjs|cjs) file."'
+  echo 'exit 2'
+} > "$FAKEBIN/npx"; chmod +x "$FAKEBIN/npx"
+PE="$(new_project node_eslint_fatal)"
+printf '{"rules":{}}' > "$PE/.eslintrc.json"   # ESLint 9+ が読まない旧形式
+printf 'var x = 1\n' > "$PE/bad.js"
+OUT="$(cd "$PE" && run_cf "$PE/bad.js")"; RC=$?
+assert_eq "0" "$RC" "ESLint の致命的エラー(exit 2)では差し戻さない: $OUT"
+assert_not_contains "$OUT" "問題があります" "ツール側の都合をファイルの問題として差し戻さない: $OUT"
+# 黙って捨てない。壊れた設定は非ブロッキングの WARN として見せる —
+# 見せないと「lint されているつもりで一度も lint されない」状態が続く
+assert_contains "$OUT" "ESLint を実行できませんでした" "設定の破綻は WARN として見せる: $OUT"
+
+# WARN は exit 0 で返るため、post_edit.sh は出力を捨てて pass を記録する。
+# 記録まで捨てると「一度も lint していない」ことが件数からも消え、件数が減る
+# のではなく初回通過率が上がったように見える形で壊れる — 指標を読む側からは
+# 気づけない。.ts は構文検査のフォールバックも無く被覆が完全にゼロになるので、
+# この経路こそ記録が要る(2026-09-03 のレビュー由来)
+printf 'const x: number = 1\n' > "$PE/typed.ts"
+: > "$PE/.feedback/events.jsonl"
+OUT="$(cd "$PE" && run_cf "$PE/typed.ts")"; RC=$?
+assert_eq "0" "$RC" "前提: .ts でも致命的エラーでは差し戻さない: $OUT"
+EV="$(cat "$PE/.feedback/events.jsonl" 2>/dev/null || true)"
+assert_contains "$EV" '"result":"warn"' \
+  "WARN を events.jsonl に記録する(記録まで握り潰さない): $EV"
+assert_contains "$EV" '"hook":"post_edit"' \
+  "記録は post_edit として残す(stop の件数に混ぜない): $EV"
+assert_contains "$EV" '"check":"node-lint"' \
+  "どの検査が素通ししたかを検査IDで残す: $EV"
+
+# 対になるケース: 問題なしの実行は WARN を記録しない(常に記録する退行を禁じる)
+{ echo '#!/usr/bin/env bash'
+  echo 'case "$*" in *--version*) exit 0 ;; esac'
+  echo 'exit 0'
+} > "$FAKEBIN/npx"; chmod +x "$FAKEBIN/npx"
+: > "$PE/.feedback/events.jsonl"
+( cd "$PE" && run_cf "$PE/typed.ts" ) >/dev/null
+assert_eq "" "$(cat "$PE/.feedback/events.jsonl")" \
+  "指摘が無ければ WARN は記録しない: $(cat "$PE/.feedback/events.jsonl")"
+# exit 2 を返す偽 npx へ戻す(以降のケースが前提にしている)
+{ echo '#!/usr/bin/env bash'
+  echo 'case "$*" in *--version*) exit 0 ;; esac'
+  echo 'echo "Oops! Something went wrong! :("'
+  echo 'exit 2'
+} > "$FAKEBIN/npx"; chmod +x "$FAKEBIN/npx"
+
+# ESLint が判定を返せないときは構文検査へ倒す。
+# 「lint を試みた」ことを理由に検査ゼロで素通しすると、壊れた設定の
+# プロジェクトだけ PostToolUse が無検査になる(exit 2 対応で作りかけた穴)
+printf 'function f( {\n' > "$PE/broken-syntax.js"
+OUT="$(cd "$PE" && run_cf "$PE/broken-syntax.js")"; RC=$?
+assert_eq "1" "$RC" "ESLint が使えなくても構文エラーは捕まえる: $OUT"
+assert_contains "$OUT" "問題があります" "構文エラーは差し戻す: $OUT"
+
+# 対になるケース: exit 1(本物の lint 違反)は従来どおり差し戻す
+{ echo '#!/usr/bin/env bash'
+  echo 'case "$*" in *--version*) exit 0 ;; esac'
+  echo 'echo "bad.js:1:1: warning: unexpected var [no-var]"'
+  echo 'exit 1'
+} > "$FAKEBIN/npx"; chmod +x "$FAKEBIN/npx"
+OUT="$(cd "$PE" && run_cf "$PE/bad.js")"; RC=$?
+assert_eq "1" "$RC" "exit 1(lint 違反)は従来どおり差し戻す: $OUT"
+rm -f "$FAKEBIN/npx"
+
 # --- 壊れた config.yaml は check_file.sh 自身をブロックする ---
 # AGENTS.md §2 で check_file.sh は編集直後の必須ゲート。黙って exit 0 で
 # 通すと、設定の打ち間違いに誰も気づけない

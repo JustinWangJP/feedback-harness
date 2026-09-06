@@ -292,6 +292,27 @@ harness_node_pm() {
   fi
 }
 
+# harness_has_eslint_config — カレントディレクトリに ESLint の設定があるか。
+#
+# ESLint が探索する設定ファイルは eslintrc 系(.eslintrc / .eslintrc.js /
+# .cjs / .mjs / .json / .yml / .yaml)とフラット系(eslint.config.js / .mjs /
+# .cjs / .ts / .mts / .cts)の2系統あり、固定列挙にすると必ず取りこぼす。
+# 実際 check_file.sh は4種だけを見ていたため、.eslintrc.cjs(package.json が
+# "type": "module" のときの定番)や eslint.config.cjs のプロジェクトで
+# PostToolUse の ESLint 検査が丸ごと飛び、同じ違反を Stop 側の
+# `$PM run lint` だけが報告する食い違いになっていた(2026-09-02 の全体レビュー由来)。
+# 判定は glob に寄せる — 新しい拡張子が増えても列挙を足して回らずに済む。
+# package.json の "eslintConfig" キー(ESLint 8 以前の置き場)も設定に数える。
+# ここを見落とすと、設定ファイルを持たないだけで実際は ESLint を使っている
+# プロジェクトで PostToolUse だけが検査を飛ばす — 埋めたはずの食い違いが残る。
+# 判定は grep で足りる(node を起動するのは毎編集フックには重く、
+# glob が外れたときだけ評価されるので誤検出の代償も小さい)
+harness_has_eslint_config() {
+  compgen -G ".eslintrc*" >/dev/null 2>&1 \
+    || compgen -G "eslint.config.*" >/dev/null 2>&1 \
+    || { [[ -f package.json ]] && grep -q '"eslintConfig"[[:space:]]*:' package.json 2>/dev/null; }
+}
+
 # harness_relpath <パス> <ルート> — ルート相対パスへ正規化(先頭の ./ や / を除く)。
 # check.sh の list_files は git ls-files / find 由来で自然にこの形になるが、
 # check_file.sh が受け取るのは Hooks からの絶対パスなので、harness_excluded に
@@ -401,20 +422,25 @@ harness_log_event() {
   return 0
 }
 
-# harness_log_warn <ルート> <ラベル> — WARN を events.jsonl に1行追記する。
+# harness_log_warn <ルート> <ラベル> [フック名] — WARN を events.jsonl に1行追記する。
 #
 # Stop フックは成功時(exit 0)の出力をエージェントへ渡さないため、WARN は
 # そのままでは誰にも届かない。記録して stats/report に載せることで、
 # 反復する WARN が「設定を入れて FAIL に昇格させるか」の判断材料になる。
+#
+# フック名は既定 stop。PostToolUse(post_edit)も同じ問題を持つ — check_file.sh が
+# WARN だけを出して exit 0 したとき、post_edit.sh は出力を捨てて pass を記録する。
+# 記録先を stop 固定にすると post_edit の WARN が stop の件数に混ざるため、
+# 呼び出し側がフック名を渡せるようにする(2026-09-03 のレビュー由来)。
 harness_log_warn() {
-  local root="$1" label="$2"
+  local root="$1" label="$2" hook="${3:-stop}"
   local dir="$root/.feedback"
   mkdir -p "$dir" 2>/dev/null || return 0
   local ts
   ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)" || return 0
   local event_json
-  event_json="$(printf '{"ts":"%s","hook":"stop","result":"warn","check":"%s"}' \
-    "$ts" "$(harness_json_escape "$label")")" || return 0
+  event_json="$(printf '{"ts":"%s","hook":"%s","result":"warn","check":"%s"}' \
+    "$ts" "$(harness_json_escape "$hook")" "$(harness_json_escape "$label")")" || return 0
   _harness_append_event "$root" "$event_json"
   return 0
 }

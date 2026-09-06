@@ -8,12 +8,36 @@ run_cross_cutting_checks() {
   # Bash 経由・外部エディタで壊された設定ファイルが完了前チェックをすり抜ける
   # (Shell ステージを追加したときと同じ非対称性)。
   # STACK_FOUND は立てない — 設定ファイルの存在は「スタックの検出」ではない。
+  # JSONC(コメント付きが慣例のファイル)はここで落とす。harness_validate_json の
+  # 内部でも同じ除外をするが、そちらに任せると「対象が1件も残らなかった」場合に
+  # 何も検証しないまま成功が返り、ステージが PASS になる — tsconfig.json だけの
+  # プロジェクトが「JSON を検証済み」に見える(2026-09-02 の再レビュー由来)
   JSON_FILES=()
+  JSON_SEEN=0
   while IFS= read -r f; do
-    [[ -n "$f" && -f "$f" ]] && JSON_FILES+=("$f")
+    [[ -n "$f" && -f "$f" ]] || continue
+    JSON_SEEN=1
+    harness_is_jsonc "$f" && continue
+    JSON_FILES+=("$f")
   done < <(list_files '*.json')
+  # 検証器の可用性は run_stage の外でゲートする。harness_validate_json は
+  # Python 不在で「検証せず成功」を返すため、run_stage からは合格と区別が
+  # つかず `PASS config: json 構文` を出す — 1件も検証していないのに検証済みだと
+  # 報告する形になる。yaml-syntax が PyYAML でやっているのと同じく、
+  # 検証できないことは SKIP として見せる(2026-09-02 の全体レビュー由来)
   if [[ ${#JSON_FILES[@]} -gt 0 ]]; then
-    run_stage lint "json-syntax" "-" "config: json 構文" harness_validate_json "${JSON_FILES[@]}"
+    if harness_has_python; then
+      run_stage lint "json-syntax" "-" "config: json 構文" harness_validate_json "${JSON_FILES[@]}"
+    else
+      record_skip "json-syntax" lint "config: json 構文" "Python 未検出"
+    fi
+  elif [[ $JSON_SEEN -eq 1 ]]; then
+    # 検査対象が JSONC だけだった。ステージごと消すと --list-checks からも
+    # 結果からも行が無くなり、「検査していない」ことが見えない(record_skip の
+    # 契約は、事前に判定できる SKIP も同じ出口へ載せること)。
+    # 1件も記録しないと anything_detected も false になり、
+    # secretlint 等の案内まで巻き添えで消える
+    record_skip "json-syntax" lint "config: json 構文" "JSONC のみ(コメント付きJSONは構文検査の対象外)"
   fi
 
   YAML_FILES=()
@@ -38,13 +62,24 @@ run_cross_cutting_checks() {
     [[ -n "$f" && -f "$f" ]] && MD_FILES+=("$f")
   done < <(list_files '*.md')
   if [[ ${#MD_FILES[@]} -gt 0 ]]; then
-    run_stage docs "md-links" "-" "docs: 内部リンク" harness_check_md_links "${MD_FILES[@]}"
+    # json-syntax と同じ理由で、検証器が使えないことを PASS で隠さない
+    if harness_has_python; then
+      run_stage docs "md-links" "-" "docs: 内部リンク" harness_check_md_links "${MD_FILES[@]}"
+    else
+      record_skip "md-links" docs "docs: 内部リンク" "Python 未検出"
+    fi
   fi
 
   # 検査対象を何か検出できたか。ここまでの全ステージの結果を見て判断する。
   # 何も検出できていないディレクトリに「設定すれば有効になる」と案内しても
-  # 相手がいない上に、案内行が残ることで「スタック未検出」の報告を潰してしまう
-  anything_detected() { [[ $STACK_FOUND -eq 1 || ${#RESULTS[@]} -gt 0 ]]; }
+  # 相手がいない上に、案内行が残ることで「スタック未検出」の報告を潰してしまう。
+  #
+  # 材料は RECORDED_CHECKS であって ${#RESULTS[@]} ではない。RESULTS は通常
+  # モードでしか積まれないため、--list-checks では常に 0 になり、この判定が
+  # 実質 STACK_FOUND だけに退化する。結果、スタック無し + 設定ファイルだけの
+  # プロジェクト(tsconfig.json のみ・yml のみ等)で、通常実行には出る
+  # secretlint / gitleaks の案内が一覧からだけ消えていた(2026-09-03 のレビュー由来)
+  anything_detected() { [[ $STACK_FOUND -eq 1 || $RECORDED_CHECKS -gt 0 ]]; }
 
   # 秘密情報スキャン。secretlint は .secretlintrc.* が無いと exit 2 で実行できない
   # (実測)ため、設定の有無をゲートにする。設定を書いた=チームが検査を選んだ、

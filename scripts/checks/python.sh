@@ -11,12 +11,19 @@ run_python_checks() {
     run_stage lint "ruff" "ruff" "python: ruff" ruff check .
     # 宣言(pyproject.toml の [tool.ruff] 系)があれば FAIL、無ければ WARN。
     # 既存プロジェクトがフォーマッタ未使用の場合に完了不能にしないため
-    if grep -q "^\[tool\.ruff" pyproject.toml 2>/dev/null; then
+    if grep -q "^[[:space:]]*\[tool\.ruff" pyproject.toml 2>/dev/null; then
       run_stage format "ruff-format" "ruff" "python: ruff format" ruff format --check .
     else
       run_stage_soft format "ruff-format" "ruff" "python: ruff format" ruff format --check .
     fi
-    if [[ -f pyproject.toml ]] && grep -q "\[tool.mypy\]" pyproject.toml 2>/dev/null; then
+    # 宣言の検出は行頭アンカー + ドットのエスケープで行う(他の宣言ゲートと同形式)。
+    # `\[tool.mypy\]` のように緩めると、[project] の description など**宣言では
+    # ない位置**にその文字列があるだけで検出が成立する。mypy には他と違って
+    # WARN フォールバック(run_stage_soft)が無く、誤検出がそのまま完了ブロックの
+    # FAIL になる(2026-09-02 の全体レビュー由来)
+    # mypy の直後も区切りに限定する。前方一致では [tool.mypy_extra] 等の
+    # 別テーブルで型検査を有効にしてしまう。空白を挟んだ区切りも TOML では有効。
+    if [[ -f pyproject.toml ]] && grep -qE "^[[:space:]]*\[tool\.mypy[[:space:]]*(\]|\.)" pyproject.toml 2>/dev/null; then
       run_stage typecheck "mypy" "mypy" "python: mypy" mypy .
     fi
     # カバレッジ相乗り(M3): テストを2回走らせず、計装フラグを足すだけ。
@@ -33,7 +40,7 @@ run_python_checks() {
     # 宣言に無い import・未使用依存の検出(ネットワーク不使用)。
     # 誤検出の可能性があるため、設定の宣言があるときだけ FAIL にする
     if has deptry; then
-      if grep -q "^\[tool\.deptry" pyproject.toml 2>/dev/null; then
+      if grep -q "^[[:space:]]*\[tool\.deptry" pyproject.toml 2>/dev/null; then
         run_stage lint "deptry" "deptry" "python: deptry" deptry .
       else
         run_stage_soft lint "deptry" "deptry" "python: deptry" deptry .
@@ -43,7 +50,7 @@ run_python_checks() {
     # デッドコード。動的呼び出し・フレームワークのフックを誤検出しやすいため
     # 確信度80%以上に絞り、宣言があるときだけ FAIL にする
     if has vulture; then
-      if [[ -f .vulture ]] || grep -q "^\[tool\.vulture" pyproject.toml 2>/dev/null; then
+      if [[ -f .vulture ]] || grep -q "^[[:space:]]*\[tool\.vulture" pyproject.toml 2>/dev/null; then
         run_stage lint "vulture" "vulture" "python: vulture" \
           vulture . --min-confidence "$HARNESS_VULTURE_MIN_CONFIDENCE"
       else
@@ -55,8 +62,8 @@ run_python_checks() {
     # 層の制約(アーキテクチャ)。設定を書いた=意図的に制約を宣言したという
     # ことなので、誤検出は原理的に起きない。mypy と同じ「設定がある時だけ」パターン
     if [[ -f .importlinter ]] \
-       || grep -q "^\[importlinter\]" setup.cfg 2>/dev/null \
-       || grep -q "^\[tool\.importlinter" pyproject.toml 2>/dev/null; then
+       || grep -q "^[[:space:]]*\[importlinter\]" setup.cfg 2>/dev/null \
+       || grep -q "^[[:space:]]*\[tool\.importlinter" pyproject.toml 2>/dev/null; then
       if has lint-imports; then
         run_stage lint "import-linter" "-" "python: import-linter" lint-imports
       else

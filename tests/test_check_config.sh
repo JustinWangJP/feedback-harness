@@ -70,4 +70,75 @@ OUT="$(bash "$CHECK" "$P6" 2>&1)"
 assert_not_contains "$OUT" "config: json 構文" "対象ファイルが無ければステージを出さない"
 assert_contains "$OUT" "検出できたスタックがありません" "スタック未検出のメッセージは従来どおり"
 
+# --- 検証器が使えないときは PASS ではなく SKIP ---
+# harness_validate_json / harness_check_md_links は Python 不在で「検証せず成功」を
+# 返すため、run_stage からは合格と区別がつかない。事前ゲートが無いと、1件も
+# 検証していないのに `PASS config: json 構文` と報告する — 未検証を検証済みに
+# 見せる、このハーネスが最も避けてきた形の報告になる(yaml-syntax だけが
+# PyYAML で事前ゲートしていて正しかった)。
+P7="$(new_project no_python)"
+printf '{ invalid\n' > "$P7/broken.json"
+printf '# doc\n\n[dead](./nope.md)\n' > "$P7/doc.md"
+OUT="$(HARNESS_PYTHON=/nonexistent/python bash "$CHECK" "$P7" 2>&1)"
+assert_contains "$OUT" "SKIP  config: json 構文" "Python 不在なら json 構文は SKIP: $OUT"
+assert_contains "$OUT" "SKIP  docs: 内部リンク" "Python 不在なら 内部リンク は SKIP: $OUT"
+assert_not_contains "$OUT" "PASS  config: json 構文" "検証していないのに PASS と報告しない"
+assert_not_contains "$OUT" "PASS  docs: 内部リンク" "検証していないのに PASS と報告しない"
+
+# JSONC しか無いプロジェクトでも「検証済み」に見せない。
+# harness_validate_json は内部で JSONC を除外するため、対象が1件も残らないと
+# 何も検証しないまま成功が返り、ステージが PASS になる(同じ偽 PASS の別経路)
+P8="$(new_project jsonc_only)"
+printf '{\n  // コメント\n  "a": 1\n}\n' > "$P8/tsconfig.json"
+OUT="$(bash "$CHECK" "$P8" 2>&1)"
+assert_not_contains "$OUT" "PASS  config: json 構文" \
+  "JSONC だけのプロジェクトで json 構文を PASS と報告しない: $OUT"
+# 否定形だけだと「ステージごと消す」実装でも成立してしまう。消すのも誤りで、
+# 検査していないことが一覧から見えなくなる(record_skip の契約)。SKIP 行の存在を求める
+assert_contains "$OUT" "SKIP  config: json 構文" \
+  "検査対象が残らないことを SKIP として見せる: $OUT"
+# SKIP 行が1本立つと RESULTS が空でなくなる。スタック未検出の案内を
+# ${#RESULTS[@]} だけで判定していると、この案内が黙って消える
+assert_contains "$OUT" "検出できたスタックがありません" \
+  "SKIP しか無くてもスタック未検出の案内は残る: $OUT"
+
+# 対になるケース: 検証対象が1件でもあれば従来どおり検証する
+printf '{"a": 1,\n' > "$P8/broken.json"
+OUT="$(bash "$CHECK" "$P8" 2>&1)"; RC=$?
+assert_eq "1" "$RC" "JSONC と壊れた JSON が混在すれば exit 1"
+assert_contains "$OUT" "FAIL  config: json 構文" "JSONC を除いた残りは検証される: $OUT"
+
+# 対になるケース。SKIP へ倒しすぎる退行(常に SKIP)も同時に禁じる
+OUT="$(bash "$CHECK" "$P7" 2>&1)"; RC=$?
+assert_eq "1" "$RC" "Python があれば壊れたJSON・リンク切れで exit 1"
+assert_contains "$OUT" "FAIL  config: json 構文" "Python があれば json 構文は実際に検証する: $OUT"
+assert_contains "$OUT" "FAIL  docs: 内部リンク" "Python があれば 内部リンク は実際に検証する: $OUT"
+
+# --- 「検査対象を検出できたか」は通常実行と --list-checks で一致する ---
+# anything_detected の材料が ${#RESULTS[@]} だったため、RESULTS を積まない
+# --list-checks では常に false へ退化し、スタック無し+設定ファイルだけの
+# プロジェクトで secretlint の案内が一覧からだけ消えていた。利用者から見ると
+# 「実行すると出る案内が、一覧には無い」という食い違いになる(2026-09-03 のレビュー由来)
+P9="$(new_project mode_symmetry)"
+printf '{\n  // コメント\n  "a": 1\n}\n' > "$P9/tsconfig.json"
+RUN_OUT="$(bash "$CHECK" "$P9" 2>&1)"
+LIST_OUT="$(bash "$CHECK" "$P9" --list-checks 2>&1)"; LIST_RC=$?
+assert_eq "0" "$LIST_RC" "--list-checks が成功する: $LIST_OUT"
+# 前提: この構成では通常実行に secretlint の案内が出る(出なければ以下は無意味)
+assert_contains "$RUN_OUT" "secretlint" \
+  "前提: 通常実行では secretlint の行が出る: $RUN_OUT"
+assert_contains "$LIST_OUT" "secretlint" \
+  "同じ構成なら --list-checks にも secretlint の行が出る: $LIST_OUT"
+
+# スタックも設定ファイルも無い空のプロジェクトでは、両モードとも案内を出さない
+# (対になるケース。「常に真」へ倒す退行を同時に禁じる)
+P10="$(new_project mode_symmetry_empty)"
+printf 'hello\n' > "$P10/README.txt"
+RUN_OUT="$(bash "$CHECK" "$P10" 2>&1)"
+LIST_OUT="$(bash "$CHECK" "$P10" --list-checks 2>&1)"
+assert_not_contains "$RUN_OUT" "secretlint" \
+  "検出対象が無ければ通常実行でも案内しない: $RUN_OUT"
+assert_not_contains "$LIST_OUT" "secretlint" \
+  "検出対象が無ければ一覧でも案内しない: $LIST_OUT"
+
 assert_summary

@@ -86,7 +86,7 @@ bash scripts/check.sh --help          # 使い方を表示(exit 0)
 
 - **検出対象**: Python(`pyproject.toml`/`setup.py`/`requirements.txt`、無くても `*.py` があれば `ruff` のみ実行) / Node(`package.json`) / Go(`go.mod`) / Rust(`Cargo.toml`) / Java(`pom.xml`/`build.gradle`) / Shell(`*.sh`) / 汎用(`Makefile` の `check` ターゲット)
 - **Maven project**: ルートに `pom.xml` があれば reactor の入口として `verify` を1回だけ実行する。ルート POM が無ければ、検出した各 `pom.xml` を `-f` で個別実行する。POM ごとに、同じディレクトリの `mvnw`、リポジトリルートの `mvnw`、グローバル `mvn` の順で選ぶ。wrapper が存在しても実行不可なら、黙ってフォールバックせず `SKIP` と表示する。Maven の `verify` は、プロジェクトで設定されたコンパイル・テスト・パッケージング・integration-test lifecycle を含み、プロジェクト設定に従って依存や plugin をリポジトリから解決する場合がある。ルート POM 無しで検出した各モジュールは `mvn-<モジュールslug>` という独立した検査IDを持つ(例 `services/api/pom.xml` → `mvn-services-api`。slug が衝突する場合は連番が付く)。判定は「その派生IDの明示設定 → `mvn` の設定」の順に解決するため、`check.skip: [test]` は全モジュールへ届き、`checks.mvn-tools-cli.severity: skip` はそのモジュールだけを止める
-- **横断チェック(スタック非依存)**: `*.json` / `*.yaml` / `*.yml` の構文検証。`tsconfig*.json` / `jsconfig*.json` / `devcontainer.json` / `.vscode/` 配下はコメント付き(JSONC)が慣例のため対象外。YAML は複数文書(`---` 区切り)に対応し、未知のカスタムタグ(`!Ref` 等)は構文エラーとして扱わない。PyYAML 未導入なら YAML は理由付き `SKIP`
+- **横断チェック(スタック非依存)**: `*.json` / `*.yaml` / `*.yml` の構文検証。`tsconfig*.json` / `jsconfig*.json` / `devcontainer.json` / `.vscode/` 配下はコメント付き(JSONC)が慣例のため対象外。YAML は複数文書(`---` 区切り)に対応し、未知のカスタムタグ(`!Ref` 等)は構文エラーとして扱わない。PyYAML 未導入なら YAML は理由付き `SKIP`。JSON 構文と内部リンクの検証は Python を使うため、Python 3.10+ を解決できない環境ではこちらも理由付き `SKIP` になる(検証していないものを `PASS` として報告しない)
 - **ドキュメント整合性**: Markdown の内部リンク切れを検出する(`docs` ステージ)。外部URL・`mailto:`・アンカーのみ・絶対パスは対象外(ネットワークを使わない原則)。コードブロック・コードスパン内のリンク風記述は検証しない
 - **秘密情報**(`security` ステージ): `.secretlintrc.*` があれば `secretlint` を実行する。**設定が無ければ SKIP** — secretlint は設定なしでは起動できないため。値は既定でマスクされ、失敗ログに秘密が出ることはない。`gitleaks` が PATH にあれば併用する(`--no-git --redact` に対応する版のみ)
 - **CI設定・Dockerfile**: `.github/workflows/*.y*ml` があれば `actionlint`、`Dockerfile*` があれば `dockerfilelint`(無ければ `hadolint`)を実行する。いずれも未導入なら SKIP
@@ -150,8 +150,8 @@ bash scripts/feedback.sh <サブコマンド> [引数]
 | `add` | `--category <cat>` `--summary "<要約>"` `[--detail "<詳細>"]` `[--source human\|hook\|agent]` `[--signal <context\|instruction\|workflow\|failure>]` | エントリを記録。`open` が3件以上で promote 候補の通知を出す。`--signal` は信号種（省略時は detail/category から推論）。`根因:` 行がある場合は、定義済み5分類のいずれか1件だけを許可する |
 | `list` | `[--status open\|promoted\|closed\|retired\|all]` `[--category <cat>]` `[--signal <context\|instruction\|workflow\|failure\|unknown>]` | エントリ一覧(既定は `open`)。`--signal unknown` は signal を持たない旧エントリを拾う |
 | `search` | `<キーワード>` | エントリの全文検索 |
-| `promote` | `<entry-id>` `--rule "<一般化ルール1行>"` | `rules.md` に**新規ルールを追記**し、対象エントリを `promoted` に更新 |
-| `merge` | `<entry-id>` `--into <既存ルールの出典id>` `[--rule "<更新後の本文>"]` | 既存ルールの**出典に追記**し(新規行を増やさない)、対象を `promoted` に更新。同じ原則の指摘が再発したとき用 |
+| `promote` | `<entry-id>` `--rule "<一般化ルール1行>"` | `rules.md` に**新規ルールを追記**し、対象エントリを `promoted` に更新。対象が `open` のときだけ実行できる(二重昇華は同じ出典のルールを2件作り、以後その id で `merge` / `retire` が実行できなくなるため) |
+| `merge` | `<entry-id>` `--into <既存ルールの出典id>` `[--rule "<更新後の本文>"]` | 既存ルールの**出典に追記**し(新規行を増やさない)、対象を `promoted` に更新。同じ原則の指摘が再発したとき用。`promote` と同じく対象が `open` のときだけ実行できる |
 | `close` | `<entry-id>` `[--reason "<理由>"]` | 昇華せず `closed` に更新。一般化できない一回限りの指摘用 |
 | `retire` | `<出典entry-id>` `--reason "<退役理由>"` | 昇華済みルールを **rules.md から撤去**し、出典エントリ(merge済みの分も含む)を `retired` に更新。棚卸しで人間が裁定した後に使う |
 | `rules` | (なし) | 現在の `rules.md` を表示 |

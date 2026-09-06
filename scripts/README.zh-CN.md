@@ -86,7 +86,7 @@ bash scripts/check.sh --help          # 显示用法（exit 0）
 
 - **检测对象：** Python（`pyproject.toml` / `setup.py` / `requirements.txt`；即使没有这些文件，只要存在 `*.py` 也会仅运行 `ruff`）/ Node（`package.json`）/ Go（`go.mod`）/ Rust（`Cargo.toml`）/ Java（`pom.xml` / `build.gradle`）/ Shell（`*.sh`）/ 通用（`Makefile` 的 `check` target）
 - **Maven 项目：** 根目录存在 `pom.xml` 时，将其作为 reactor 入口，只运行一次 `verify`。没有根 POM 时，对检测到的每个 `pom.xml` 使用 `-f` 独立运行。每个 POM 依次优先使用同目录的 `mvnw`、仓库根目录的 `mvnw`，最后才使用全局 `mvn`。wrapper 存在但不可执行时会标记为 `SKIP`，不会静默回退。Maven `verify` 包含项目配置的编译、测试、打包和 integration-test 生命周期阶段；Maven 可能会按照项目设置从仓库解析依赖项和插件。没有根 POM 时检测到的每个模块都拥有独立的检查 ID `mvn-<模块 slug>`（例如 `services/api/pom.xml` → `mvn-services-api`；slug 冲突时会追加序号）。判定按「该派生 ID 的显式设置 → `mvn` 的设置」顺序解析，因此 `check.skip: [test]` 会作用于所有模块，而 `checks.mvn-tools-cli.severity: skip` 只停止该模块
-- **横向检查（与技术栈无关）：** 验证 `*.json`、`*.yaml` 和 `*.yml` 的语法。`tsconfig*.json`、`jsconfig*.json`、`devcontainer.json` 以及 `.vscode/` 下的文件通常允许注释（JSONC），因此不检查。YAML 支持由 `---` 分隔的多文档格式，`!Ref` 等未知自定义标签不视为语法错误。未安装 PyYAML 时，YAML 检查标记为 `SKIP` 并说明原因
+- **横向检查（与技术栈无关）：** 验证 `*.json`、`*.yaml` 和 `*.yml` 的语法。`tsconfig*.json`、`jsconfig*.json`、`devcontainer.json` 以及 `.vscode/` 下的文件通常允许注释（JSONC），因此不检查。YAML 支持由 `---` 分隔的多文档格式，`!Ref` 等未知自定义标签不视为语法错误。未安装 PyYAML 时，YAML 检查标记为 `SKIP` 并说明原因。JSON 语法与内部链接检查依赖 Python，因此在无法解析 Python 3.10+ 的环境中同样标记为 `SKIP` 并说明原因（不会把未验证的项目报告为 `PASS`）
 - **文档一致性：** 在 `docs` 阶段检测 Markdown 内部链接失效。为保持离线运行，不检查外部 URL、`mailto:`、仅锚点链接和绝对路径。代码块和行内代码中的链接状文本不参与验证
 - **密钥（`security` 阶段）：** 存在 `.secretlintrc.*` 时运行 `secretlint`。**未配置时标记为 SKIP**，因为 secretlint 无法在没有配置的情况下启动。值默认会被屏蔽，不会出现在失败日志中。PATH 中存在 `gitleaks` 时也会运行，但仅支持带有 `--no-git --redact` 的版本
 - **CI 配置和 Dockerfile：** 存在 `.github/workflows/*.y*ml` 时运行 `actionlint`；存在 `Dockerfile*` 时运行 `dockerfilelint`，若不存在则使用 `hadolint`。缺少工具时标记为 SKIP
@@ -150,8 +150,8 @@ bash scripts/feedback.sh <子命令> [参数]
 | `add` | `--category <cat>` `--summary "<摘要>"` `[--detail "<详情>"]` `[--source human\|hook\|agent]` `[--signal <context\|instruction\|workflow\|failure>]` | 记录条目。open 条目达到 3 个或更多时提示存在 promote 候选。`--signal` 表示信号类型，省略时根据 detail/category 推断。存在 `根因:` 行时，只允许填写定义好的五种分类之一，并且只能填写一项 |
 | `list` | `[--status open\|promoted\|closed\|retired\|all]` `[--category <cat>]` `[--signal <context\|instruction\|workflow\|failure\|unknown>]` | 列出条目（默认为 `open`）。`--signal unknown` 用于选择没有 signal 的旧条目 |
 | `search` | `<关键字>` | 对条目执行全文搜索 |
-| `promote` | `<entry-id>` `--rule "<一条通用规则>"` | 向 `rules.md` **添加新规则**，并将目标条目标记为 `promoted` |
-| `merge` | `<entry-id>` `--into <现有规则的来源id>` `[--rule "<更新后的文本>"]` | 在不增加新规则行的情况下向**现有规则**追加来源，并将目标条目标记为 `promoted`。用于同一原则再次出现时 |
+| `promote` | `<entry-id>` `--rule "<一条通用规则>"` | 向 `rules.md` **添加新规则**，并将目标条目标记为 `promoted`。仅当条目为 `open` 时才可执行（重复整理会生成两条来源相同的规则，此后该 id 无法再执行 `merge` / `retire`） |
+| `merge` | `<entry-id>` `--into <现有规则的来源id>` `[--rule "<更新后的文本>"]` | 在不增加新规则行的情况下向**现有规则**追加来源，并将目标条目标记为 `promoted`。用于同一原则再次出现时。与 `promote` 相同，仅当条目为 `open` 时才可执行 |
 | `close` | `<entry-id>` `[--reason "<原因>"]` | 不整理为规则，直接标记为 `closed`。用于无法通用化的一次性反馈 |
 | `retire` | `<来源entry-id>` `--reason "<停用原因>"` | 从 rules.md **移除已整理的规则**，并将其来源条目（包括已经 merge 的条目）标记为 `retired`。在规则盘点并由人工裁定后使用 |
 | `rules` | （无） | 显示当前 `rules.md` |

@@ -168,6 +168,29 @@ assert_not_contains "$OUT_T" "/tmp/other.py" "/tmp 配下のファイルは失�
 assert_not_contains "$OUT_T" "COMMIT_EDITMSG" "ルート直下の .git/ も失敗上位に出ない"
 assert_contains "$OUT_T" "PostToolUse 初回通過率: 1/3 (33%)" "一時ファイルは初回通過率の分母にも入らない"
 
+# --- PostToolUse の WARN は件数だけ数え、ファイル単位の合否に混ぜない ---
+# check_file.sh の writer は file の無い WARN を記録する。将来 file が付いても
+# WARN 自体が「そのファイルの初回失敗」になるべきではないので両形式を含める。
+cat > "$WORK/project/.feedback/events.jsonl" <<'EOF'
+{"ts":"2026-08-14T01:00:00Z","hook":"post_edit","result":"warn","check":"node-lint"}
+{"ts":"2026-08-14T01:01:00Z","hook":"post_edit","file":"src/pass.ts","result":"warn","check":"node-lint"}
+EOF
+OUT_W="$(fb stats --since 2026-08-10)"; RC=$?
+assert_eq "0" "$RC" "WARN だけの stats が成功する: $OUT_W"
+assert_contains "$OUT_W" "期間内の post_edit イベントが無い" "WARN だけなら合否の集計対象は0ファイル"
+assert_not_contains "$OUT_W" "PostToolUse 初回通過率:" "WARN だけで架空の通過率を出さない"
+assert_contains "$OUT_W" "node-lint(2, 最終 2026-08-14)" "PostToolUse の WARN 件数は残す"
+cat >> "$WORK/project/.feedback/events.jsonl" <<'EOF'
+{"ts":"2026-08-14T01:02:00Z","hook":"post_edit","file":"src/pass.ts","result":"pass"}
+{"ts":"2026-08-14T01:03:00Z","hook":"post_edit","file":"src/retry.ts","result":"fail"}
+{"ts":"2026-08-14T01:04:00Z","hook":"post_edit","file":"src/retry.ts","result":"pass"}
+EOF
+OUT_W="$(fb stats --since 2026-08-10)"; RC=$?
+assert_eq "0" "$RC" "WARN と合否が併存する stats が成功する: $OUT_W"
+assert_contains "$OUT_W" "PostToolUse 初回通過率: 1/2 (50%)" "WARN は架空のファイルにも初回失敗にも数えない"
+assert_contains "$OUT_W" "1ファイルあたりの平均再チェック回数: 0.50" "再チェック回数の分母も実ファイル数になる"
+assert_contains "$OUT_W" "node-lint(2, 最終 2026-08-14)" "合否と併存しても WARN 件数は残す"
+
 # --- events が無いプロジェクトでも死なない ---
 rm "$WORK/project/.feedback/events.jsonl"
 OUT3="$(fb stats)"
