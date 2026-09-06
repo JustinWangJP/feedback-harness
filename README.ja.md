@@ -60,7 +60,9 @@ Windows では Git for Windows に付属する **Git Bash** を使います。�
 | 報告 | `report` | この作業コピー内だけの、朝会や振り返りに使う期間別の要約（前の期間との比較付き） |
 | 脆弱性監査 | `audit.sh` | 必要なときだけ実行（ハーネスが意図して通信する専用処理） |
 
-curator が `rules.md` 以外への自動化を提案するときは、`automation_candidates`（`candidate` / `evidence` / `recommended_check` / `human_decision`）という構造化契約を使い、人間が承認するまで保留にする。
+curator の自動チェック案は `automation_candidates`（`candidate` / `evidence` / `recommended_check` / `human_decision`）、文書の追記案は `document_candidates`（`target_path` / `section` / `proposed_text` / `reason` / `read_path` / `evidence` / `human_decision`）で提示する。導入先の指示文書と参照先を読み、役割に合う反映先を選ぶ。AGENTS.md または CLAUDE.md だけの導入先も扱い、反映先が未決定なら `target_path: null` とする。どちらも人間が承認するまで保留にする。
+
+`init.sh` 単独導入でも、`docs/pointer_claude.md` / `docs/pointer_agents.md` から挿入する規約に、同じ反映先選択と提案形式を含めています。プラグインのスキルは不要です。既存導入には、更新した配布元の `init.sh` を再実行すると管理マーカー内の規約が届き、マーカー外の利用者の記述は保持されます。導入先の文書構成や、どの文書を正本とするかは導入先の指定に従います。
 
 ## できること / できないこと
 
@@ -73,7 +75,7 @@ curator が `rules.md` 以外への自動化を提案するときは、`automati
 | 依存取得やリモート参照をハーネス側から追加せず検査する | **`check.sh` 自身は意図的なネットワークアクセスを開始しない**。ただし、プロジェクト定義のコマンドや外部ツールは設定に応じて通信する場合がある。脆弱性監査は `audit.sh` に分離し、Stop フックからは呼ばない |
 | カバレッジを計測する | **テストを2回実行しない**。既存の test コマンドにカバレッジ計測を追加する（または `test:coverage` に切り替える）だけ |
 | 破壊的変更を git ベースラインとの差分で検出する | **リモートを参照しない**。比較元は `git merge-base HEAD <既定ブランチ>`、解決できなければ `HEAD` |
-| `apply-feedback` スキルが記録済みの指摘を読み、次の作業へ反映する | **共有ファイルを無断で書き換えない**。`rules.md` 以外への変更（CLAUDE.md への追記・lint の追加）は提案のみとし、人間が承認してから反映する |
+| `apply-feedback` スキルが記録済みの指摘を読み、次の作業へ反映する | **共有ファイルを無断で書き換えない**。`rules.md` 以外への変更（共通規約・参照文書への追記や lint の追加）は提案のみとし、人間が承認してから反映する |
 | 数値を出す（`stats` / `report`） | **ダッシュボードを作らない**。バックグラウンドで動き続ける処理やグラフ、外部へのデータ送信は行わず、求められたときだけテキストで出力する |
 | 秘密情報を検出する | **値そのものは出力しない**（secretlint は標準でマスクし、gitleaks では `--redact` を必須にする）。失敗ログはエージェントへ渡されるため |
 
@@ -133,6 +135,8 @@ docs/
   configuration.zh-CN.md # 設定ガイドの簡体字中国語版
   pointer_claude.md # 導入先の CLAUDE.md に追加する案内文
   pointer_agents.md # 導入先の AGENTS.md に追加する案内文
+  development-guide.md # 開発の背景と規約の移行対応表
+  history/          # 開発履歴 (履歴資料)
   proposals/        # 実装前の提案 (履歴資料)
   references/       # 設計の背景として参照した外部資料 (履歴資料)
   superpowers/      # 設計書 (specs/) と実装計画 (plans/) — 履歴資料
@@ -310,7 +314,7 @@ cd /path/to/your-project && bash scripts/check.sh   # スタック検出の確�
 
 | Agent | 起動元 | 役割 | 出力 |
 |---|---|---|---|
-| `feedback-curator` | `feedback-loop` Phase 1（Phase 4 では起動せず、判断の考え方だけを使う） | 指摘を共通ルールにまとめる。signal（指摘の種類）を基に反映先を振り分け、失敗に関する指摘は根本原因によってさらに振り分ける | `promote`/`merge`/`close` の実行結果と判断の要約。`rules.md` 以外への反映案（CLAUDE.md への追記・lint の追加）は**提案のみ** |
+| `feedback-curator` | `feedback-loop` Phase 1（Phase 4 では起動せず、判断の考え方だけを使う） | 指摘を共通ルールにまとめる。signal（指摘の種類）を基に反映先を振り分け、失敗に関する指摘は根本原因によってさらに振り分ける | `promote`/`merge`/`close` の実行結果と判断の要約。`rules.md` 以外への反映案（共通規約・参照文書への追記や lint の追加）は**提案のみ** |
 | `harness-qa` | `feedback-loop` Phase 2 | スクリプトが動くか、Hooks の設定が正しいか、CLAUDE.md / AGENTS.md / rules.md が一致しているかを横断して検証する | `_workspace/qa_report_{日付}.md` に PASS/FAIL/SKIP レポート |
 
 どちらも**共有ファイルを自動では書き換えません**。`rules.md` 以外への変更は提案として示し、実際に反映するかどうかはユーザーが決めます。
@@ -422,7 +426,7 @@ bash scripts/check.sh --list-checks --json    # 同じ内容を機械可読な J
              promote → .feedback/rules.md へ新規ルール      (主に指示欠陥)
              merge   → 既存ルールへ統合。再発なら文言を強化
              close   → 共通ルールにできない一回限りの指摘を処理済みにする
-             提案    → 文脈欠落: CLAUDE.md などへの前提情報追加案
+             提案    → 文脈欠落: 役割に合う参照文書への前提情報追加案
                        実行誤り: lint・テスト・チェックリスト追加案
                        モデル限界: 人間確認・決定的ツールへの切り替え案（再現証拠が必要）
                        未判定: open のまま追加情報を待つ
@@ -441,7 +445,7 @@ bash scripts/check.sh --list-checks --json    # 同じ内容を機械可読な J
 
 測定は、Feedback Flywheel における「変化の測定」に当たります。ダッシュボードは作りません。`stats` は求められたときだけテキストを出力し、数値は `report` の「数字」セクションにのみ表示します。`events.jsonl`（フックの実行結果）と `.last-retro`（振り返り期間の開始点）は、端末内だけで使う状態ファイルであり、Git では共有しません。
 
-反映先を rules.md だけに限定しないのは、シグナルの種類によって改善すべき共有ファイルが異なるためです。知識の不足は、前提情報を示す文書（CLAUDE.md）で補います。機械的に検出できる失敗は lint やテストに組み込む方が、文章のルールだけで防ぐよりも確実です（参考: [Feedback Flywheel](docs/references/fowler-feedback-flywheel-translation.md)）。
+反映先を rules.md だけに限定しないのは、シグナルの種類によって改善すべき共有ファイルが異なるためです。知識の不足は、導入先の指示文書と参照先の役割を確認して選んだ文書で補います。機械的に検出できる失敗は lint やテストに組み込む方が、文章のルールだけで防ぐよりも確実です（参考: [Feedback Flywheel](docs/references/fowler-feedback-flywheel-translation.md)）。
 
 ## ライセンス
 

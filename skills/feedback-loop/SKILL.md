@@ -25,8 +25,9 @@ description: フィードバックハーネス全体のオーケストレータ�
 
 環境のサブエージェント機能で feedback-curator を呼び出す（定義: `agents/feedback-curator.md` — 定義ファイルの作業原則を prompt に含める）。Claude Code では `Agent` と `model: "opus"`、Codex では継承モデルを使う:
 
-- 入力: openエントリ一覧 + 既存rules.md + ユーザーの直近指摘
-- 期待出力: promote/merge/close の実行結果と判断の要約、および次の構造化契約。候補が無い場合も `automation_candidates: []` を出す
+- 入力: openエントリ一覧 + 既存rules.md + ユーザーの直近指摘 + 導入先の AGENTS.md / CLAUDE.md と参照先の情報。未確認の文書は curator が読む
+- 文書の反映先は [curator の反映先選択契約](../../agents/feedback-curator.md#document-targets) に従う。片方の指示文書だけの導入先も維持し、ファイル名で追記先を固定しない
+- 期待出力: promote/merge/close の実行結果と判断の要約、および次の構造化契約。自動チェック案と文書の追記案を分け、候補が無い種類も `automation_candidates: []` / `document_candidates: []` を出す
 
 ```yaml
 automation_candidates:
@@ -34,9 +35,17 @@ automation_candidates:
     evidence: "対象entry IDと再現・反復の証拠"
     recommended_check: "追加するlint・テスト・チェックの案"
     human_decision: pending
+document_candidates:
+  - target_path: "導入先ルートからの相対パス（未決定なら null）"
+    section: "追記する節"
+    proposed_text: "追加する文面"
+    reason: "文書の役割に基づく選定理由"
+    read_path: ["入口の指示文書", "対象の参照文書"]
+    evidence: "対象entry IDと確認した文脈"
+    human_decision: pending
 ```
 
-`human_decision` は承認前には必ず `pending` とする。
+`human_decision` は承認前には必ず `pending` とする。文書の対象が未決定なら `target_path: null` とし、候補と確認事項を `reason` に示す。
 - 完了後、rules.mdの差分と反映提案をユーザーに提示する。提案の採否はユーザーが決める(curator は共有アーティファクトを直接編集しない)
 
 ## Phase 2: ハーネスQA

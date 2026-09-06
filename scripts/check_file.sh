@@ -63,7 +63,7 @@ fi
 # 別々に持つと、検査を足したときに CHECK_ID の設定だけ書き漏れ、その検査の
 # WARN が無ラベルで記録される — 書き漏れが静かに通る形になる。
 # 戻り値は $(...) ではなく変数で返す。command substitution は subshell を作るため、
-# 関数内での CHECK_ID の更新が呼び出し側へ届かない(CLAUDE.md の既知の落とし穴)。
+# 関数内での CHECK_ID の更新が呼び出し側へ届かない(AGENTS.md C15 の既知の落とし穴)。
 SEV=""
 CHECK_ID=""
 check_sev() {
