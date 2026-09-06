@@ -62,6 +62,8 @@
 
 curator 使用 `automation_candidates`（`candidate`、`evidence`、`recommended_check`、`human_decision`）提交自动检查建议，使用 `document_candidates`（`target_path`、`section`、`proposed_text`、`reason`、`read_path`、`evidence`、`human_decision`）提交文档补充建议。先阅读目标项目的指令文档及其引用，再按文档职责选择位置。仅有 AGENTS.md 或仅有 CLAUDE.md 的项目也受支持；位置未定时使用 `target_path: null`。两类建议均在人工批准前保持待定。
 
+仅使用 `init.sh` 安装时，`docs/pointer_claude.md` / `docs/pointer_agents.md` 写入的规则也包含相同的反映位置选择流程和建议格式，无需插件 Skills。对已有项目重新运行更新后的源仓库中的 `init.sh`，即可更新管理标记内的规则，并保留标记外的用户内容。目标项目仍自行决定文档结构和共通规则的权威来源。
+
 ## 可以做什么 / 不会做什么
 
 本工具链有意不执行某些操作。以下内容是设计决策，并非尚未实现的功能。

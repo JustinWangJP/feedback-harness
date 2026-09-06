@@ -26,6 +26,10 @@ PLAN = "docs/proposals/2026-09-06-shared-agent-instructions.md"
 GUIDE = "docs/development-guide.md"
 CURATOR = "agents/feedback-curator.md"
 LOOP = "skills/feedback-loop/SKILL.md"
+POINTERS = re.findall(r'"(docs/pointer_[^\"]+\.md)"',
+                      (repo / "scripts/init.sh").read_text(encoding="utf-8"))
+if len(POINTERS) < 2:
+    raise SystemExit("init.sh の配布用ポインタを検出できません")
 
 
 def links(text):
@@ -64,7 +68,7 @@ def contracts(text):
 
 def validate(files):
     errors = []
-    for required in ("AGENTS.md", "CLAUDE.md", PLAN, GUIDE, CURATOR, LOOP):
+    for required in ("AGENTS.md", "CLAUDE.md", PLAN, GUIDE, CURATOR, LOOP, *POINTERS):
         if required not in files:
             errors.append("missing-file: " + required)
     if errors:
@@ -114,14 +118,15 @@ def validate(files):
     canonical = contracts(files[CURATOR])
     if set(canonical) != {"automation_candidates", "document_candidates"}:
         errors.append("output-contract: missing proposal type")
-    # 全 agent / skill の YAML例を走査。期待フィールドは curator から導出する。
+    # 全 agent / skill と実際に配布するポインタの YAML例を走査。
+    # 期待フィールドは curator から導出する。
     consumers = 0
     for path, text in files.items():
-        if not path.startswith(("agents/", "skills/")):
+        if not path.startswith(("agents/", "skills/")) and path not in POINTERS:
             continue
         found = contracts(text)
         if not found:
-            if path == LOOP:
+            if path == LOOP or path in POINTERS:
                 errors.append("output-contract: " + path)
             continue
         consumers += 1
@@ -129,8 +134,8 @@ def validate(files):
             errors.append("output-contract: " + path)
         if any(fields.get("human_decision") != "pending" for fields in found.values()):
             errors.append("approval-state: " + path)
-    if consumers < 2:
-        errors.append("output-contract: scan did not reach curator and orchestrator")
+    if consumers < 2 + len(POINTERS):
+        errors.append("output-contract: scan did not reach curator, orchestrator and pointers")
     readmes = [p for p in files if re.fullmatch(r"README(?:\.[\w-]+)?\.md", p)]
     if not readmes:
         errors.append("contract-docs: no README scanned")
@@ -181,13 +186,20 @@ for expected, path, mutate in mutations:
     check(fixture[path] != documents[path], "mutation changed input: " + expected)
     detected = validate(fixture)
     check(any(e.startswith(expected + ":") for e in detected), "mutation detected: " + expected)
+for path in POINTERS:
+    fixture = copy.copy(documents)
+    fixture[path] = "\n".join(line for line in fixture[path].splitlines()
+                             if not line.startswith("    read_path:"))
+    check(fixture[path] != documents[path], "pointer mutation changed input: " + path)
+    check(any(e.startswith("output-contract:") for e in validate(fixture)),
+          "pointer contract drift detected: " + path)
 fixture = copy.copy(documents)
 del fixture[GUIDE]
 check(any(e.startswith("missing-file:") for e in validate(fixture)), "missing guide detected")
 
 if failures:
     raise SystemExit(1)
-print(f"共通規約: {len(documents)}文書を走査、旧項目の参照と出力契約、{len(mutations) + 1}種の欠陥再注入が成功")
+print(f"共通規約: {len(documents)}文書を走査、旧項目の参照と出力契約、{len(mutations) + len(POINTERS) + 1}種の欠陥再注入が成功")
 PY
 STATUS=$?
 assert_eq "0" "$STATUS" "共通規約の構造と検査自身の欠陥検出"

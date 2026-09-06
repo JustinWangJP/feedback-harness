@@ -13,8 +13,8 @@ This directory contains documentation for current usage and historical material 
 | [Project overview](../README.md) | Features, installation, and daily usage |
 | [Configuration guide](configuration.md) | Configuration and troubleshooting for `.feedback/config.yaml` |
 | [Script reference](../scripts/README.md) | Responsibilities, behavior, and exit codes for each script |
-| [Rules for Codex and general-purpose agents](pointer_agents.md) | Rules inserted into target AGENTS.md files that support both Codex Plugin Hooks and the manual fallback |
-| [Rules for Claude Code](pointer_claude.md) | Rules inserted into target CLAUDE.md files that support both Claude Code plugin Hooks and the init-only manual fallback |
+| [Rules for Codex and general-purpose agents](pointer_agents.md) | Target AGENTS.md guidance for Hooks or manual checks, including document destination selection and proposal formats without skills |
+| [Rules for Claude Code](pointer_claude.md) | Target CLAUDE.md guidance for Hooks or manual checks, including document destination selection and proposal formats without skills |
 
 ## Historical material
 

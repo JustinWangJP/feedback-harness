@@ -62,6 +62,8 @@ The feedback accumulation features are:
 
 Curator automation proposals use `automation_candidates` (`candidate`, `evidence`, `recommended_check`, `human_decision`). Document proposals use `document_candidates` (`target_path`, `section`, `proposed_text`, `reason`, `read_path`, `evidence`, `human_decision`). The curator reads the target project's instruction files and their references, then chooses a destination by its role. Projects with only AGENTS.md or only CLAUDE.md remain supported; an unresolved destination uses `target_path: null`. Both proposal types remain pending until human approval.
 
+With an `init.sh`-only installation, the guidance inserted from `docs/pointer_claude.md` and `docs/pointer_agents.md` provides the same destination-selection procedure and proposal format without requiring plugin skills. Rerun the updated source repository's `init.sh` to replace the managed guidance in an existing project; text outside the management markers is preserved. The target project keeps its own document structure and choice of shared instructions.
+
 ## What it does and does not do
 
 The harness deliberately leaves some things undone. These are design decisions, not missing features.

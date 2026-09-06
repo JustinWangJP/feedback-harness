@@ -62,6 +62,8 @@ Windows では Git for Windows に付属する **Git Bash** を使います。�
 
 curator の自動チェック案は `automation_candidates`（`candidate` / `evidence` / `recommended_check` / `human_decision`）、文書の追記案は `document_candidates`（`target_path` / `section` / `proposed_text` / `reason` / `read_path` / `evidence` / `human_decision`）で提示する。導入先の指示文書と参照先を読み、役割に合う反映先を選ぶ。AGENTS.md または CLAUDE.md だけの導入先も扱い、反映先が未決定なら `target_path: null` とする。どちらも人間が承認するまで保留にする。
 
+`init.sh` 単独導入でも、`docs/pointer_claude.md` / `docs/pointer_agents.md` から挿入する規約に、同じ反映先選択と提案形式を含めています。プラグインのスキルは不要です。既存導入には、更新した配布元の `init.sh` を再実行すると管理マーカー内の規約が届き、マーカー外の利用者の記述は保持されます。導入先の文書構成や、どの文書を正本とするかは導入先の指定に従います。
+
 ## できること / できないこと
 
 このハーネスには、意図的に**行わないこと**があります。以下は未実装の機能ではなく、設計上の判断です。
