@@ -79,7 +79,7 @@ TOML
 check_ids "$P3"
 assert_contains "$IDS" "mypy" "[tool.mypy] セクションがあれば mypy を走らせる: $IDS"
 
-# サブテーブルも前方一致で検出する(ruff / deptry / vulture と同じ形)。
+# サブテーブルも名前の区切りまで一致すれば検出する。
 # なお `[[tool.mypy.overrides]]`(配列テーブル)は行頭が `[[` のため
 # この前方一致には掛からない。ruff 等の既存ゲートも同じ挙動で、mypy は
 # `[tool.mypy]` を書くのが前提のため、ここは意図した境界として据え置く。
@@ -107,6 +107,23 @@ name = "demo"
 TOML
 check_ids "$P5"
 assert_contains "$IDS" "mypy" "インデントされた見出しでも宣言として扱う: $IDS"
+
+# 名前の前方一致だけでは別テーブルを宣言と誤認する。
+for table in mypy_extra mypy-extra mypyc; do
+  P="$(new_project "$table")"
+  printf '[tool.%s]\nenabled = true\n' "$table" > "$P/pyproject.toml"
+  check_ids "$P"
+  assert_contains "$IDS" "ruff" "前提: 別テーブルでも Python スタックは検出される: $IDS"
+  assert_not_contains "$IDS" "mypy" "[tool.$table] は mypy の宣言ではない: $IDS"
+done
+
+# TOML が許す区切り前の空白も受け付ける。
+for table in 'mypy ]' 'mypy .plugins]'; do
+  P="$(new_project "spaced-$table")"
+  printf '[tool.%s\n' "$table" > "$P/pyproject.toml"
+  check_ids "$P"
+  assert_contains "$IDS" "mypy" "区切り前に空白があっても mypy を検出する: $table"
+done
 
 # --- 走査: pyproject.toml を見る宣言ゲートはすべて行頭アンカーを持つ ---
 # 個別ケースだけを直すと、同じ抜けが隣のゲートへ再発する(実際 mypy だけが

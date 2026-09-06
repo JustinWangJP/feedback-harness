@@ -73,10 +73,12 @@ cat > "$WORK/project/.feedback/events.jsonl" <<'EOF'
 {"ts":"2026-08-10T01:00:00Z","hook":"post_edit","file":"src/a.py","result":"fail"}
 {"ts":"2026-08-10T01:01:00Z","hook":"post_edit","file":"src/a.py","result":"pass"}
 {"ts":"2026-08-14T02:00:00Z","hook":"post_edit","file":"src/b.py","result":"pass"}
+{"ts":"2026-08-14T02:01:00Z","hook":"post_edit","result":"warn","check":"node-lint"}
 {"ts":"2026-08-14T03:00:00Z","hook":"stop","result":"warn","check":"python: ruff format"}
 EOF
 
-OUT="$(fb report --since 2026-07-10)"
+OUT="$(fb report --since 2026-07-10)"; RC=$?
+assert_eq "0" "$RC" "WARN と合否が併存する report が成功する: $OUT"
 assert_contains "$OUT" "scope: local" "report はローカル集計であることを明示する"
 assert_contains "$OUT" ".feedback/log/" "report はデータ元を明示する"
 
@@ -94,9 +96,10 @@ assert_contains "$OUT" "20260715-000001(参考 " "再発候補の本文(読む�
 # 昇華セクションだけで、再発候補行はプレフィックス無し — こちらで区別して照合する)
 assert_not_contains "$OUT" "出典 20260701-000001" "期間前の昇華は載らない"
 # 数字セクション: events があるので初回通過率が出る
-assert_contains "$OUT" "PostToolUse 初回通過率:" "イベント数字が出る"
+assert_contains "$OUT" "PostToolUse 初回通過率: 当期間 1/2" "WARN を除いた実ファイル数で通過率を出す"
 assert_contains "$OUT" "## WARN" "WARN セクションがある"
 assert_contains "$OUT" "python: ruff format: 1件" "WARN の件数が出る"
+assert_contains "$OUT" "node-lint: 1件" "PostToolUse の WARN も件数には残す"
 # 件数だけでは、直った指摘と今も出ている指摘が同じ見た目になる
 assert_contains "$OUT" "最終 " "WARN に最終発生日が併記される"
 assert_contains "$OUT" "日以上再発なし" "古いWARNには鮮度の注記が付く"
@@ -131,11 +134,14 @@ mkdir -p "$WORK/project3/.feedback"
 SINCE_REL="$(days_ago 4)"   # span=4 → 前期間は [今日-8, 今日-5]
 {
   # 当期間([今日-4, ∞)): 初回 pass の1ファイル → 1/1
+  printf '{"ts":"%sT00:00:00Z","hook":"post_edit","result":"warn","check":"node-lint"}\n' "$(days_ago 2)"
   printf '{"ts":"%sT01:00:00Z","hook":"post_edit","file":"src/cur.py","result":"pass"}\n' "$(days_ago 2)"
   # 前期間([今日-8, 今日-5]): 初回 fail の1ファイル → 0/1
+  printf '{"ts":"%sT00:00:00Z","hook":"post_edit","result":"warn","check":"node-lint"}\n' "$(days_ago 6)"
   printf '{"ts":"%sT01:00:00Z","hook":"post_edit","file":"src/prev.py","result":"fail"}\n' "$(days_ago 6)"
 } > "$WORK/project3/.feedback/events.jsonl"
-OUT3="$(CLAUDE_PROJECT_DIR="$WORK/project3" tpy "$CLI" report --since "$SINCE_REL")"
+OUT3="$(CLAUDE_PROJECT_DIR="$WORK/project3" tpy "$CLI" report --since "$SINCE_REL")"; RC=$?
+assert_eq "0" "$RC" "両期間に WARN がある report が成功する: $OUT3"
 assert_contains "$OUT3" "PostToolUse 初回通過率: 当期間 1/1" "当期間の初回通過率が出る"
 assert_contains "$OUT3" "(前期間 0/1)" "同じ長さだけ遡った前期間と比較される"
 

@@ -246,13 +246,17 @@ def post_edit_first_pass(evs, date_from: str, date_to: str):
     """期間内の post_edit イベントから
     (初回pass数, ファイル数, ファイル別fail数, ファイル別の最終fail日)を返す。
 
-    「初回」= 期間内でそのファイルに最初に現れたイベント。期間を跨ぐ再登場は
+    「初回」= 期間内でそのファイルに最初に現れた pass / fail。期間を跨ぐ再登場は
     リセットされる(日次/指定期間のスナップショットとして測る)。
     一時ファイルは集計対象外(is_transient_path)。
     """
     first, fails, last_fail = {}, {}, {}
     for e in evs:
         if e.get("hook") != "post_edit":
+            continue
+        # WARN は検査別の指摘件数として別途集計する。file の無い WARN を
+        # 混ぜると空文字の架空ファイルが増え、file があれば初回失敗に化ける。
+        if e.get("result") not in ("pass", "fail"):
             continue
         d = str(e.get("ts", ""))[:10]
         if not (date_from <= d <= date_to):

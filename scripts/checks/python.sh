@@ -21,7 +21,9 @@ run_python_checks() {
     # ない位置**にその文字列があるだけで検出が成立する。mypy には他と違って
     # WARN フォールバック(run_stage_soft)が無く、誤検出がそのまま完了ブロックの
     # FAIL になる(2026-09-02 の全体レビュー由来)
-    if [[ -f pyproject.toml ]] && grep -q "^[[:space:]]*\[tool\.mypy" pyproject.toml 2>/dev/null; then
+    # mypy の直後も区切りに限定する。前方一致では [tool.mypy_extra] 等の
+    # 別テーブルで型検査を有効にしてしまう。空白を挟んだ区切りも TOML では有効。
+    if [[ -f pyproject.toml ]] && grep -qE "^[[:space:]]*\[tool\.mypy[[:space:]]*(\]|\.)" pyproject.toml 2>/dev/null; then
       run_stage typecheck "mypy" "mypy" "python: mypy" mypy .
     fi
     # カバレッジ相乗り(M3): テストを2回走らせず、計装フラグを足すだけ。
