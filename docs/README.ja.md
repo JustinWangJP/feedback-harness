@@ -8,16 +8,19 @@
 
 | 文書 | 内容 |
 |---|---|
+| [共通開発規約](../AGENTS.md) | このリポジトリで全エージェントが従う必須規約 |
+| [開発ガイド](development-guide.md) | 判断の背景、実装例、規約の移行対応表 |
 | [プロジェクト概要](../README.ja.md) | 機能、導入方法、日常の利用方法 |
 | [設定ガイド](configuration.ja.md) | `.feedback/config.yaml` の設定方法とトラブルシューティング |
 | [スクリプト仕様](../scripts/README.ja.md) | 各スクリプトの役割、実行内容、終了コード |
-| [Codex / 汎用エージェント向け規約](pointer_agents.md) | Codex Plugin Hooks と手動フォールバックを両立する、導入先 AGENTS.md 用の規約 |
-| [Claude Code 向け規約](pointer_claude.md) | Claude Code プラグインの Hooks と init-only の手動フォールバックを両立する、導入先 CLAUDE.md 用の規約 |
+| [Codex / 汎用エージェント向け規約](pointer_agents.md) | Hooks／手動チェックに加え、スキルなしでも使える文書の反映先選択・提案形式を含む導入先 AGENTS.md 用の規約 |
+| [Claude Code 向け規約](pointer_claude.md) | Hooks／手動チェックに加え、スキルなしでも使える文書の反映先選択・提案形式を含む導入先 CLAUDE.md 用の規約 |
 
 ## 履歴資料を確認する
 
 | ディレクトリ | 位置づけ |
 |---|---|
+| [開発履歴](history/development-history.md) (`history/`) | 日付付きの開発上の判断と変更内容 |
 | `proposals/` | 実装前の提案。未採用案や、後から変更された案を含む |
 | `superpowers/specs/` | 設計時点の仕様と判断理由 |
 | `superpowers/plans/` | 実装時の作業計画と検証手順 |

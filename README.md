@@ -60,7 +60,9 @@ The feedback accumulation features are:
 | Report | `report` | Produces a local-only period summary for stand-ups and retrospectives, including comparison with the preceding period |
 | Vulnerability audit | `audit.sh` | Runs only when requested (the harness's dedicated networked operation) |
 
-Curator suggestions outside `rules.md` use a structured `automation_candidates` contract (`candidate`, `evidence`, `recommended_check`, and `human_decision`) so that proposed automation remains pending until a human approves it.
+Curator automation proposals use `automation_candidates` (`candidate`, `evidence`, `recommended_check`, `human_decision`). Document proposals use `document_candidates` (`target_path`, `section`, `proposed_text`, `reason`, `read_path`, `evidence`, `human_decision`). The curator reads the target project's instruction files and their references, then chooses a destination by its role. Projects with only AGENTS.md or only CLAUDE.md remain supported; an unresolved destination uses `target_path: null`. Both proposal types remain pending until human approval.
+
+With an `init.sh`-only installation, the guidance inserted from `docs/pointer_claude.md` and `docs/pointer_agents.md` provides the same destination-selection procedure and proposal format without requiring plugin skills. Rerun the updated source repository's `init.sh` to replace the managed guidance in an existing project; text outside the management markers is preserved. The target project keeps its own document structure and choice of shared instructions.
 
 ## What it does and does not do
 
@@ -73,7 +75,7 @@ The harness deliberately leaves some things undone. These are design decisions, 
 | Runs checks without adding dependency downloads or remote lookups of its own | **`check.sh` itself does not intentionally initiate network access.** Project-defined commands and tools may still use the network according to their configuration. The dedicated vulnerability audit is isolated in `audit.sh` and is never called by the Stop hook |
 | Measures coverage | **Does not run tests twice.** It only adds coverage instrumentation to the existing test command (or switches to `test:coverage`) |
 | Detects breaking changes against a Git baseline | **Does not consult a remote.** The baseline is `git merge-base HEAD <default-branch>`, falling back to `HEAD` when it cannot be resolved |
-| Uses the `apply-feedback` skill to read recorded feedback and apply it to the next task | **Does not modify shared files without permission.** Changes outside `rules.md` (such as additions to CLAUDE.md or a new linter) are proposed and applied only after human approval |
+| Uses the `apply-feedback` skill to read recorded feedback and apply it to the next task | **Does not modify shared files without permission.** Changes outside `rules.md` (such as additions to shared instructions or reference documents or a new linter) are proposed and applied only after human approval |
 | Produces numbers with `stats` and `report` | **Does not build a dashboard.** There are no persistent background processes, charts, or external data transmission; output is text produced on request |
 | Detects secrets | **Does not print the values themselves.** secretlint masks by default, and gitleaks must use `--redact`, because failure logs are sent to the agent |
 
@@ -133,6 +135,8 @@ docs/
   configuration.zh-CN.md # Simplified Chinese version of the configuration guide
   pointer_claude.md # Guidance inserted into target CLAUDE.md files
   pointer_agents.md # Guidance inserted into target AGENTS.md files
+  development-guide.md # Development rationale and migration map (Japanese)
+  history/          # Development history (historical material, Japanese)
   proposals/        # Pre-implementation proposals (historical material)
   references/       # External sources consulted during design (historical material)
   superpowers/      # Design specifications (specs/) and implementation plans (plans/) — historical
@@ -310,7 +314,7 @@ You do not need to invoke these agents directly, but understanding their roles m
 
 | Agent | Started by | Role | Output |
 |---|---|---|---|
-| `feedback-curator` | `feedback-loop` Phase 1 (Phase 4 uses its decision framework without starting it) | Consolidates feedback into shared rules. It routes by signal and further routes failure feedback by root cause | Result and rationale for `promote`, `merge`, or `close`. Changes outside `rules.md` (such as additions to CLAUDE.md or a new linter) are **proposals only** |
+| `feedback-curator` | `feedback-loop` Phase 1 (Phase 4 uses its decision framework without starting it) | Consolidates feedback into shared rules. It routes by signal and further routes failure feedback by root cause | Result and rationale for `promote`, `merge`, or `close`. Changes outside `rules.md` (such as additions to shared instructions or reference documents or a new linter) are **proposals only** |
 | `harness-qa` | `feedback-loop` Phase 2 | Checks script behavior, Hook configuration, and consistency among CLAUDE.md, AGENTS.md, and rules.md | A PASS/FAIL/SKIP report at `_workspace/qa_report_{date}.md` |
 
 Neither agent **modifies shared files automatically**. Changes outside `rules.md` are proposed, and you decide whether to apply them.
@@ -422,7 +426,7 @@ Precedence is environment variable > individual check > stack > global > default
              promote → add a new rule to .feedback/rules.md      (mainly instruction defects)
              merge   → merge into an existing rule; strengthen wording on recurrence
              close   → close one-off feedback that cannot become a shared rule
-             propose → Missing context: add prerequisite information to CLAUDE.md, etc.
+             propose → Missing context: propose additions to the appropriate prerequisite document
                        Execution error: add a linter, test, or checklist
                        Model limitation: require human review or a deterministic tool (reproduction evidence required)
                        Undetermined: leave open and wait for more information
@@ -442,7 +446,7 @@ Recorded feedback is consulted from the next task onward without waiting for `pr
 
 Measurement corresponds to “measuring the change” in the Feedback Flywheel. The harness does not build a dashboard. `stats` produces text only on request, and numbers appear only in the “Numbers” section of `report`. `events.jsonl` (Hook results) and `.last-retro` (the reporting period marker) are local state files and are not shared through Git.
 
-Rules are not the only destination because the right shared artifact depends on the signal. Missing knowledge belongs in prerequisite documentation such as CLAUDE.md. Mechanically detectable failures are prevented more reliably by a linter or test than by prose alone. See [Feedback Flywheel](docs/references/fowler-feedback-flywheel-translation.md).
+Rules are not the only destination because the right shared artifact depends on the signal. Missing knowledge belongs in the prerequisite document selected from the target project's instruction files and their references. Mechanically detectable failures are prevented more reliably by a linter or test than by prose alone. See [Feedback Flywheel](docs/references/fowler-feedback-flywheel-translation.md).
 
 ## License
 

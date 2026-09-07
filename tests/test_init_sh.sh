@@ -9,11 +9,66 @@ WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 WORK="$(cd "$WORK" && pwd)"
 
+# 配布元テンプレート全体が実際の導入先へ届くことを新規・更新・旧形式移行で検証する。
+# 期待集合は init.sh の配布定義から導出し、特定の一文だけで最新化を判定しない。
+verify_installed_pointers() {
+  local status
+  tpy - "$REPO" "$1" <<'PY'
+import re
+import sys
+from pathlib import Path
+
+repo, dest = map(Path, sys.argv[1:])
+pairs = re.findall(
+    r'update_pointer "([^\"]+\.md)"\s+.*?"(docs/pointer_[^\"]+\.md)"',
+    (repo / "scripts/init.sh").read_text(encoding="utf-8"), re.S,
+)
+if len(pairs) < 2:
+    raise SystemExit("配布するポインタを検出できません")
+for filename, source in pairs:
+    template = (repo / source).read_text(encoding="utf-8")
+    installed = (dest / filename).read_text(encoding="utf-8")
+    start, end = "<!-- feedback-harness:pointer:start -->\n", "<!-- feedback-harness:pointer:end -->"
+    if installed.count(start) != 1 or installed.count(end) != 1:
+        raise SystemExit(filename + ": 管理ブロックが一意でありません")
+    actual = installed.split(start, 1)[1].split(end, 1)[0]
+    if "{{INSTALL_DATE}}" in template:
+        date = re.search(r"^\| (\d{4}-\d{2}-\d{2}) \| フィードバックハーネス導入", actual, re.M)
+        if not date:
+            raise SystemExit(filename + ": 導入日がありません")
+        template = template.replace("{{INSTALL_DATE}}", date.group(1))
+    if actual != template:
+        raise SystemExit(filename + ": 配布元テンプレートと管理ブロックが一致しません")
+PY
+  status=$?
+  assert_eq "${2:-0}" "$status" "配布元ポインタと導入先 $1 の比較結果"
+}
+
 mkdir -p "$WORK/target"
 ( cd "$WORK/target" && git init -q . )
 
 OUT="$(bash "$REPO/scripts/init.sh" "$WORK/target" 2>&1)"
 assert_eq "0" "$?" "init.sh が成功する: $OUT"
+verify_installed_pointers "$WORK/target"
+
+# 比較が実際の配布内容の欠落を検出することも、隔離コピーで確かめる。
+mkdir -p "$WORK/mutated"
+for pointer in CLAUDE.md AGENTS.md; do
+  cp "$WORK/target/CLAUDE.md" "$WORK/target/AGENTS.md" "$WORK/mutated/"
+  tpy - "$WORK/mutated/$pointer" <<'PY'
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+if "document_candidates:" not in text:
+    raise SystemExit("欠陥再注入対象がありません")
+path.write_text(text.replace("document_candidates:", "removed_document_candidates:"), encoding="utf-8")
+PY
+  MUTATION_STATUS=$?
+  assert_eq "0" "$MUTATION_STATUS" "導入先 $pointer の文書提案契約を欠陥再注入で変更した"
+  verify_installed_pointers "$WORK/mutated" "1"
+done
 
 # Codex 向けにベンダリングされるもの
 assert_file_exists "$WORK/target/scripts/check.sh" "check.sh"
@@ -105,6 +160,8 @@ agents.write_text(
 )
 PY
 bash "$REPO/scripts/init.sh" "$WORK/target" >/dev/null 2>&1
+assert_eq "0" "$?" "init.sh の再実行が成功する"
+verify_installed_pointers "$WORK/target"
 assert_eq "$BEFORE_C" "$(grep -c 'ハーネス: フィードバックループ' "$WORK/target/CLAUDE.md")" "CLAUDE.md のポインタが重複しない"
 assert_eq "$BEFORE_A" "$(grep -c 'フィードバックハーネス' "$WORK/target/AGENTS.md")" "AGENTS.md のポインタが重複しない"
 assert_eq "0" "$(grep -c 'OLD CLAUDE POINTER' "$WORK/target/CLAUDE.md")" "CLAUDE.md の旧管理内容を更新する"
@@ -146,6 +203,8 @@ OLD LEGACY AGENTS POINTER
 keep agents tail
 EOF
 bash "$REPO/scripts/init.sh" "$WORK/legacy" >/dev/null 2>&1
+assert_eq "0" "$?" "旧ポインタからの移行が成功する"
+verify_installed_pointers "$WORK/legacy"
 assert_eq "0" "$(grep -c 'OLD LEGACY CLAUDE POINTER' "$WORK/legacy/CLAUDE.md")" \
   "CLAUDE.md の旧ポインタを移行する"
 assert_eq "0" "$(grep -c 'OLD LEGACY AGENTS POINTER' "$WORK/legacy/AGENTS.md")" \
