@@ -249,4 +249,38 @@ assert_eq "1" "$(grep -cxF '.feedback/local/' "$GI/.gitignore")" \
 assert_eq "1" "$(grep -cxF '_workspace/' "$GI/.gitignore")" \
   "既存エントリを二重に書かない"
 
+# 配布した scripts/ は所有者以外も読める。ruff ディレクティブを後挿入する
+# ファイルは mktemp(0600)経由で置き換わるため、umask 022 でも明示しないと
+# 所有者専用になり、別ユーザーの CI・共有端末で config が読めなくなる。
+# 対象は配布定義に列挙せず、導入先の scripts/ 全ファイルを走査する
+PERM="$WORK/perm"
+mkdir -p "$PERM"
+(umask 022 && bash "$REPO/scripts/init.sh" "$PERM" >/dev/null 2>&1)
+assert_eq "0" "$?" "umask 022 で init.sh が成功する"
+PERM_RESULT="$(tpy - "$PERM/scripts" <<'PY'
+import os
+import stat
+import sys
+
+root = sys.argv[1]
+scanned, private = [], []
+for base, _dirs, files in os.walk(root):
+    for name in files:
+        path = os.path.join(base, name)
+        rel = os.path.relpath(path, root).replace(os.sep, "/")
+        scanned.append(rel)
+        mode = os.stat(path).st_mode
+        if not (mode & stat.S_IRGRP and mode & stat.S_IROTH):
+            private.append(f"{rel}={stat.filemode(mode)}")
+print("scanned=" + ",".join(sorted(scanned)))
+print("private=" + ",".join(sorted(private)))
+PY
+)"
+assert_eq "0" "$?" "権限走査が正常終了する(異常終了を空出力=合格にしない)"
+assert_contains "$PERM_RESULT" "harness_config.py" "権限走査が ruff ディレクティブを挿入した配布ファイルに触れる"
+assert_contains "$PERM_RESULT" "checks/python.sh" "権限走査が checks/ 配下に触れる"
+assert_contains "$PERM_RESULT" $'\nprivate=' "権限走査が結果を出力する"
+assert_eq "private=" "$(printf '%s\n' "$PERM_RESULT" | grep '^private=')" \
+  "導入先 scripts/ の全ファイルが所有者以外にも読める"
+
 assert_summary
