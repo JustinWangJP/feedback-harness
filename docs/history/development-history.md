@@ -42,6 +42,7 @@
 | 2026-09-02 | 全体レビュー(2026-09-02)の指摘5件+改修中の新規2件を改修(0.1.11 → 0.1.12) | feedback_log.py / check_file.sh / lib.sh / checks/python.sh / checks/cross_cutting.sh / tests / scripts/README×3 / plugin manifests / review | (P1) `updated_status_text` が `status_changed:` の有無を全文で判定し、detail や close 理由にその文言があると frontmatter へ追加せず本文の日付を書き換えていた(記録が黙って変わり、report の close・retire 節から永久に消える)。frontmatter の境界判定を `split_frontmatter` へ集約し読み書き双方を通した。(P2) `promote` / `merge` に `close` と同じ状態ガードが無く、二重 promote が同じ出典のルールを2件作って `merge` / `retire` を恒久的にロックしていた(`require_open` で復旧手順つきに拒否)。(P2) `check_file.sh` の ESLint 設定検出が4種の固定列挙で、`.eslintrc.cjs` 等では PostToolUse が検査を飛ばし Stop だけが報告する食い違いになっていた(`harness_has_eslint_config` の glob へ)。(P3) `json-syntax` / `md-links` が Python 不在時に未検証のまま `PASS` を報告していた(`yaml-syntax` と同じ事前ゲートで `SKIP`)。(P3) `mypy` の宣言ゲートだけアンカー・エスケープが無く、description の文言で FAIL 検査が起動していた。改修中に2件を検出しその場で塞いだ: `--format unix` は ESLint 10 で core から外れツール自身のエラーが差し戻されていた件と、非0を一律 lint 違反として扱っていたため eslintrc のみのプロジェクトで設定エラーが毎編集ごとに返っていた件(終了コード 1 のみを違反として扱う)。再レビューを3周し、そこで見つけた指摘も同一ブランチで解消した: ESLint 致命的エラー時に構文検査へ倒さず無検査で素通ししていた件、`updated_status_text` が frontmatter 内でも部分文字列置換で他キーの値を壊しうる件、`cmd_merge` の状態ガードが「すでにこのルールの出典です」より先に出て破壊的な retire を案内していた件、JSONC しか無いプロジェクトで json 構文が未検証のまま PASS になる件、終端していない frontmatter で status_changed の挿入が行を連結する件。あわせて promote / merge の `open` 前提を3言語 README へ記載した。各修正は欠陥を再注入して護欄が落ちることを確認 |
 | 2026-09-03 | PR #17 レビュー指摘4件を改修 | feedback_log.py / check_file.sh / check.sh / lib.sh / checks/cross_cutting.sh / tests / review | (P1) `require_open` が `verb` を無視し、`close` / `merge` にも promote 向けの文言と `retire` の案内を返していた。案内どおり `retire` するとルール本体が消え出典すべてが retired になったうえ、目的の merge は `status=retired` で依然失敗する — 案内に従うほど壊れて先へ進めない形で、②の修正が防ごうとした失敗が別の入口から残っていた(`_promoted_recovery` で verb ごとに分岐し、未知の verb は破壊的操作を案内しない側へ倒す。走査で書き漏れを禁止)。(P2) `check_file.sh` の WARN が `events.jsonl` に残らず、ESLint が致命的エラーで判定を返せない `.ts`/`.tsx`/`.jsx` は lint 被覆ゼロなのに `pass` として記録され、初回通過率だけが上がっていた(`emit` から `harness_log_warn ... post_edit` で記録。`check_sev` が severity と検査IDを1つの入口で束ねラベルの書き漏れを構造的に防ぐ)。(P3) `anything_detected` の材料が `RESULTS` で `--list-checks` では常に false へ退化し、通常実行には出る secretlint の案内が一覧からだけ消えていた(両モードが通る入口で数える `RECORDED_CHECKS` へ)。(P3) 宣言ゲートの走査が `-q`/`-qE`/`-qF` の固定列挙で `-qs` / `-q --` / `>/dev/null` を素通しし、かつ対象ディレクトリが消えると否定形アサーションが空振りで成立していた(フラグ列を任意個として受け、走査が実ゲートに触れていることを肯定形で先に固定)。各修正は欠陥を再注入して護欄が落ちることを確認 |
 | 2026-09-06 | 全エージェント共通規約の一元化（v0.1.12 → v0.1.13） | AGENTS.md / CLAUDE.md / docs / agents / skills / README各言語版 / tests / plugin manifests | 旧設計メモ29項目の必須制約を AGENTS.md へ、背景を開発ガイドへ、変更履歴35行を本書へ移した。curator が導入先の指示文書と参照先の役割から追記先を選び、文書案を document_candidates で返す契約へ変更。配布用ポインタと init.sh の構成、rules.md の昇華・統合経路は維持した。Claude Code / Codex の公開プラグインバージョンを0.1.13へ更新した。 |
+| 2026-10-04 | v0.1.13 安定版の出荷前実測と init.sh の権限修正 | scripts/init.sh / tests/test_init_sh.sh / 本書 | v0.1.13-beta を安定版にする前に、隔離した導入先で init.sh と Claude Code / Codex の指示ルーティングを実測した。導入先の `scripts/harness_config.py` だけが 0600 になっていた(ruff ディレクティブの後挿入で mktemp の権限のまま置き換わり、`chmod 755` の対象からも外れていた)。別ユーザーの CI・共有端末では config を読めない。`chmod 644` を明示し、umask 022 で導入先 `scripts/` 全ファイルの読取権限を走査する回帰テストを追加した。公開プラグインバージョンは0.1.13のまま据え置く。 |
 
 ## 社内配布に向けた追補（2026-09-06、v0.1.13）
 
@@ -68,3 +69,19 @@
 | 更新・承認の境界 | document_candidates は文書追記案、automation_candidates は自動チェック案。双方 pending で提示し、rules.md の既存 promote / merge / retire と出典管理は変更しない |
 
 これは文書を読んだレビュー結果であり、Claude Code / Codex の別セッションで実際に読取を確認した結果ではない。構造検査も本文の意味を保証しない。新しい構造検査は、参照切れ・移行先欠落・空本文・節の再追加・出力項目の不一致など12種の欠陥再注入で検出を確認し、検査内のサブプロセスを失敗させた場合も終了コード1になることを確認した。スキルの形式検査、スキル経路・根因分類の既存テストも成功した。
+
+## v0.1.13 安定版の出荷前実測（2026-10-04）
+
+上の本文レビューは文書を読んだ結果にとどまり、別セッションで実際の読取は確認していなかった。v0.1.13-beta（`804dc1a`）を安定版にする前に、`init.sh` だけで導入した隔離プロジェクトで実測した。Claude Code 2.1.289 は `--setting-sources project` で起動した。グローバルで有効な feedback-harness プラグインを外すため、Codex CLI 0.153.4 は `--ignore-user-config` で起動した。どちらも Hooks なしの経路である。
+
+| 実測項目 | 結果 |
+|---|---|
+| 新規導入 | CLAUDE.md / AGENTS.md の管理ブロックが配布元全文と一致した。`.gitignore` 8項目を追記し、`check.sh`・`check_file.sh`・`feedback.sh` の rules / add / list / promote は終了コード 0 だった |
+| 再実行 | 導入日・rules.md・`.gitignore` を保持し、管理マーカーは各1つだった |
+| 利用者の既存文書 | 管理ブロックの前後にある利用者記述を、初回・再実行とも保持した |
+| v0.1.12 導入からの更新 | 管理ブロックを現行全文へ置き換え、利用者記述を保持した。`scripts/` も現行と一致した |
+| 変更作業（M1） | Codex は1回、Claude Code は3回試した。全試行で編集後の `check_file.sh` と完了前の `check.sh` を実行した。開始時の `feedback.sh rules` / `list` は、Codex の1回と Claude Code の3回中2回で実行した |
+| 反映先選択（M2） | 正本を `docs/rules.md` と明示した導入先で、記録済みの context を反映するよう依頼した。両エージェントとも `docs/rules.md` の前提知識節を対象とする `document_candidates`（`human_decision: pending`）と空の `automation_candidates` を示した。承認前に共有文書は変更しなかった |
+| 配布ファイルの権限 | `scripts/harness_config.py` だけが 0600 だったため、上表のとおり修正した |
+
+Claude Code の M1 で開始時の確認を1回省略した。導入先の rules.md は空のテンプレートで、作業結果への影響はなかった。3回中2回は実行したため、ポインタの欠落ではなく実行時のばらつきとして記録し、文面は変更していない。なお、修正は既存導入へ、更新した配布元から `init.sh` を再実行すると届く。公開プラグインバージョンを据え置いたため、v0.1.13-beta を導入済みのプラグインキャッシュは自動では更新されない。

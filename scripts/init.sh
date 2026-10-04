@@ -86,6 +86,9 @@ done
 # 導入元が 711 の場合に +x だと所有者以外が実行できない権限のまま複製される
 chmod 755 "$DEST/scripts/"*.sh "$DEST/scripts/checks/"*.sh \
   "$DEST/scripts/feedback_store.py" "$DEST/scripts/feedback_log.py"
+# harness_config.py は import されるだけで実行しないが、上の mktemp(0600)で
+# 置き換わっているため、明示しないと所有者以外が config を読めない
+chmod 644 "$DEST/scripts/harness_config.py"
 echo "  scripts/ ... OK"
 
 # Claude Code 向けの skills / agents / hooks はプラグインが提供する
